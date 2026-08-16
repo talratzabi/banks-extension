@@ -137,8 +137,16 @@ async function extractLoanDetails(){
     if(cells.length<5)continue;
     const interestFromCell=interestIndex>=0?(cells[interestIndex]||''):'';
     let interest=interestFromCell||cells.find(value=>/%/.test(value)&&!/^\d{1,2}\/\d{1,2}\//.test(value))||'';
-    if(!interest){row.querySelector(':scope > td:last-child')?.click();await wait(250);const detailText=(row.nextElementSibling?.innerText||row.parentElement?.innerText||'').replace(/\s+/g,' ');interest=(detailText.match(/ריבית נוכחית\s*([0-9.]+\s*%)/)||[])[1]||''}
-    loans.push({type:cells[0],startDate:cells[1]||'',endDate:cells[2]||'',originalPrincipal:parseMoney(cells[3]),balance:parseMoney(cells[4]),nextPayment:parseMoney(cells[5]),nextPaymentDate:cells[6]||'',interest});
+    // הפירוט שמתחת לשורה נפתח פעם אחת ומשמש לשני השדות.
+    let detailText='';
+    const detail=async()=>{if(detailText)return detailText;row.querySelector(':scope > td:last-child')?.click();await wait(250);detailText=(row.nextElementSibling?.innerText||row.parentElement?.innerText||'').replace(/\s+/g,' ');return detailText};
+    if(!interest)interest=((await detail()).match(/ריבית נוכחית\s*([0-9.]+\s*%)/)||[])[1]||'';
+    // ⚠ "תשלום קרן:63מתוך71" — 63 הוא מספר התשלומים שנותרו, לא ששולמו.
+    // אומת על שתי הלוואות 16.08.2026: 71-63=8 ו-71-66=5, בדיוק מספר החודשים שחלפו.
+    // הדשבורד מצפה ל-paid/total, לכן מחסרים.
+    const pay=(await detail()).match(/תשלום\s*קרן\s*:?\s*(\d+)\s*מתוך\s*(\d+)/)||(await detail()).match(/תשלום\s*ריבית\s*:?\s*(\d+)\s*מתוך\s*(\d+)/);
+    const installments=pay&&Number(pay[2])>=Number(pay[1])?`${Number(pay[2])-Number(pay[1])}/${Number(pay[2])}`:'';
+    loans.push({type:cells[0],startDate:cells[1]||'',endDate:cells[2]||'',originalPrincipal:parseMoney(cells[3]),balance:parseMoney(cells[4]),nextPayment:parseMoney(cells[5]),nextPaymentDate:cells[6]||'',interest,installments});
   }
   return loans;
 }
