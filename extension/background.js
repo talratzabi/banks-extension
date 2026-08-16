@@ -132,13 +132,16 @@ if(!pending.length){await chrome.storage.local.set({syncStatus:`נמצאו ${com
 // כל התחברות חדשה מפעילה קריאה עדכנית. אין מגבלת שש שעות. נשארת רק הגנת
 // debounce קצרה מפני כמה אירועי AUTHENTICATED שאותה טעינת SPA שולחת ברצף.
 const AUTO_LOGIN_DEBOUNCE_MS=90*1000;
+const AUTO_SYNC_MIN_GAP_MS=6*60*60*1000;
+const gapText=ms=>{const m=Math.max(0,Math.round(ms/60000));return m<60?`${m} דק'`:`${Math.floor(m/60)} שע'${m%60?` ו-${m%60} דק'`:''}`};
+function autoSyncTooSoon(st,source){const last=Number(st.autoSyncLast?.[source]||0);if(!last)return 0;const since=Date.now()-last;return since<AUTO_SYNC_MIN_GAP_MS?AUTO_SYNC_MIN_GAP_MS-since:0}
 const autoLoginRuns=new Map();
 let autoBusy=false;
 function acceptAutoLogin(source,tabId){const key=`${source}|${tabId||0}`,now=Date.now(),last=Number(autoLoginRuns.get(key)||0);if(now-last<AUTO_LOGIN_DEBOUNCE_MS)return false;autoLoginRuns.set(key,now);return true}
 function releaseAutoLogin(source,tabId){autoLoginRuns.delete(`${source}|${tabId||0}`)}
 async function maybeAutoSync(source,label,tabId){
   const st=await chrome.storage.local.get({autoSyncOnLogin:true,selectedAccountKeys:[],accounts:[],autoSyncLast:{}});
-  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}
+  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // גרסאות קודמות יכלו להשאיר חשבונות מסונכרנים בלי selectedAccountKeys.
   // במקרה כזה משחזרים את הבחירה רק מן החשבונות שכבר אושרו ונשמרו, בלי לבחור
   // חשבונות חדשים שהמשתמש מעולם לא ביקש לסנכרן.
@@ -176,7 +179,7 @@ async function maybeAutoSync(source,label,tabId){
 // התנאי המקביל ל"כבר בחרת": קיים חשבון שמור מאותו מקור — כלומר סנכרנת אותו בעבר.
 async function maybeAutoRun(source,label,fn,tabId){
   const st=await chrome.storage.local.get({autoSyncOnLogin:true,accounts:[],autoSyncLast:{}});
-  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}
+  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // ⚠ ישראכרט אינו יוצר שורת חשבון משלו — הכרטיסים נתלים על חשבונות הבנק. לכן
   // "כבר סונכרן פעם" נמדד אצלו לפי קיום כרטיס שהמנפיק שלו ישראכרט, ולא לפי source.
   const synced=source==='isracard'
@@ -359,7 +362,7 @@ async function syncSelected(selectionKeys){
     const grouped={business:[],private:[],leumi:[],'discount-business':[],'discount-private':[],mizrahi:[]};for(const selectionKey of selectionKeys){const parts=String(selectionKey).split('|');if(parts.length===2&&grouped[parts[0]])grouped[parts[0]].push(parts[1]);else grouped.business.push(selectionKey)}
     const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);const all=saved.accounts.filter(a=>!syncedSources.includes(a.source||'business'));for(const source of syncedSources)all.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
     const marked=markNewTransactions(saved.accounts,all,syncedSources),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
-    const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: ${marked.length} חשבונות`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
+    const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: ${marked.length} חשבונות`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה: ${e.message}`});throw e}finally{running=false}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
