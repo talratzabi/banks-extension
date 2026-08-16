@@ -2,7 +2,7 @@ importScripts('cheque-store.js','card-history.js','yahav.js');
 // התקנה או עדכון מבטלים תהליך חלקי ומנקים בורר זמני ישן. במהלך זיהוי פעיל
 // הרשימה נשמרת; היא אינה אמורה לחזור לאחר רענון או בזמן חיבור לבנק אחר.
 const freshStart={pendingLeumi:false,pendingDiscountBusiness:false,pendingDiscountPrivate:false,pendingMizrahi:false,pendingYahav:false,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:[]};
-chrome.runtime.onInstalled.addListener(()=>{chrome.storage.local.set({...freshStart,autoSyncOnLogin:true}).then(scanAuthenticatedTabs)});
+chrome.runtime.onInstalled.addListener(details=>{const patch={...freshStart};if(details?.reason==='install')patch.autoSyncOnLogin=true;chrome.storage.local.set(patch).then(scanAuthenticatedTabs)});
 chrome.runtime.onStartup.addListener(()=>{chrome.storage.local.set(freshStart).then(scanAuthenticatedTabs)});
 
 // ── חיווי מצב על סמל התוסף ────────────────────────────────────────────────
