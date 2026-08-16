@@ -45,5 +45,5 @@ async function runYahav(tabId){
     const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],accountKinds:{}}),accounts=[...state.accounts.filter(a=>a.source!=='yahav'),row],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('yahav|')),selectionKey])],accountKinds={...state.accountKinds,[selectionKey]:'private'};
     await chrome.storage.local.set({accounts,selectedAccountKeys,accountKinds,accountFilter:'both',pendingYahav:false,discoveredAccounts:[],syncStatus:`יהב: הסנכרון הסתיים — ${home.transactions.length} תנועות ו־${loans.length} הלוואות`,lastAutoSync:now});
     if(!autoBusy)await chrome.runtime.openOptionsPage();
-  }finally{yahavBusy=false}
+  }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה ביהב: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{yahavBusy=false}
 }
