@@ -1,10 +1,21 @@
 {
   "manifest_version": 3,
   "name": "בנקים",
-  "version": "0.51.3",
+  "version": "0.52.0",
   "description": "דשבורד מקומי לסנכרון מאומת של בנקים וכרטיסי אשראי.",
-  "icons": {"16":"icons/bank-16.png","32":"icons/bank-32.png","48":"icons/bank-48.png","128":"icons/bank-128.png"},
-  "permissions": ["storage", "unlimitedStorage", "tabs", "scripting", "webNavigation"],
+  "icons": {
+    "16": "icons/bank-16.png",
+    "32": "icons/bank-32.png",
+    "48": "icons/bank-48.png",
+    "128": "icons/bank-128.png"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "scripting",
+    "webNavigation"
+  ],
   "host_permissions": [
     "https://biz2.bankhapoalim.co.il/*",
     "https://www.bankhapoalim.biz/*",
@@ -22,59 +33,102 @@
     "https://*.cal-online.co.il/*",
     "https://*.max.co.il/*"
   ],
-  "background": { "service_worker": "background.js" },
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_title": "בנקים",
-    "default_icon": {"16":"icons/bank-16.png","32":"icons/bank-32.png"},
+    "default_icon": {
+      "16": "icons/bank-16.png",
+      "32": "icons/bank-32.png"
+    },
     "default_popup": "popup.html"
   },
   "content_scripts": [
     {
-      "matches": ["https://biz2.bankhapoalim.co.il/*", "https://login.bankhapoalim.co.il/*"],
-      "js": ["poalim-content.js"],
+      "matches": [
+        "https://biz2.bankhapoalim.co.il/*",
+        "https://login.bankhapoalim.co.il/*"
+      ],
+      "js": [
+        "poalim-content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://online.fibi.co.il/*"],
-      "js": ["fibi-content.js"],
+      "matches": [
+        "https://online.fibi.co.il/*"
+      ],
+      "js": [
+        "fibi-content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://hb2.bankleumi.co.il/*"],
-      "js": ["leumi-content.js"],
+      "matches": [
+        "https://hb2.bankleumi.co.il/*"
+      ],
+      "js": [
+        "leumi-content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://start.telebank.co.il/*"],
-      "js": ["discount-content.js"],
+      "matches": [
+        "https://start.telebank.co.il/*"
+      ],
+      "js": [
+        "discount-content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://mto.mizrahi-tefahot.co.il/*"],
-      "js": ["mizrahi-content.js"],
+      "matches": [
+        "https://mto.mizrahi-tefahot.co.il/*"
+      ],
+      "js": [
+        "mizrahi-content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true,
       "match_origin_as_fallback": true
     },
     {
-      "matches": ["https://digital.yahav.co.il/*"],
-      "js": ["yahav-content.js"],
+      "matches": [
+        "https://digital.yahav.co.il/*"
+      ],
+      "js": [
+        "yahav-content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://web.isracard.co.il/*"],
-      "js": ["isracard-content.js"],
+      "matches": [
+        "https://web.isracard.co.il/*"
+      ],
+      "js": [
+        "isracard-content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://digital-web.cal-online.co.il/*"],
-      "js": ["cal-content.js"],
+      "matches": [
+        "https://digital-web.cal-online.co.il/*"
+      ],
+      "js": [
+        "cal-content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.max.co.il/*", "https://online.max.co.il/*"],
-      "js": ["max-content.js"],
+      "matches": [
+        "https://www.max.co.il/*",
+        "https://online.max.co.il/*"
+      ],
+      "js": [
+        "max-content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
