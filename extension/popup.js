@@ -1,0 +1,1 @@
+const status=document.querySelector('#status');document.querySelector('#dashboard').onclick=()=>chrome.runtime.sendMessage({type:'OPEN_DASHBOARD'});async function refreshStatus(){const x=await chrome.storage.local.get({syncStatus:''});status.textContent=x.syncStatus}refreshStatus();setInterval(refreshStatus,700);
