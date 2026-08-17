@@ -557,7 +557,7 @@ async function startLeumi(){if(running)return{ok:false,error:'סנכרון כב�
 // רשימת החשבונות נמחקת כבר בלחיצה. היא תוצר של התחברות אחת ואין להציג אותה בלעדיה —
 // אחרת נבחרים חשבונות מרשימה ישנה שאין מאחוריה שום סשן פעיל.
 const prev=await chrome.storage.local.get({discoveredAccounts:[]});
-await chrome.storage.local.set({pendingLeumi:true,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:prev.discoveredAccounts.filter(a=>a.source!=='leumi'),syncStatus:'טוען את החיבור הפעיל ללאומי ומזהה חשבונות'});const tabs=await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']});if(tabs.length){const tab=leumiTab(tabs);await returnToDashboard(tab.id,true);discoverLeumi(tab.id).catch(async e=>{await chrome.storage.local.set({pendingLeumi:false,syncStatus:`זיהוי החשבונות בלאומי נכשל: ${e.message}`})});return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות ללאומי'});await chrome.tabs.create({url:'https://www.leumi.co.il/',active:true});return{ok:true,status:'waiting_login'}}
+await chrome.storage.local.set({pendingLeumi:true,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:prev.discoveredAccounts.filter(a=>a.source!=='leumi'),syncStatus:'טוען את החיבור הפעיל ללאומי ומזהה חשבונות'});const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(tabs.length){const tab=leumiTab(tabs);await returnToDashboard(tab.id,true);discoverLeumi(tab.id).catch(async e=>{await chrome.storage.local.set({pendingLeumi:false,syncStatus:`זיהוי החשבונות בלאומי נכשל: ${e.message}`})});return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות ללאומי'});await chrome.windows.create({url:LEUMI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
 // ⚠⚠ שלושת השומרים כאן מונעים לולאת ניווט, ואין להסיר אף אחד מהם.
 // prepareLeumiRoute מנווט את הלשונית; הניווט טוען מחדש את הדף; הדף שולח LEUMI_AUTHENTICATED;
 // וזה קורא שוב ל-discoverLeumi. בלי תקרת ניסיונות, נעילה וצינון — זו לולאה אינסופית
@@ -612,6 +612,10 @@ const ping=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),
 catch(e){last=e.message;try{await chrome.scripting.executeScript({target:{tabId},files:['leumi-content.js']})}catch(e2){last=`${e.message} / הזרקה נכשלה: ${e2.message}`}}}
 throw Error(`עמוד לאומי לא היה מוכן בתוך דקה (${seen||'הלשונית לא נקראה'}): ${last}. אם הדף מסתובב בלי להיטען — ההתחברות ללאומי פגה ויש להתחבר מחדש.`)}
 // מעדיפים לשונית שכבר בתוך הפורטל, כדי לא לחטוף לשונית לאומי אקראית שפתוחה במקרה
+// ⚠ מסך הכניסה של לאומי יושב על **אותו מארח** שבו מזוהה סשן מחובר, ולכן חלונית
+// ההתחברות הייתה נחשבת חיבור פעיל — התקלה שהפילה את דיסקונט ב-0.75.1.
+// **דף Login.html אינו סשן.** נכתב 18.08.2026, כשהכניסה עברה לחלונית.
+const leumiSession=tabs=>tabs.filter(t=>!/\/H\/Login\.html/i.test(t.url||''));
 function leumiTab(tabs){return tabs.find(t=>t.url?.includes('/digitalfront/'))||tabs[0]}
 // מדידה של הלשונית הפעילה, לצורך כתיבת מתאם לבנק חדש. קריאה בלבד: אין לחיצות,
 // אין ניווט, ואין שינוי מצב באתר. הצילום נשמר ל-bankProbe ונקרא משם.
@@ -629,7 +633,7 @@ async function probeActiveTab(){
 }
 async function leumiSnapshot(tabId){try{const s=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_SNAPSHOT'}),20000,'צילום דף לאומי');return s?.debug||null}catch{return null}}
 function dbgText(asked,d){if(!d)return' | אבחון: לא התקבל צילום מצב מהעמוד';const landed=d.url===asked?'הכתובת שביקשנו':`הדפדפן נחת ב-${d.url}`;return` | אבחון: ${landed}; טבלאות ${d.tables}, שורות ${d.rows}, מהן עם תאריך ${d.datedRows} (${d.cols} עמודות); לשוניות חשבון ${d.tabs}; ₪ לפני מספר ${d.shekelBefore}, ₪ אחרי מספר ${d.shekelAfter}; שורה ראשונה ${JSON.stringify(d.firstRow)}; פתיח ${String(d.head||'').slice(0,220)}`}
-async function syncLeumi(keys){const tabs=await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']});if(!tabs[0])throw Error('החיבור ללאומי אינו פעיל');
+async function syncLeumi(keys){const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(!tabs[0])throw Error('החיבור ללאומי אינו פעיל');
 // היתרות שנקראו מבורר החשבונות בזיהוי משמשות נפילה לאחור, כדי שכרטיס יתרה שלא רונדר
 // לא יפיל את הסנכרון כולו אחרי שלושה ניסיונות של שתי דקות וחצי כל אחד.
 const disc=(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts;
@@ -655,7 +659,7 @@ for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue
 await chrome.storage.local.set({leumiChequeReport:{total:chequeCtx.total,already:chequeCtx.base,noReference:chequeCtx.noRef,asked,saved,failed,why,at:new Date().toISOString()}});
 if(asked&&!saved)await chrome.storage.local.set({syncStatus:`לאומי: לא נשמר אף צילום שיק מתוך ${asked} מבוקשים — ${why||'ללא סיבה'}`});
 return saved}
-async function openLeumiCheque(m){const tabs=await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']});if(!tabs[0])throw Error('יש להתחבר ללאומי כדי להציג צילום שיק');await chrome.tabs.update(tabs[0].id,{url:'https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/checks/cleared-checks/'});await delay(1600);const r=await chrome.tabs.sendMessage(tabs[0].id,{type:'LEUMI_OPEN_CHEQUE',branch:m.branch,accountNumber:m.accountNumber,date:m.date,amount:m.amount});if(!r?.ok)throw Error(r?.error||'צילום השיק לא נמצא');return{ok:true}}
+async function openLeumiCheque(m){const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(!tabs[0])throw Error('יש להתחבר ללאומי כדי להציג צילום שיק');await chrome.tabs.update(tabs[0].id,{url:'https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/checks/cleared-checks/'});await delay(1600);const r=await chrome.tabs.sendMessage(tabs[0].id,{type:'LEUMI_OPEN_CHEQUE',branch:m.branch,accountNumber:m.accountNumber,date:m.date,amount:m.amount});if(!r?.ok)throw Error(r?.error||'צילום השיק לא נמצא');return{ok:true}}
 
 // ⚠ tabs[0] בחר לשונית שרירותית — לעיתים ישנה, מנותקת או בחלון אחר. המשתמש ראה
 // "לא קורה כלום" בזמן שהתוסף דפדף בלשונית אחרת. סדר העדיפות: הלשונית הפעילה עכשיו,
@@ -740,6 +744,12 @@ const ISRACARD_HOME='https://web.isracard.co.il/StatusPage';
 // ⚠ מארח **אחר** (digital) מזה שבו מזוהה סשן (web), ולכן חלונית ההתחברות אינה
 // יכולה להיחשב סשן מחובר. זו המלכודת שהפילה את דיסקונט ב-0.75.1 — כאן היא לא קיימת.
 const ISRACARD_LOGIN='https://digital.isracard.co.il/personalarea/Login/';
+// שלוש כתובות כניסה נוספות, כולן נמדדו 18.08.2026 מתוך ה-href באתרי הבנקים.
+// כאל ולאומי יושבות על מארחי הסשן שלהן, ולכן `calTab` ו-`leumiSession` מסננים
+// אותן במפורש. מקס — `/login` בטווח השאילתה של `maxTab`, ולכן גם שם.
+const CAL_LOGIN='https://digital-web.cal-online.co.il/login?returnedUrl=%2Ftransactions#top';
+const MAX_LOGIN='https://www.max.co.il/login';
+const LEUMI_LOGIN='https://hb2.bankleumi.co.il/H/Login.html';
 async function isracardTab(){const tabs=await chrome.tabs.query({url:['https://web.isracard.co.il/*']});return tabs.find(t=>!/login|signin/i.test(t.url||''))||null}
 async function prepareIsracard(tabId){try{const p=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_PING_V3'});if(p?.ok&&p.adapterVersion===3)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['isracard-content.js']});await delay(350);const p=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_PING_V3'});if(!p?.ok||p.adapterVersion!==3)throw Error('מתאם ישראכרט החדש לא נטען')}
 async function waitIsracardReady(tabId,suffix,month='',previousFingerprint=''){
@@ -772,9 +782,13 @@ try{await storeCardMonth(mmYYYY(new Date()),details)}catch(e){}
 await chrome.storage.local.set({accounts,isracardUnassigned:unassigned,isracardLastCards:details,syncStatus:`ישראכרט: הסנכרון הסתיים — נקראו ${details.length} כרטיסים, ${assigned.length} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,assigned:assigned.length,unassigned:unassigned.length}}
 const CAL_HOME='https://digital-web.cal-online.co.il/dashboard',CAL_TX='https://digital-web.cal-online.co.il/transactions-all';
 let calBusy=false;
-async function calTab(){const tabs=await chrome.tabs.query({url:['https://digital-web.cal-online.co.il/*','https://www.cal-online.co.il/*']});return tabs.find(t=>String(t.url||'').includes('digital-web.cal-online.co.il'))||tabs[0]||null}
+// ⚠ כתובת הכניסה של כאל יושבת על digital-web — בדיוק המארח שמועדף כאן כסשן.
+// בלי הסינון חלונית ההתחברות הייתה נבחרת כחיבור פעיל (תקלת דיסקונט, 0.75.1).
+async function calTab(){const all=await chrome.tabs.query({url:['https://digital-web.cal-online.co.il/*','https://www.cal-online.co.il/*']});
+const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
+return tabs.find(t=>String(t.url||'').includes('digital-web.cal-online.co.il'))||tabs[0]||null}
 async function prepareCal(tabId){await delay(600);try{const p=await chrome.tabs.sendMessage(tabId,{type:'CAL_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['cal-content.js']});await delay(300)}
-async function startCal(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingCal:true,pendingCalSuffix:suffix,syncStatus:suffix?`כאל: מכין טעינת שנה לכרטיס ${suffix}`:'כאל: בודק את החיבור'});const tab=await calTab();if(!tab||!String(tab.url||'').includes('digital-web.cal-online.co.il')){await chrome.storage.local.set({syncStatus:suffix?`ממתין להתחברות לכאל עבור כרטיס ${suffix}`:'ממתין להתחברות לכאל'});if(tab)await chrome.tabs.update(tab.id,{url:'https://www.cal-online.co.il/',active:true});else await chrome.tabs.create({url:'https://www.cal-online.co.il/',active:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runCal(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingCal:false,pendingCalSuffix:'',syncStatus:`שגיאה בכאל: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
+async function startCal(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingCal:true,pendingCalSuffix:suffix,syncStatus:suffix?`כאל: מכין טעינת שנה לכרטיס ${suffix}`:'כאל: בודק את החיבור'});const tab=await calTab();if(!tab||!String(tab.url||'').includes('digital-web.cal-online.co.il')){await chrome.storage.local.set({syncStatus:suffix?`ממתין להתחברות לכאל עבור כרטיס ${suffix}`:'ממתין להתחברות לכאל'});if(tab)await chrome.tabs.update(tab.id,{url:'https://www.cal-online.co.il/',active:true});else await chrome.windows.create({url:CAL_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runCal(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingCal:false,pendingCalSuffix:'',syncStatus:`שגיאה בכאל: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
 async function runCal(tabId,requestedSuffix=''){
   if(calBusy)return;calBusy=true;
   try{
@@ -793,9 +807,12 @@ async function runCal(tabId,requestedSuffix=''){
 }
 const MAX_TX='https://www.max.co.il/transaction-details/personal';
 let maxBusy=false;
-async function maxTab(){const tabs=await chrome.tabs.query({url:['https://www.max.co.il/*','https://online.max.co.il/*']});return tabs.find(t=>String(t.url||'').includes('/transaction-details/personal'))||tabs[0]||null}
+// ⚠ אותו שיקול: www.max.co.il/login נמצא בטווח השאילתה, ו-tabs[0] היה בוחר אותו.
+async function maxTab(){const all=await chrome.tabs.query({url:['https://www.max.co.il/*','https://online.max.co.il/*']});
+const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
+return tabs.find(t=>String(t.url||'').includes('/transaction-details/personal'))||tabs[0]||null}
 async function prepareMax(tabId){await delay(500);try{const p=await chrome.tabs.sendMessage(tabId,{type:'MAX_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['max-content.js']});await delay(250)}
-async function startMax(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingMax:true,pendingMaxSuffix:suffix,syncStatus:suffix?`MAX: מכין טעינת שנה לכרטיס ${suffix}`:'MAX: בודק את החיבור'});const tab=await maxTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל‑MAX'});await chrome.tabs.create({url:'https://www.max.co.il/',active:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMax(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingMax:false,pendingMaxSuffix:'',syncStatus:`שגיאה ב‑MAX: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
+async function startMax(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingMax:true,pendingMaxSuffix:suffix,syncStatus:suffix?`MAX: מכין טעינת שנה לכרטיס ${suffix}`:'MAX: בודק את החיבור'});const tab=await maxTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל‑MAX'});await chrome.windows.create({url:MAX_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMax(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingMax:false,pendingMaxSuffix:'',syncStatus:`שגיאה ב‑MAX: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
 async function runMax(tabId,requestedSuffix=''){
  if(maxBusy)return;maxBusy=true;
  try{
