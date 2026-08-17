@@ -435,14 +435,32 @@ function markNewTransactions(previous,next,syncedSources){
   })
 }
 async function syncSource(source,keys){
-  const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);
+  const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);const skippedParts=[];
   let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`,'מזהה בעל חשבון');await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
   await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});
   // אבחון: אילו חשבונות לא נקראה להם יתרה בדף התנועות. דף ריכוז היתרות עוד עשוי למלא.
   await chrome.storage.local.set({poalimNoBalance:(tx.accounts||[]).filter(a=>a.balanceMissing).map(a=>`${source}|${a.branch}-${a.accountNumber}`)});if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
   await syncStep(`${cfg.label}: מסנכרן ריכוז יתרות`,'מוריד יתרות');await prepareRoute(tab.id,route(source,'current-account/balances'),'/current-account/balances');const summaries=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_BALANCE_SUMMARIES',keys});if(!summaries?.ok)throw Error(summaries?.error||'סנכרון ריכוז היתרות נכשל');
-  await syncStep(`${cfg.label}: קורא הלוואות`,'מוריד הלוואות');await prepareRoute(tab.id,route(source,'credit-and-mortgage'),'/credit-and-mortgage');const loans=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'loans',keys});if(!loans?.ok)throw Error(loans?.error||'קריאת ההלוואות נכשלה');
-  await syncStep(`${cfg.label}: קורא כרטיסי אשראי`,'מוריד כרטיסי אשראי');await prepareRoute(tab.id,route(source,'plastic-cards/current-debit'),'/plastic-cards/current-debit');const cards=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'cards',keys});if(!cards?.ok)throw Error(cards?.error||'קריאת הכרטיסים נכשלה');
+  // ⚠ מוצר משני שנכשל לא ימחק את הליבה. תנועות ויתרות כבר נאספו, ואין שום סיבה
+  // לאבד אותן בגלל דף הלוואות. וחובה withTimeout — sendMessage בלי תקרה נתקע לנצח,
+  // וזה מה שדווח כ„נעצר בהלוואות" בפועלים פרטי (17.08.2026).
+  await syncStep(`${cfg.label}: קורא הלוואות`,'מוריד הלוואות');
+  let loans={accounts:[]};
+  try{
+    await prepareRoute(tab.id,route(source,'credit-and-mortgage'),'/credit-and-mortgage');
+    const r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'loans',keys}),45000,'קריאת ההלוואות');
+    if(!r?.ok)throw Error(r?.error||'קריאת ההלוואות נכשלה');
+    loans=r;
+  }catch(e){skippedParts.push(`הלוואות: ${e.message}`)}
+  await syncStep(`${cfg.label}: קורא כרטיסי אשראי`,'מוריד כרטיסי אשראי');
+  let cards={accounts:[]};
+  try{
+    await prepareRoute(tab.id,route(source,'plastic-cards/current-debit'),'/plastic-cards/current-debit');
+    const r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'cards',keys}),45000,'קריאת הכרטיסים');
+    if(!r?.ok)throw Error(r?.error||'קריאת הכרטיסים נכשלה');
+    cards=r;
+  }catch(e){skippedParts.push(`כרטיסי אשראי: ${e.message}`)}
+  await chrome.storage.local.set({poalimSkipped:skippedParts.length?`${cfg.label} — ${skippedParts.join(' · ')}`:''});
   const byKey=new Map((summaries.accounts||[]).map(a=>[a.key,a]));for(const a of loans.accounts||[])byKey.set(a.key,{...(byKey.get(a.key)||{}),...a});for(const a of cards.accounts||[])byKey.set(a.key,{...(byKey.get(a.key)||{}),...a});const now=new Date().toISOString();
   return tx.accounts.map(a=>({...a,...(byKey.get(`${a.branch}-${a.accountNumber}`)||{}),nickname:owner||a.nickname,owner:owner||a.nickname,source,sourceLabel:cfg.label,selectionKey:`${source}|${a.branch}-${a.accountNumber}`,id:`${source}-${a.branch}-${a.accountNumber}`,lastSync:now,status:'מסונכרן'}));
 }
