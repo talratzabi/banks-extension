@@ -665,7 +665,7 @@ await delay(attempt===1?500:1500)}
 throw Error(`אין חיבור לעמוד דיסקונט אחרי 5 ניסיונות: ${last}`)}
 async function startDiscountPrivate(){
 await chrome.storage.local.set({pendingDiscountPrivate:true,pendingDiscountBusiness:false,syncStatus:'ממתין להתחברות לדיסקונט פרטי'});
-await chrome.tabs.create({url:'https://www.discountbank.co.il/private/',active:true});
+await chrome.windows.create({url:DISCOUNT_LOGIN_PRIVATE,type:'popup',width:560,height:780,focused:true});
 return{ok:true,status:'waiting_login'}}
 async function handleDiscountAuthenticated(tabId){const state=await chrome.storage.local.get({pendingDiscountBusiness:false,pendingDiscountPrivate:false});
 if(state.pendingDiscountPrivate){await discoverDiscountPrivate(tabId);return}
@@ -792,10 +792,15 @@ async function startDiscountBusiness(){const saved=await chrome.storage.local.ge
 discountLastRun=0;
 // לא מוחקים את הטבלה הקודמת בתחילת הזיהוי. היא מוחלפת רק אחרי שהבנק החזיר
 // רשימת ישויות חדשה, ולכן כשל או עיכוב לא משאירים מסך ריק.
-await chrome.storage.local.set({pendingDiscountBusiness:true,discountAttempts:0,syncStatus:'דיסקונט עסקי: מזהה ישויות וחשבונות — הרשימה הקודמת נשמרת עד לעדכון'});const tab=await discountTab();if(tab){await returnToDashboard(tab.id,true);await prepareDiscountContent(tab.id);await discoverDiscountBusiness(tab.id);return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות לדיסקונט עסקי'});await chrome.tabs.create({url:'https://www.discountbank.co.il/business/',active:true});return{ok:true,status:'waiting_login'}}
+await chrome.storage.local.set({pendingDiscountBusiness:true,discountAttempts:0,syncStatus:'דיסקונט עסקי: מזהה ישויות וחשבונות — הרשימה הקודמת נשמרת עד לעדכון'});const tab=await discountTab();if(tab){await returnToDashboard(tab.id,true);await prepareDiscountContent(tab.id);await discoverDiscountBusiness(tab.id);return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות לדיסקונט עסקי'});await chrome.windows.create({url:DISCOUNT_LOGIN_BUSINESS,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
 // שלושת השומרים של לאומי, מועתקים במכוון: נעילה, צינון ותקרת ניסיונות.
 let discountBusy=false,discountLastRun=0;
 const DISCOUNT_MAX_ATTEMPTS=3,DISCOUNT_COOLDOWN_MS=30000;
+// מסכי הכניסה של דיסקונט. נמדדו 17.08.2026 מתוך ה-href של „כניסה לחשבון" באתר:
+// קישור רגיל, בלי מודאל ובלי לחיצה — רק לנווט. הדף מרנדר #tzId · #tzPassword · #aidnum.
+// ⚠ העסקי הוא **t=s** ולא t=b. ניחוש סביר היה שולח את המשתמש לדף הלא נכון.
+const DISCOUNT_LOGIN_PRIVATE='https://start.telebank.co.il/login/?multilang=he&bank=d&t=p';
+const DISCOUNT_LOGIN_BUSINESS='https://start.telebank.co.il/login/?multilang=he&bank=d&t=s';
 async function discoverDiscountBusiness(tabId){const state=await chrome.storage.local.get({pendingDiscountBusiness:false,discoveredAccounts:[],discountAttempts:0});if(!state.pendingDiscountBusiness)return;
 if(discountBusy)return;
 if(running){await chrome.storage.local.set({syncStatus:'דיסקונט: סנכרון כבר רץ — הזיהוי ימתין לסיומו'});return}
