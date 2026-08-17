@@ -35,11 +35,16 @@ chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){r
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
 // לא נמצאו שורות תואמות ולא נשמר אף צילום.
 async function chequeImages(wanted,key){if(key&&accountTabs().length)await selectAccount(key);await openCurrentAccount();await loadAllRows();const out={};const dataSrc=()=>[...document.querySelectorAll('img')].map(i=>i.src).filter(s=>s.startsWith('data:image'));
+// ⚠ חלון הצילום נשאר פתוח אחרי שיק: הוא מכסה את הטבלה וחוסם את
+// הלחיצה הבאה, וגם מוסיף את תמונותיו ל-before כך שתמונה חדשה
+// אינה מזוהה. זה מייצר "חלק כן וחלק לא". סלקטור הסגירה כבר מדוד, מ-discover().
+const closeViewer=async()=>{const btn=document.querySelector('[role="dialog"] button[aria-label="סגירה"]')||document.querySelector('[role="dialog"] [aria-label*="סגירה"],[role="dialog"] [aria-label*="סגור"]');if(btn){realClick(btn);await wait(450);return}if(document.querySelector('[role="dialog"]')){document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(450)}};
 for(const item of wanted){const reference=String(item.reference||'');const hit=datedRows().find(({cells})=>cells.includes(item.date)&&cells.includes(reference));if(!hit)continue;
-const before=new Set(dataSrc());hit.row.querySelector('button,[role="button"]')?.click();
-let fresh=[];for(let i=0;i<16;i++){await wait(250);fresh=dataSrc().filter(s=>!before.has(s));if(fresh.length>=2)break}
+await closeViewer();const before=new Set(dataSrc());hit.row.querySelector('button,[role="button"]')?.click();
+// 4 שניות היו קצרות מדי לצילום שנטען מהבנק — עכשיו 12, עם יציאה מוקדמת.
+let fresh=[];for(let i=0;i<48;i++){await wait(250);fresh=dataSrc().filter(s=>!before.has(s));if(fresh.length>=2)break}
 if(fresh.length)out[reference]={front:fresh[0],back:fresh[1]||''}}
-return out}
+await closeViewer();return out}
 function snapshot(){try{const dated=datedRows(),page=normalized(txt(document.body));return{url:location.href,tables:document.querySelectorAll('table').length,rows:gridRows().length,datedRows:dated.length,cols:dated[0]?dated[0].cells.length:0,firstRow:dated[0]?dated[0].cells.slice(0,10):[],tabs:accountTabs().length,chooser:txt(chooser()).slice(0,140),shekelBefore:/₪\s*-?[\d,]+\.\d{2}/.test(page),shekelAfter:/-?[\d,]+\.\d{2}\s*₪/.test(page),head:page.slice(0,500),...probe()}}catch(e){return{snapshotError:e.message,url:location.href}}}
 function probe(){try{const roleCounts={};for(const role of['table','grid','treegrid','row','rowgroup','gridcell','cell','columnheader','list','listitem']){const n=document.querySelectorAll(`[role="${role}"]`).length;if(n)roleCounts[role]=n}
 const frames=[...document.querySelectorAll('iframe')].map(f=>{let doc=null;try{doc=f.contentDocument}catch{}return{id:f.id||'',name:f.name||'',src:String(f.src||'').slice(0,140),sameOrigin:Boolean(doc),innerTables:doc?doc.querySelectorAll('table').length:-1,innerRows:doc?doc.querySelectorAll('table tr,[role="row"]').length:-1}});
