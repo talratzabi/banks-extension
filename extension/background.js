@@ -77,7 +77,13 @@ async function returnToDashboard(tabId,force=false){
   // ונשארת visible. בסיום `restoreSyncTabs` מחזירה אותה לחלון הראשי, כבקשת טל.
   try{
     const tab=await chrome.tabs.get(tabId),win=await chrome.windows.get(tab.windowId,{populate:true});
-    if((win.tabs||[]).length>1){await chrome.windows.create({tabId,focused:false});detachedForSync.add(tabId)}
+    // ⚠ חלון העבודה יורש את מידות החלון המקורי. בלי זה Chrome פותח חלון בגודל
+    // ברירת מחדל, צר מהחלון של המשתמש — ואתרי בנק משנים פריסה לפי רוחב.
+    // ב-17.08.2026 זה הפיל את יהב: בורר התאריכים לא רונדר בפריסה הצרה,
+    // ו-setThreeMonths החזירה false. **גודל החלון הוא חלק מהסביבה שהמתאמים נמדדו מולה.**
+    const box={};
+    for(const k of ['left','top','width','height'])if(Number.isFinite(win[k]))box[k]=win[k];
+    if((win.tabs||[]).length>1){await chrome.windows.create({tabId,focused:false,...box});detachedForSync.add(tabId)}
   }catch{}
   // הדשבורד קדימה. לשונית הבנק **אינה** מופעלת — זה מה שמשאיר את התוסף בחזית.
   try{await chrome.tabs.update(dash.id,{active:true});await chrome.windows.update(dash.windowId,{focused:true})}catch{}

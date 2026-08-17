@@ -30,8 +30,16 @@ async function runYahav(tabId){
   try{
     await chrome.storage.local.set({syncStatus:'יהב: מגדיר טווח של 3 חודשים וקורא תנועות'});
     await yahavRoute(tabId,'/main/accounts/current/');
-    const range=await chrome.tabs.sendMessage(tabId,{type:'YAHAV_SET_3_MONTHS'});
-    if(!range?.ok)throw Error('לא ניתן היה להגדיר טווח של שלושה חודשים');
+    // טווח שלא נקבע אינו מוחק סנכרון שלם — קוראים את מה שהדף מציג, ומדווחים
+    // שהתקופה מקוצרת כדי שהמשתמש לא יחשוב שקיבל שלושה חודשים. אותו עיקרון
+    // שכבר יושם ביתרה חסרה (0.64.0) ובהלוואות פועלים (0.67.0).
+    let range=null;
+    try{range=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'YAHAV_SET_3_MONTHS'}),30000,'הגדרת טווח התאריכים')}catch(e){range={ok:false,error:e.message}}
+    {
+      const diags=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
+      if(range?.ok)delete diags.yahav;else diags.yahav='טווח 3 חודשים לא נקבע — נקראה התקופה שהדף הציג';
+      await chrome.storage.local.set({bankDiagnostics:diags});
+    }
     await delay(2800);
     const home=await yahavRead(tabId),account=home.account;
     if(!account)throw Error('לא זוהה מספר החשבון הפעיל');
