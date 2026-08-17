@@ -40,7 +40,27 @@ const SOURCES={
 };
 let running=false,discoveryChain=Promise.resolve();
 const mizrahiFrameData=new Map();
+// ברגע שההתחברות הושלמה — המיקוד חוזר לדשבורד והסנכרון ממשיך ברקע.
+// ⚠ לא 'לשונית מוסתרת': Chrome משהה rAF ומאט טיימרים בלשונית נסתרת, ואתר שמרנדר
+// טבלה ב-rAF לא יצייר אותה כלל. לשונית *פעילה בחלון שאינו במוקד* נשארת visible.
+// לכן הלשונית מועברת לחלון משלה עם focused:false, ולא רק active:false.
+const returnedToDashboard=new Set();
+chrome.tabs.onRemoved.addListener(id=>returnedToDashboard.delete(id));
+async function returnToDashboard(tabId){
+  if(returnedToDashboard.has(tabId))return;   // פעם אחת ללשונית — LEUMI_AUTHENTICATED נורה בכל ניווט
+  returnedToDashboard.add(tabId);
+  try{
+    const tab=await chrome.tabs.get(tabId),win=await chrome.windows.get(tab.windowId,{populate:true});
+    if((win.tabs||[]).length>1)await chrome.windows.create({tabId,focused:false});
+  }catch{}
+  try{
+    const [dash]=await chrome.tabs.query({url:chrome.runtime.getURL('dashboard.html')+'*'});
+    if(dash){await chrome.tabs.update(dash.id,{active:true});await chrome.windows.update(dash.windowId,{focused:true})}
+    else await chrome.runtime.openOptionsPage();
+  }catch{}
+}
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
+  if(/^[A-Z_]*AUTHENTICATED$/.test(m?.type||'')&&sender.tab?.id)returnToDashboard(sender.tab.id);
   if(m?.type==='START_AUTO_SYNC'){start(m.scope||'business',Boolean(m.force)).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='AUTHENTICATED'&&sender.tab?.id){const source=sourceFromUrl(sender.tab.url);if(source){queueDiscover(sender.tab.id,source);chrome.storage.local.get({pendingSources:[]}).then(x=>{if(!x.pendingSources.includes(source))maybeAutoSync(source,SOURCES[source].label,sender.tab.id).catch(()=>{})})}reply({ok:true});return}
   if(m?.type==='SYNC_SELECTED'){syncSelected(m.keys||[]).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
