@@ -41,8 +41,9 @@ async function chequeImages(wanted,key){if(key&&accountTabs().length)await selec
 const closeViewer=async()=>{const btn=document.querySelector('[role="dialog"] button[aria-label="סגירה"]')||document.querySelector('[role="dialog"] [aria-label*="סגירה"],[role="dialog"] [aria-label*="סגור"]');if(btn){realClick(btn);await wait(450);return}if(document.querySelector('[role="dialog"]')){document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(450)}};
 for(const item of wanted){const reference=String(item.reference||'');const hit=datedRows().find(({cells})=>cells.includes(item.date)&&cells.includes(reference));if(!hit)continue;
 await closeViewer();const before=new Set(dataSrc());hit.row.querySelector('button,[role="button"]')?.click();
-// 4 שניות היו קצרות מדי לצילום שנטען מהבנק — עכשיו 12, עם יציאה מוקדמת.
-let fresh=[];for(let i=0;i<48;i++){await wait(250);fresh=dataSrc().filter(s=>!before.has(s));if(fresh.length>=2)break}
+// 4 שניות היו קצרות, אבל 12 הוציאו את האצווה מתקרת ה-120 שניות
+// וכל ששת השיקים נזרקו. 8 שניות עם יציאה מוקדמת, והתקרה הורחבה ל-300.
+let fresh=[];for(let i=0;i<32;i++){await wait(250);fresh=dataSrc().filter(s=>!before.has(s));if(fresh.length>=2)break}
 if(fresh.length)out[reference]={front:fresh[0],back:fresh[1]||''}}
 await closeViewer();return out}
 function snapshot(){try{const dated=datedRows(),page=normalized(txt(document.body));return{url:location.href,tables:document.querySelectorAll('table').length,rows:gridRows().length,datedRows:dated.length,cols:dated[0]?dated[0].cells.length:0,firstRow:dated[0]?dated[0].cells.slice(0,10):[],tabs:accountTabs().length,chooser:txt(chooser()).slice(0,140),shekelBefore:/₪\s*-?[\d,]+\.\d{2}/.test(page),shekelAfter:/-?[\d,]+\.\d{2}\s*₪/.test(page),head:page.slice(0,500),...probe()}}catch(e){return{snapshotError:e.message,url:location.href}}}

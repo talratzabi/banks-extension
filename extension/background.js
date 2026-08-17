@@ -513,7 +513,7 @@ if(!routed){try{await prepareLeumiRoute(tabId,txUrl);routed=true}catch(e){why=`�
 // באצוות, כדי שכשל באמצע לא יזרוק את מה שכבר ירד
 for(let i=0;i<wanted.length;i+=6){const batch=wanted.slice(i,i+6);let r=null;
 await chrome.storage.local.set({syncStatus:`לאומי: שומר צילומי שיקים מקומית ${Math.min(i+batch.length,wanted.length)}/${wanted.length}`});
-try{r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_CHEQUE_IMAGES',wanted:batch,key:a.key}),120000,'צילומי שיקים בלאומי')}catch(e){why=why||e.message}
+try{r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_CHEQUE_IMAGES',wanted:batch,key:a.key}),300000,'צילומי שיקים בלאומי')}catch(e){why=why||e.message}
 if(!r?.ok){failed+=batch.length;why=why||r?.error||'הדף לא החזיר צילומים';continue}
 for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue;await chequePut({id:chequeId(a.selectionKey,reference),selectionKey:a.selectionKey,reference,front:img.front,back:img.back||'',savedAt:new Date().toISOString()});saved++}}}
 await chrome.storage.local.set({leumiChequeReport:{asked,saved,failed,why,at:new Date().toISOString()}});
