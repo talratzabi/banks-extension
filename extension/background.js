@@ -175,7 +175,13 @@ async function start(scope,force=false){
 async function openSource(source){
   const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}/*`]});const active=tabs.find(t=>t.url?.includes(cfg.portal));
   if(active){await returnToDashboard(active.id,true);queueDiscover(active.id,source);return}
-  await chrome.storage.local.set({syncStatus:`ממתין להתחברות אל ${cfg.label}`});const tab=tabs[0];if(tab)await chrome.tabs.update(tab.id,{url:cfg.login,active:true});else await chrome.tabs.create({url:cfg.login,active:true});
+  await chrome.storage.local.set({syncStatus:`ממתין להתחברות אל ${cfg.label}`});const tab=tabs[0];
+  // ⚠ לשונית פועלים קיימת — מנווטים אותה במקום, ולא פותחים חלונית שנייה. אחרת
+  // נוצרות שתי לשוניות על אותו מארח, ו-syncSource בוחר `tabs[0]` שעלול להיות הישנה.
+  if(tab)await chrome.tabs.update(tab.id,{url:cfg.login,active:true});
+  // אין לשונית — חלונית כניסה, כמו בשאר היעדים. אחרי ההתחברות `returnToDashboard`
+  // מגדילה את החלון הזה למידות הדשבורד, ולכן הסנכרון אינו רץ בפריסה צרה (0.73.0).
+  else await chrome.windows.create({url:cfg.login,type:'popup',width:560,height:780,focused:true});
 }
 // ⚠ שומר לולאה — אל תסיר (§9). discover מסירה את הבנק מ-pendingSources רק בהצלחה;
 // בכישלון הוא נשאר, prepareRoute מנווטת, הניווט משנה pathname, reportAuthenticated
