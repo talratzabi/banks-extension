@@ -10,7 +10,12 @@ const MENU_ROUTES=[
  {path:'/nis-accounts/nis-transactions',parent:'עובר ושב שקלים',child:'תנועות בחשבון שקלים'},
  {path:'/credits/loans',parent:'אשראי',child:'הלוואות'},
  {path:'/checks/cleared-checks',parent:'שיקים',child:'שיקים מזומנים'}];
-const menuItem=name=>[...document.querySelectorAll('a,button,[role="link"],[role="menuitem"]')].find(el=>normalized(txt(el))===name);
+// ⚠ אין להשתמש כאן ב-txt/normalized: normalized אינו מקצץ רווחים ואינו
+// מכווץ אותם, ו-txt מוסיף טקסט של אלמנט האב לכפתורים מסוימים.
+// שניהם נועדו לשורות חשבון, והשוואה ב-=== מול שם פריט תפריט לעולם לא תתאים.
+// זה הכשיל את goRoute ב-0.56.0–0.57.4 עם "הפריט לא נמצא בתפריט".
+const menuText=el=>String(el?.innerText||el?.textContent||'').replace(/\s+/g,' ').trim();
+const menuItem=name=>[...document.querySelectorAll('a,button,[role="link"],[role="menuitem"]')].find(el=>menuText(el)===name);
 async function goRoute(path){
 const route=MENU_ROUTES.find(r=>String(path).includes(r.path));
 if(!route)return{ok:false,error:`אין מסלול תפריט ל-${path}`};
