@@ -461,11 +461,13 @@ async function prepareLeumiRoute(tabId,url){const path=new URL(url).pathname;
 try{const go=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_GO',path}),30000,'ניווט בתפריט לאומי');
 if(go?.ok){const ping=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),8000,'בדיקת דף לאומי');
 if(ping?.ok)return}}catch{}
+{const cur=await chrome.tabs.get(tabId).catch(()=>null);
+if(String(cur?.url||'').includes('hb2.bankleumi.co.il'))throw Error('הניווט בתפריט של לאומי נכשל. אין לנווט לכתובת — זה היה מנתק אותך מהחשבון. נוודא שאתה בדף הראשי של לאומי ונסה שוב');}
 await chrome.tabs.update(tabId,{url,active:true});const started=Date.now();let last='העמוד עדיין נטען',renav=0;let seen='';
 // ⚠ אין להתנות על tab.status==='complete'. באתר של לאומי בקשה תלויה משאירה את הלשונית
 // ב-loading לצמיתות, והתנאי הזה חסם את כל התהליך גם כשהדף עצמו שמיש לחלוטין.
 while(Date.now()-started<60000){await delay(500);try{const tab=await chrome.tabs.get(tabId);seen=`${tab.status} · ${tab.url}`;
-if(!tab.url?.includes(path)){last=`הדפדפן נחת ב-${tab.url}`;if(renav<4){renav++;await delay(1500);await chrome.tabs.update(tabId,{url,active:true})}continue}
+if(!tab.url?.includes(path)){last=`הדפדפן נחת ב-${tab.url}`;if(renav<4&&!String(tab.url||'').includes('hb2.bankleumi.co.il')){renav++;await delay(1500);await chrome.tabs.update(tabId,{url,active:true})}continue}
 const ping=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),8000,'בדיקת דף לאומי');if(ping?.ok)return}
 catch(e){last=e.message;try{await chrome.scripting.executeScript({target:{tabId},files:['leumi-content.js']})}catch(e2){last=`${e.message} / הזרקה נכשלה: ${e2.message}`}}}
 throw Error(`עמוד לאומי לא היה מוכן בתוך דקה (${seen||'הלשונית לא נקראה'}): ${last}. אם הדף מסתובב בלי להיטען — ההתחברות ללאומי פגה ויש להתחבר מחדש.`)}
