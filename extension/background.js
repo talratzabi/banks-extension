@@ -49,7 +49,19 @@ const mizrahiFrameData=new Map();
 // **הסימן אם זה מתממש: סנכרון שנתקע או מחזיר טבלה ריקה, בלי שרואים דפדוף.**
 // אם יקרה — לחזור ל-windows.create({tabId,focused:false}) שהיה כאן.
 const returnedToDashboard=new Set();
-chrome.tabs.onRemoved.addListener(id=>returnedToDashboard.delete(id));
+chrome.tabs.onRemoved.addListener(id=>{returnedToDashboard.delete(id);detachedForSync.delete(id)});
+// לשוניות שהוצאו לחלון עבודה נפרד, ויחזרו לחלון הראשי כשהסנכרון ייגמר.
+const detachedForSync=new Set();
+async function restoreSyncTabs(){
+  if(!detachedForSync.size)return;
+  let dash=null;try{[dash]=await chrome.tabs.query({url:chrome.runtime.getURL('dashboard.html')+'*'})}catch{}
+  for(const id of [...detachedForSync]){
+    detachedForSync.delete(id);
+    if(!dash)continue;
+    try{const t=await chrome.tabs.get(id);if(t.windowId!==dash.windowId)await chrome.tabs.move(id,{windowId:dash.windowId,index:-1})}catch{}
+  }
+  if(dash)try{await chrome.tabs.update(dash.id,{active:true});await chrome.windows.update(dash.windowId,{focused:true})}catch{}
+}
 // force=true בכניסות סנכרון מפורשות. הודעת התחברות אינה נורית כשהלשונית כבר מחוברת
 // (פועלים שולח AUTHENTICATED רק כשה-pathname משתנה), ולכן שם חייבים לכפות.
 async function returnToDashboard(tabId,force=false){
@@ -59,8 +71,14 @@ async function returnToDashboard(tabId,force=false){
   let dash=await findDash();
   if(!dash){try{await chrome.runtime.openOptionsPage()}catch{}await delay(500);dash=await findDash()}
   if(!dash)return;
-  // מחזיר את לשונית הבנק לחלון של הדשבורד, אם סבב קודם הוציא אותה לחלון נפרד.
-  try{const tab=await chrome.tabs.get(tabId);if(tab.windowId!==dash.windowId)await chrome.tabs.move(tabId,{windowId:dash.windowId,index:-1})}catch{}
+  // ⚠ נמדד 17.08.2026: לשונית לא-פעילה היא לשונית מוסתרת, ו-Chrome משהה בה rAF.
+  // פועלים פרטי החזיר יתרה ריקה ואז נתקע בהלוואות — הדפים פשוט לא צוירו.
+  // לכן בזמן סנכרון הלשונית יושבת בחלון משלה שאינו במוקד: שם היא הפעילה בחלונה
+  // ונשארת visible. בסיום `restoreSyncTabs` מחזירה אותה לחלון הראשי, כבקשת טל.
+  try{
+    const tab=await chrome.tabs.get(tabId),win=await chrome.windows.get(tab.windowId,{populate:true});
+    if((win.tabs||[]).length>1){await chrome.windows.create({tabId,focused:false});detachedForSync.add(tabId)}
+  }catch{}
   // הדשבורד קדימה. לשונית הבנק **אינה** מופעלת — זה מה שמשאיר את התוסף בחזית.
   try{await chrome.tabs.update(dash.id,{active:true});await chrome.windows.update(dash.windowId,{focused:true})}catch{}
 }
@@ -426,7 +444,7 @@ async function syncSelected(selectionKeys){
     const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);const all=saved.accounts.filter(a=>!syncedSources.includes(a.source||'business'));for(const source of syncedSources)all.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
     const marked=markNewTransactions(saved.accounts,all,syncedSources),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
     const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: ${marked.length} חשבונות`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
-  }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress()}
+  }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress();await restoreSyncTabs()}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
 function transactionSyncKey(t){return JSON.stringify([t?.date||'',t?.action||'',t?.details||'',t?.reference||'',Number(t?.debit)||0,Number(t?.credit)||0,t?.balance==null?'':Number(t.balance)])}
