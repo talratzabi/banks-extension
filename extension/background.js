@@ -81,9 +81,14 @@ async function returnToDashboard(tabId,force=false){
     // ברירת מחדל, צר מהחלון של המשתמש — ואתרי בנק משנים פריסה לפי רוחב.
     // ב-17.08.2026 זה הפיל את יהב: בורר התאריכים לא רונדר בפריסה הצרה,
     // ו-setThreeMonths החזירה false. **גודל החלון הוא חלק מהסביבה שהמתאמים נמדדו מולה.**
+    // ⚠ המידות נלקחות מחלון **הדשבורד**, לא מחלון המקור. אם ההתחברות נעשתה
+    // בחלונית קטנה, חלון המקור קטן — וירושה ממנו הייתה משחזרת בדיוק את התקלה.
+    const dashWin=await chrome.windows.get(dash.windowId).catch(()=>null),src=dashWin||win;
     const box={};
-    for(const k of ['left','top','width','height'])if(Number.isFinite(win[k]))box[k]=win[k];
+    for(const k of ['left','top','width','height'])if(Number.isFinite(src[k]))box[k]=src[k];
     if((win.tabs||[]).length>1){await chrome.windows.create({tabId,focused:false,...box});detachedForSync.add(tabId)}
+    // לשונית שכבר לבדה בחלון — לא מעבירים, אבל כן מוודאים שהחלון בגודל שולחני.
+    else if(Object.keys(box).length)await chrome.windows.update(tab.windowId,box).catch(()=>{});
   }catch{}
   // הדשבורד קדימה. לשונית הבנק **אינה** מופעלת — זה מה שמשאיר את התוסף בחזית.
   try{await chrome.tabs.update(dash.id,{active:true});await chrome.windows.update(dash.windowId,{focused:true})}catch{}
@@ -380,7 +385,7 @@ async function loadIsracardMonth(month){
     await storeCardMonth(month,out);
     await chrome.storage.local.set({syncStatus:`היסטוריית כרטיסים ${month}: נשמרו ${out.length} כרטיסים`});
     return{ok:true,month,cards:out.length};
-  }finally{isracardHistoryBusy=false}
+  }finally{isracardHistoryBusy=false;await restoreSyncTabs()}
 }
 
 // טעינת שנה אחורה. רשימת הכרטיסים נקראת פעם אחת בלבד — לא 12 פעמים — ומדלגים על כל
@@ -441,7 +446,7 @@ async function loadIsracardYear(months=12,suffixes=[]){
   await chrome.storage.local.set({isracardActiveSince:activeSince});
   await chrome.storage.local.set({syncStatus:`היסטוריית כרטיסים: נטענו ${done} חודשים${failed.length?`, נכשלו ${failed.join(', ')}`:''}`});
   return{ok:true,loaded:done,failed};
-  }finally{isracardHistoryBusy=false}
+  }finally{isracardHistoryBusy=false;await restoreSyncTabs()}
 }
 async function syncSelected(selectionKeys){
   if(!selectionKeys.length)throw Error('לא נבחרו חשבונות');if(running)throw Error('תהליך אחר כבר מתבצע');running=true;
@@ -533,7 +538,7 @@ async function syncFibi(tabId){
     const loanAccountKey=`${t.data.branch}-${t.data.accountNumber}`,account={...s.data,...loanResult.data,...t.data,loans:(loanResult.data.loans||[]).map(l=>({...l,accountKey:loanAccountKey})),nickname:owner.firstName||`חשבון ${t.data.accountNumber}`,owner:owner.fullName||'',source,sourceLabel:label,selectionKey:`${source}|${loanAccountKey}`,id:`${source}-${loanAccountKey}`,lastSync:now,status:'מסונכרן'};
     const accounts=state.accounts.filter(a=>a.source!==source);accounts.push(account);const names=(await chrome.storage.local.get({fibiConnectionNames:{}})).fibiConnectionNames;names[source]=owner.firstName||t.data.accountNumber;
     await chrome.storage.local.set({accounts,fibiConnectionNames:names,pendingFibiSlot:'',syncStatus:`${label} סונכרן`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();
-  }catch(e){await chrome.storage.local.set({pendingFibiSlot:'',syncStatus:`שגיאה בבינלאומי: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{running=false}
+  }catch(e){await chrome.storage.local.set({pendingFibiSlot:'',syncStatus:`שגיאה בבינלאומי: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{running=false;await restoreSyncTabs()}
 }
 
 async function startLeumi(){if(running)return{ok:false,error:'סנכרון כבר רץ — המתן לסיומו לפני הפעלה מחדש'};leumiLastRun=0;
@@ -556,7 +561,7 @@ if(Date.now()-leumiLastRun<LEUMI_COOLDOWN_MS)return;
 if(state.leumiAttempts>=LEUMI_MAX_ATTEMPTS){await chrome.storage.local.set({pendingLeumi:false,leumiAttempts:0,syncStatus:`לאומי: ${LEUMI_MAX_ATTEMPTS} ניסיונות נכשלו — נעצר כדי לא להיכנס ללולאה. התחבר ידנית באתר עד שרואים תנועות, ואז הפעל סנכרון מחדש.`});await chrome.runtime.openOptionsPage();return}
 leumiBusy=true;leumiLastRun=Date.now();
 await chrome.storage.local.set({leumiAttempts:state.leumiAttempts+1});
-try{return await runDiscoverLeumi(tabId,state)}finally{leumiBusy=false}}
+try{return await runDiscoverLeumi(tabId,state)}finally{leumiBusy=false;await restoreSyncTabs()}}
 async function runDiscoverLeumi(tabId,state){
 // הזיהוי רץ בעבר על הדף שבמקרה היה פתוח, ולכן נחת על gate-keeper והחזיר "לא נמצאה רשימת החשבונות".
 await prepareLeumiRoute(tabId,LEUMI_TX_URL);await delay(1200);
@@ -708,7 +713,7 @@ async function setMizrahiRange(tabId){await chrome.scripting.executeScript({targ
 async function readMizrahiTransactions(tabId){let rows=[];try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const rows=[];for(const row of document.querySelectorAll('[role="row"],tr')){const cells=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>({text:clean(x.innerText),label:clean(x.getAttribute('aria-label'))})),dateCell=cells.find(c=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.text));if(!dateCell)continue;const actionCell=cells.find(c=>/סוג תנועה/.test(c.label)),amountCell=cells.find(c=>/זכות\s*\/\s*חובה/.test(c.label)),balanceCell=cells.find(c=>/יתרה/.test(c.label));const amount=money(amountCell?.text),balance=money(balanceCell?.text);rows.push({date:dateCell.text,action:actionCell?.text||'',details:'',debit:amount!=null&&amount<0?Math.abs(amount):null,credit:amount!=null&&amount>=0?amount:null,balance})}return rows}});rows=results.flatMap(x=>Array.isArray(x.result)?x.result:[])}catch{}if(!rows.length)rows=mizrahiFrameData.get(tabId)?.transactions||[];return rows}
 async function readMizrahiSummary(tabId){const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const buttons=[...document.querySelectorAll('button')].map(x=>clean(x.innerText)),hit=buttons.find(t=>/\b\d{3}\s*-\s*\d{5,9}\b/.test(t));if(!hit)return null;const m=hit.match(/\b(\d{3})\s*-\s*(\d{5,9})\b/);if(!m)return null;const text=clean(document.body?.innerText),owner=hit.replace(m[0],'').trim()||'חשבון מזרחי',balance=money((text.match(/יתרת עו["״']ש\s*([\d,.-]+)\s*₪/)||[])[1]),creditLimit=money((text.match(/מסגרת אשראי בחשבון\s*([\d,.-]+)\s*₪/)||[])[1]);return{branch:m[1],accountNumber:m[2],owner,nickname:owner,balance,creditLimit}}});return results.map(x=>x.result).find(Boolean)||null}
 async function startMizrahi(){if(mizrahiBusy)return{ok:false,error:'סנכרון מזרחי־טפחות כבר מתבצע'};await chrome.storage.local.set({pendingMizrahi:true,syncStatus:'מזרחי־טפחות: בודק את החיבור ומזהה חשבונות'});const tab=await mizrahiTab();if(!tab){await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: פותח את חלון ההתחברות'});const opened=await chrome.tabs.create({url:MIZRAHI_HOME,active:true});try{await waitTab(opened.id,'mizrahi-tefahot.co.il')}catch{}const shown=await openMizrahiLogin(opened.id);await chrome.storage.local.set({syncStatus:shown?'ממתין להתחברות למזרחי־טפחות — הזן משתמש וסיסמה בחלונית שנפתחה':'ממתין להתחברות למזרחי־טפחות — נפתח דף ההתחברות'});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMizrahi(tab.id).catch(async e=>{await chrome.storage.local.set({pendingMizrahi:false,syncStatus:`שגיאה במזרחי־טפחות: ${e.message}`});await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
-async function runMizrahi(tabId){if(mizrahiBusy)return;mizrahiBusy=true;try{await prepareMizrahi(tabId);const detected=await readMizrahiSummary(tabId);if(!detected)throw Error('לא זוהה חשבון פעיל בעמוד מזרחי');const found=[{...detected,key:`mizrahi|${detected.branch}-${detected.accountNumber}`,source:'mizrahi',sourceLabel:'מזרחי־טפחות',balance:null}];const result=await syncMizrahiSelected([`${detected.branch}-${detected.accountNumber}`],tabId);const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});const accounts=[...state.accounts.filter(a=>a.source!=='mizrahi'),...result],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('mizrahi|')),result[0].selectionKey])];await chrome.storage.local.set({accounts,discoveredAccounts:[],selectedAccountKeys,pendingMizrahi:false,syncStatus:`מזרחי־טפחות: הסנכרון הסתיים — ${result[0].transactions.length} תנועות ו־${result[0].loans.length} הלוואות`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{mizrahiBusy=false}}
+async function runMizrahi(tabId){if(mizrahiBusy)return;mizrahiBusy=true;try{await prepareMizrahi(tabId);const detected=await readMizrahiSummary(tabId);if(!detected)throw Error('לא זוהה חשבון פעיל בעמוד מזרחי');const found=[{...detected,key:`mizrahi|${detected.branch}-${detected.accountNumber}`,source:'mizrahi',sourceLabel:'מזרחי־טפחות',balance:null}];const result=await syncMizrahiSelected([`${detected.branch}-${detected.accountNumber}`],tabId);const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});const accounts=[...state.accounts.filter(a=>a.source!=='mizrahi'),...result],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('mizrahi|')),result[0].selectionKey])];await chrome.storage.local.set({accounts,discoveredAccounts:[],selectedAccountKeys,pendingMizrahi:false,syncStatus:`מזרחי־טפחות: הסנכרון הסתיים — ${result[0].transactions.length} תנועות ו־${result[0].loans.length} הלוואות`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{mizrahiBusy=false;await restoreSyncTabs()}}
 async function syncMizrahiSelected(keys,knownTabId=null){const tab=knownTabId?await chrome.tabs.get(knownTabId):await mizrahiTab();if(!tab)throw Error('החיבור למזרחי־טפחות אינו פעיל');if(keys.length!==1)throw Error('בחיבור מזרחי הנוכחי ניתן לסנכרן חשבון פעיל אחד בכל פעם');await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: טוען תנועות של 3 חודשים אחרונים'});if(!tab.url?.includes('root-main-osh-p428New')){await chrome.tabs.update(tab.id,{url:MIZRAHI_TX});await waitTab(tab.id,'root-main-osh-p428New')}await prepareMizrahi(tab.id);await delay(1200);await setMizrahiRange(tab.id);await delay(4200);const account=await readMizrahiSummary(tab.id),transactions=await readMizrahiTransactions(tab.id);if(!account)throw Error('פרטי החשבון הפעיל לא זוהו בעמוד מזרחי');if(`${account.branch}-${account.accountNumber}`!==keys[0])throw Error(`החשבון הפעיל הוא ${account.branch}-${account.accountNumber}, ולא החשבון שנבחר`);if(!transactions.length)throw Error('לא נקראו תנועות ישירות מטבלת שלושת החודשים — הסנכרון נעצר ולא נשמרו נתונים חלקיים');let loans=[];await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: נקראו ${transactions.length} תנועות; קורא הלוואות`});try{await chrome.tabs.update(tab.id,{url:MIZRAHI_LOANS});await waitTab(tab.id,'legacy-Loan-P060');await prepareMizrahi(tab.id);await delay(2200);const lr=await chrome.tabs.sendMessage(tab.id,{type:'MIZRAHI_LOANS'});if(lr?.ok)loans=lr.loans||[]}catch{}const now=new Date().toISOString(),availableCredit=account.balance==null||account.creditLimit==null?null:account.balance+account.creditLimit;return[{...account,availableCredit,transactions,loans,source:'mizrahi',sourceLabel:'מזרחי־טפחות',selectionKey:`mizrahi|${account.branch}-${account.accountNumber}`,id:`mizrahi-${account.branch}-${account.accountNumber}`,lastSync:now,status:loans.length?'מסונכרן':'מסונכרן ללא פירוט הלוואות'}]}
 
 const ISRACARD_HOME='https://web.isracard.co.il/StatusPage';
@@ -761,7 +766,7 @@ async function runCal(tabId,requestedSuffix=''){
     const state=await chrome.storage.local.get({accounts:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[],digits=v=>String(v||'').replace(/\D/g,'');let assigned=0;
     for(const card of details){let target=accounts.find(a=>(a.cards||[]).some(c=>digits(c.suffix).endsWith(card.suffix)));if(!target&&home.debitAccount){const wanted=digits(home.debitAccount);const matches=accounts.filter(a=>wanted.endsWith(digits(a.accountNumber))||digits(a.accountNumber).endsWith(wanted));if(matches.length===1)target=matches[0]}if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>digits(c.suffix).endsWith(card.suffix));if(index>=0)target.cards[index]={...target.cards[index],...card};else target.cards.push(card);assigned++}
     const now=new Date().toISOString(),savedCal=await chrome.storage.local.get({calLastCards:[],calUnassigned:[]}),merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]},monthCount=monthly.length;autoLoginRuns.set(`cal|${tabId}`,Date.now());await chrome.storage.local.set({accounts,calLastCards:merge(savedCal.calLastCards,details),calUnassigned:merge(savedCal.calUnassigned,unassigned),pendingCal:false,pendingCalSuffix:'',syncStatus:`כאל: הסנכרון הסתיים — ${details.length} כרטיסים, ${monthCount} דפי חיוב חודשיים נשמרו, ${assigned} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:monthCount,assigned,unassigned:unassigned.length}
-  }finally{calBusy=false}
+  }finally{calBusy=false;await restoreSyncTabs()}
 }
 const MAX_TX='https://www.max.co.il/transaction-details/personal';
 let maxBusy=false;
@@ -779,7 +784,7 @@ async function runMax(tabId,requestedSuffix=''){
   if(!monthly.length)throw Error('לא נקראו עסקאות חודשיות מ‑MAX');const latestBySuffix=new Map();for(const c of monthly)if(!latestBySuffix.has(c.suffix))latestBySuffix.set(c.suffix,c);const nowLabel=firstRead.label,nowKey=firstRead.key;await chrome.storage.local.set({syncStatus:`MAX: החיוב הקרוב — ${nowLabel}`});await chrome.tabs.sendMessage(tabId,{type:'MAX_SELECT_MONTH',label:nowLabel});await delay(1800);await prepareMax(tabId);let currentPage=await chrome.tabs.sendMessage(tabId,{type:'MAX_READ'});if(!currentPage?.ok||currentPage.month!==nowKey)currentPage={ok:true,month:nowKey,total:0,cards:{}};const details=[...latestBySuffix.keys()].map(suffix=>{const transactions=currentPage.cards?.[suffix]||[],onlyCard=latestBySuffix.size===1,amount=onlyCard&&Number.isFinite(Number(currentPage.total))?Number(currentPage.total):transactions.reduce((s,t)=>s+Math.abs(Number(t.amount)||0),0);return{...latestBySuffix.get(suffix),amount,transactions,month:currentPage.month}}),state=await chrome.storage.local.get({accounts:[],maxLastCards:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[];let assigned=0;const digits=v=>String(v||'').replace(/\D/g,'');
   for(const card of details){const target=accounts.find(a=>(a.cards||[]).some(c=>digits(c.suffix).endsWith(card.suffix)));if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>digits(c.suffix).endsWith(card.suffix));if(index>=0)target.cards[index]={...target.cards[index],...card};else target.cards.push(card);assigned++}
   const merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]};autoLoginRuns.set(`max|${tabId}`,Date.now());await chrome.storage.local.set({accounts,maxLastCards:merge(state.maxLastCards,details),maxUnassigned:unassigned,pendingMax:false,pendingMaxSuffix:'',syncStatus:`MAX: הסנכרון הסתיים — ${details.length} כרטיסים, ${seen.size} דפי חיוב חודשיים נשמרו, ${assigned} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:new Date().toISOString()});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:seen.size,assigned,unassigned:unassigned.length}
- }finally{maxBusy=false}
+ }finally{maxBusy=false;await restoreSyncTabs()}
 }
 async function startDiscountBusiness(){const saved=await chrome.storage.local.get({discoveredAccounts:[]});
 // לחיצה ידנית היא התחלה חדשה. קודם נשארו discountLastRun/discountAttempts מהריצה
@@ -798,7 +803,7 @@ if(Date.now()-discountLastRun<DISCOUNT_COOLDOWN_MS)return;
 if(state.discountAttempts>=DISCOUNT_MAX_ATTEMPTS){await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0,syncStatus:`דיסקונט עסקי: ${DISCOUNT_MAX_ATTEMPTS} ניסיונות נכשלו — נעצר כדי לא להיכנס ללולאה. התחבר ידנית והפעל שוב.`});await chrome.runtime.openOptionsPage();return}
 discountBusy=true;discountLastRun=Date.now();
 await chrome.storage.local.set({discountAttempts:state.discountAttempts+1});
-try{return await runDiscoverDiscount(tabId,state)}finally{discountBusy=false}}
+try{return await runDiscoverDiscount(tabId,state)}finally{discountBusy=false;await restoreSyncTabs()}}
 async function runDiscoverDiscount(tabId,state){await prepareDiscountContent(tabId);const r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),120000,'זיהוי הישויות');
 // שומרים את צילום המצב לפני שזורקים, כדי שהתיקון הבא ייכתב ממדידה ולא מהשערה.
 if(r?.probe)await chrome.storage.local.set({discountProbe:r.probe});
