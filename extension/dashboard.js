@@ -37,7 +37,8 @@ chrome.storage.onChanged.addListener(()=>{clearTimeout(loadTimer);loadTimer=setT
 async function load(){
   const epoch=++loadEpoch;
   document.querySelector('.sources')?.classList.add('hidden');
-  const data=await chrome.storage.local.get({accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null});
+  const data=await chrome.storage.local.get({accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{}});
+  statusBySource=data.statusBySource||{};
   if(epoch!==loadEpoch)return;
   accounts=data.accounts;discovered=data.discoveredAccounts;syncScope=data.syncScope;accountFilter=data.accountFilter;accountKinds=data.accountKinds;privateOwnerName=data.privateOwnerName;hideMortgages=Boolean(data.hideMortgages);isracardUnassigned=data.isracardUnassigned||[];calUnassigned=data.calUnassigned||[];maxUnassigned=data.maxUnassigned||[];isracardLastCards=data.isracardLastCards||[];calLastCards=data.calLastCards||[];maxLastCards=data.maxLastCards||[];selectedKeys=(Array.isArray(data.selectedAccountKeys)?data.selectedAccountKeys:accounts.map(a=>a.selectionKey||a.id)).map(k=>String(k).includes('|')?k:`business|${k}`);
   // תיקון רשומות בינלאומי שכבר נשמרו לפני אימות לוח הסילוקין. הערכים נמדדו
@@ -48,6 +49,7 @@ async function load(){
   if(!Array.isArray(data.selectedAccountKeys))await chrome.storage.local.set({selectedAccountKeys:selectedKeys});
   renderSyncStatus(data.syncStatus);
   renderSyncProgress(data.syncProgress,data.syncStatus);
+  await rememberBankStatus(data.syncStatus,data.statusBySource);
   $('#syncAll').textContent='סנכרון לפי הבחירה האחרונה';
   const totalLabel=$('#total')?.previousElementSibling;if(totalLabel)totalLabel.textContent='יתרה כוללת בכל החשבונות';
   const selectable=discovered.filter(a=>a.branch&&a.accountNumber),fresh=selectable.filter(a=>!selectedKeys.includes(a.key));
@@ -58,7 +60,7 @@ async function load(){
   setActiveView(discovered.length&&activeView!=='selection'?'selection':activeView);
 }
 function renderScope(){const syncToggleState=()=>chrome.storage.local.get({autoSyncOnLogin:true}).then(x=>{for(const c of document.querySelectorAll('[id="autoSyncOnLogin"]'))c.checked=x.autoSyncOnLogin});let panel=$('#scopePanel');if(!panel){panel=document.createElement('section');panel.id='scopePanel';panel.className='panel scope-panel';document.querySelector('.sources')?.before(panel)}panel.onchange=async e=>{const c=e.target.closest('#autoSyncOnLogin');if(c)await chrome.storage.local.set({autoSyncOnLogin:c.checked})};
-panel.innerHTML=`<h2>הבנקים וכרטיסי האשראי שלי</h2><p>לחץ על הגוף שברצונך לחבר או לסנכרן.</p><label class="auto-sync"><input type="checkbox" id="autoSyncOnLogin"> <span>סנכרון אוטומטי בכל כניסה לבנק<small>בכל התחברות חדשה מעדכן לבד את החשבונות שכבר בחרת</small></span></label><div class="bank-grid">${BANK_BUTTONS.map(b=>`<button class="bank-button ${b.ready?'ready':''}" data-bank="${b.id}"><img src="${b.logo}" alt=""><span><b>${b.name}</b><small>${b.ready?'סנכרון פעיל':'ממתין לחיבור'}</small></span></button>`).join('')}</div><h3>אילו חשבונות להציג?</h3><div class="scope-choice"><label><input type="radio" name="accountFilter" value="business" ${accountFilter==='business'?'checked':''}> עסקיים</label><label><input type="radio" name="accountFilter" value="private" ${accountFilter==='private'?'checked':''}> פרטיים</label><label><input type="radio" name="accountFilter" value="both" ${accountFilter==='both'?'checked':''}> כולם</label></div>`;panel.onclick=async e=>{const button=e.target.closest('.bank-button');if(!button)return;const bank=BANK_BUTTONS.find(b=>b.id===button.dataset.bank);if(bank.fibi)return startFibi(bank.id,button);if(bank.leumi)return startLeumi(button);if(bank.discountBusiness)return startDiscountBusiness(button);if(bank.discountPrivate)return startDiscountPrivate(button);if(bank.mizrahi)return startMizrahi(button);if(bank.yahav)return startYahav(button);if(bank.isracard)return startIsracard(button);if(bank.cal)return startCal(button);if(bank.max)return startMax(button);if(bank.ready)return startChosenSync(bank.id,button);await chrome.runtime.sendMessage({type:'OPEN_EXTERNAL_BANK',url:bank.url});toast(`${bank.name}: האתר הרשמי נפתח; חיבור הסנכרון יתווסף בשלב הבא`)};panel.onchange=async e=>{if(e.target.name==='accountFilter'){accountFilter=e.target.value;await chrome.storage.local.set({accountFilter});render()}}
+panel.innerHTML=`<h2>הבנקים וכרטיסי האשראי שלי</h2><p>לחץ על הגוף שברצונך לחבר או לסנכרן.</p><label class="auto-sync"><input type="checkbox" id="autoSyncOnLogin"> <span>סנכרון אוטומטי בכל כניסה לבנק<small>בכל התחברות חדשה מעדכן לבד את החשבונות שכבר בחרת</small></span></label><div class="bank-grid">${BANK_BUTTONS.map(b=>`<button class="bank-button ${b.ready?'ready':''}" data-bank="${b.id}"><img src="${b.logo}" alt=""><span><b>${b.name}</b><small>${esc(bankLine(b))}</small></span></button>`).join('')}</div><h3>אילו חשבונות להציג?</h3><div class="scope-choice"><label><input type="radio" name="accountFilter" value="business" ${accountFilter==='business'?'checked':''}> עסקיים</label><label><input type="radio" name="accountFilter" value="private" ${accountFilter==='private'?'checked':''}> פרטיים</label><label><input type="radio" name="accountFilter" value="both" ${accountFilter==='both'?'checked':''}> כולם</label></div>`;panel.onclick=async e=>{const button=e.target.closest('.bank-button');if(!button)return;const bank=BANK_BUTTONS.find(b=>b.id===button.dataset.bank);if(bank.fibi)return startFibi(bank.id,button);if(bank.leumi)return startLeumi(button);if(bank.discountBusiness)return startDiscountBusiness(button);if(bank.discountPrivate)return startDiscountPrivate(button);if(bank.mizrahi)return startMizrahi(button);if(bank.yahav)return startYahav(button);if(bank.isracard)return startIsracard(button);if(bank.cal)return startCal(button);if(bank.max)return startMax(button);if(bank.ready)return startChosenSync(bank.id,button);await chrome.runtime.sendMessage({type:'OPEN_EXTERNAL_BANK',url:bank.url});toast(`${bank.name}: האתר הרשמי נפתח; חיבור הסנכרון יתווסף בשלב הבא`)};panel.onchange=async e=>{if(e.target.name==='accountFilter'){accountFilter=e.target.value;await chrome.storage.local.set({accountFilter});render()}}
 syncToggleState();}
 function cardSrc(c){const s=String(c?.issuer||'');return /MAX|מקס/i.test(s)?'max':/כאל|CAL/i.test(s)?'cal':'isracard'}
 function assignSelect(c){return`<select class="isracard-account" data-suffix="${esc(c.suffix)}" data-src="${esc(cardSrc(c))}"><option value="">ממתין לשיוך — בחר חשבון</option>${accounts.map(a=>`<option value="${esc(a.id)}">${esc(a.sourceLabel)} · ${esc(a.branch)}-${esc(a.accountNumber)}${a.nickname||a.owner?` · ${esc(a.nickname||a.owner)}`:''}</option>`).join('')}</select>`}
@@ -284,3 +286,39 @@ syncRingStyles.textContent='.sync-ring{display:flex;align-items:center;gap:14px;
 '.sync-ring .ring-center span{font-size:.63rem;font-weight:700;line-height:1.2;opacity:.85}'+
 '.sync-ring-text small{opacity:.75}';
 document.head.appendChild(syncRingStyles);
+
+
+// ── סטטוס נפרד לכל בנק ──────────────────────────────────────────────────
+// הבעיה שזה פותר: syncStatus הוא מחרוזת גלובלית אחת לכל היעדים. כשפתוחים שמונה
+// בנקים, הודעה של אחד נכתבת מעל השני, וב-17.08.2026 זה הסתיר כישלון של פועלים
+// פרטי במשך שני סבבי אבחון שלמים.
+// למה בצד הדשבורד ולא ב-background: ההודעות כבר נושאות את שם הבנק, ולכן אפשר
+// לשייך אותן בקריאה — בלי לגעת בעשרות נקודות הכתיבה שבתוך זרימות הסנכרון.
+var statusBySource={};
+function bankBase(name){return String(name).split(' — ')[0]}
+function attributeStatus(value){
+  const v=String(value||'');if(!v)return null;
+  let best=null;
+  for(const b of BANK_BUTTONS){
+    const full=b.name,base=bankBase(b.name);
+    if(v.includes(full)||v.includes(base)){
+      // השם הארוך ביותר מנצח: „פועלים פרטי" גובר על „פועלים"
+      if(!best||bankBase(b.name).length>bankBase(best.name).length)best=b;
+    }
+  }
+  return best?best.id:null;
+}
+function bankLine(b){
+  const s=statusBySource[b.id];
+  if(s&&s.text){const base=bankBase(b.name);const t=s.text.split(base+':').pop().trim();return t||s.text}
+  return b.ready?'סנכרון פעיל':'ממתין לחיבור';
+}
+async function rememberBankStatus(value,stored){
+  const id=attributeStatus(value);
+  if(!id)return;
+  const prev=(stored||{})[id];
+  if(prev&&prev.text===String(value))return;   // בלי כתיבה מיותרת — כל כתיבה מפעילה load מחדש
+  const next={...(stored||{}),[id]:{text:String(value),at:Date.now()}};
+  statusBySource=next;
+  await chrome.storage.local.set({statusBySource:next});
+}
