@@ -463,11 +463,14 @@ async function prepareLeumiRoute(tabId,url){const path=new URL(url).pathname;
 // התוצאה הייתה כישלון. מזריקים מחדש — בלי לנווט ובלי להרוס את הסשן.
 try{await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),5000,'בדיקת סקריפט לאומי')}
 catch{try{await chrome.scripting.executeScript({target:{tabId},files:['leumi-content.js']});await delay(400)}catch{}}
+let goWhy='';
 try{const go=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_GO',path}),30000,'ניווט בתפריט לאומי');
 if(go?.ok){const ping=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),8000,'בדיקת דף לאומי');
-if(ping?.ok)return}}catch{}
+if(ping?.ok)return;goWhy='הניווט הצליח אבל הדף לא השיב'}
+else goWhy=go?.error||'ללא סיבה'}
+catch(e){goWhy=e.message}
 {const cur=await chrome.tabs.get(tabId).catch(()=>null);
-if(String(cur?.url||'').includes('hb2.bankleumi.co.il'))throw Error('הניווט בתפריט של לאומי נכשל. אין לנווט לכתובת — זה היה מנתק אותך מהחשבון. נוודא שאתה בדף הראשי של לאומי ונסה שוב');}
+if(String(cur?.url||'').includes('hb2.bankleumi.co.il'))throw Error(`הניווט בתפריט נכשל: ${goWhy}. הלשונית על ${String(cur?.url||'?').replace(/[?#].*/,'')}. אין לנווט לכתובת — זה היה מנתק אותך מהחשבון`);}
 await chrome.tabs.update(tabId,{url,active:true});const started=Date.now();let last='העמוד עדיין נטען',renav=0;let seen='';
 // ⚠ אין להתנות על tab.status==='complete'. באתר של לאומי בקשה תלויה משאירה את הלשונית
 // ב-loading לצמיתות, והתנאי הזה חסם את כל התהליך גם כשהדף עצמו שמיש לחלוטין.
