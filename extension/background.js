@@ -184,6 +184,11 @@ if(!pending.length){await chrome.storage.local.set({syncStatus:`נמצאו ${com
 const AUTO_LOGIN_DEBOUNCE_MS=90*1000;
 const AUTO_SYNC_MIN_GAP_MS=6*60*60*1000;
 const gapText=ms=>{const m=Math.max(0,Math.round(ms/60000));return m<60?`${m} דק'`:`${Math.floor(m/60)} שע'${m%60?` ו-${m%60} דק'`:''}`};
+// ⚠ הצלחה וכישלון אינם אותו דבר. ב-0.64.0 רשמתי כישלון לתוך autoSyncLast כדי לעצור
+// לולאה, והתוצאה הייתה שהתוסף הודיע „סונכרן לאחרונה" בדיוק כששום דבר לא נשמר —
+// וחסם ניסיון אוטומטי ל-6 שעות. כישלון מקבל צינון קצר משלו, ומחרוזת אחרת.
+const AUTO_RETRY_AFTER_FAIL_MS=15*60*1000;
+function autoRetryTooSoon(st,source){const last=Number(st.autoSyncFailed?.[source]||0);if(!last)return 0;const since=Date.now()-last;return since<AUTO_RETRY_AFTER_FAIL_MS?AUTO_RETRY_AFTER_FAIL_MS-since:0}
 function autoSyncTooSoon(st,source){const last=Number(st.autoSyncLast?.[source]||0);if(!last)return 0;const since=Date.now()-last;return since<AUTO_SYNC_MIN_GAP_MS?AUTO_SYNC_MIN_GAP_MS-since:0}
 const autoLoginRuns=new Map();
 let autoBusy=false;
@@ -192,7 +197,8 @@ function acceptAutoLogin(source,tabId){const key=`${source}|${tabId||0}`,now=Dat
 // מעל הסטטוס של בנק ב' שבאמצע עבודה — וזה הסתיר מהמשתמש את סיבת הכישלון האמיתית.
 async function maybeAutoSync(source,label,tabId){
   if(running)return false;
-  const st=await chrome.storage.local.get({autoSyncOnLogin:true,selectedAccountKeys:[],accounts:[],autoSyncLast:{}});
+  const st=await chrome.storage.local.get({autoSyncOnLogin:true,selectedAccountKeys:[],accounts:[],autoSyncLast:{},autoSyncFailed:{}});
+  if(autoRetryTooSoon(st,source))return false;   // ניסיון קודם נכשל — שקט, ההודעה שלו עדיין על המסך
   if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;if(/שגיאה|נכשל/.test((await chrome.storage.local.get({syncStatus:''})).syncStatus||''))return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // גרסאות קודמות יכלו להשאיר חשבונות מסונכרנים בלי selectedAccountKeys.
   // במקרה כזה משחזרים את הבחירה רק מן החשבונות שכבר אושרו ונשמרו, בלי לבחור
@@ -221,13 +227,13 @@ async function maybeAutoSync(source,label,tabId){
       }catch(e){lastError=e;if(attempt<3)await chrome.storage.local.set({syncStatus:`${label}: הקריאה טרם הושלמה — מנסה שוב (${attempt+1}/3)`})}
     }
     if(lastError)throw lastError;
-    await chrome.storage.local.set({autoSyncLast:{...st.autoSyncLast,[source]:Date.now()}});
+    await chrome.storage.local.set({autoSyncLast:{...st.autoSyncLast,[source]:Date.now()},autoSyncFailed:{...st.autoSyncFailed,[source]:0}});
     return true;
   // ⚠ שומר לולאה — אל תסיר (§9). כאן עמד releaseAutoLogin, שמחק את הדיבאונס של 90 השניות
   // בדיוק כשהסנכרון נכשל. autoSyncLast נכתב רק בהצלחה, ולכן לא נותר שום שומר: הניווטים
   // של הסנכרון עצמו יורים AUTHENTICATED, acceptAutoLogin עובר, וזה רץ שוב ונכשל שוב.
   // עכשיו הצינון נרשם גם בכישלון — ריצה אוטומטית אחת, ואז הכדור אצל המשתמש.
-  }catch(e){await chrome.storage.local.set({autoSyncLast:{...st.autoSyncLast,[source]:Date.now()},syncStatus:`סנכרון אוטומטי ב${label} נכשל ולא נשמר עדכון: ${e.message} · לעדכון ידני לחץ על הבנק בדשבורד`});return false}
+  }catch(e){await chrome.storage.local.set({autoSyncFailed:{...st.autoSyncFailed,[source]:Date.now()},syncStatus:`סנכרון אוטומטי ב${label} נכשל ולא נשמר עדכון: ${e.message} · לעדכון ידני לחץ על הבנק בדשבורד`});return false}
   finally{autoBusy=false}
 }
 
