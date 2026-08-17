@@ -57,7 +57,16 @@ const headers=[...document.querySelectorAll('[role="columnheader"]')].map(h=>fla
 const gridRowEls=[...document.querySelectorAll('[role="row"]')];
 const sampleCells=gridRowEls.map(r=>[...r.querySelectorAll('[role="cell"],[role="gridcell"]')].map(c=>({t:flat(c.innerText),a:flat(c.getAttribute('aria-label')),cls:flat(typeof c.className==='string'?c.className:'').slice(0,60)}))).filter(cs=>cs.some(c=>/^\d{2}\.\d{2}\.\d{4}$/.test(c.t))).slice(0,5);
 return{roleCounts,frames,dateEls:dateEls.length,chain,headers,gridRowCount:gridRowEls.length,sampleCells,bodyLen:(document.body.innerText||'').length}}catch(e){return{probeError:e.message}}}
-let reported=false;function report(){if(!reported&&location.hostname==='hb2.bankleumi.co.il'&&document.querySelector('main')){reported=true;chrome.runtime.sendMessage({type:'LEUMI_AUTHENTICATED'}).catch(()=>{})}}setInterval(report,800);report();
+// ⚠ 18.08.2026 — הפריט שנרשם כפתוח ב-0.58.0: ההודעה נשלחה בלי לוודא שהמשתמש מחובר.
+// הגייט היחיד היה „מארח hb2 + קיים <main>", ודף ההתחברות עונה על שניהם. כל עוד
+// הכניסה הייתה על www.leumi.co.il (בלי content script) הבאג היה רדום; ברגע שהכניסה
+// עברה ל-hb2 ב-0.79.0 הוא התעורר — התוסף הכריז „מחובר" בזמן שהמשתמש מקליד, הזיהוי
+// התחיל וניווט את הדף מתחת לידיו. **דף התחברות ושער אינם סשן.**
+let reported=false;function report(){if(reported)return;
+if(location.hostname!=='hb2.bankleumi.co.il')return;
+if(/\/H\/Login\.html/i.test(location.pathname)||/\/gate-keeper\//i.test(location.pathname))return;
+if(!document.querySelector('main'))return;
+reported=true;chrome.runtime.sendMessage({type:'LEUMI_AUTHENTICATED'}).catch(()=>{})}setInterval(report,800);report();
 function normalized(value){return String(value||'').replace(/(?<=\d)\s+(?=\d)/g,'').replace(/\s*([-\/])\s*/g,'$1')}
 function parseAccount(value){const m=normalized(value).match(/(\d{3})-(\d+)(?:\/(\d+))?/);return m?{branch:m[1],accountNumber:m[2],accountSuffix:m[3]||'',key:`${m[1]}-${m[2]}`}:null}
 // ⚠ שורות הרשת מכילות את מספרי החשבון של מושכי השיקים (12-645-0000099426), והם תואמים
