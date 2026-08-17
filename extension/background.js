@@ -648,7 +648,13 @@ async function openLeumiCheque(m){const tabs=await chrome.tabs.query({url:['http
 // ⚠ tabs[0] בחר לשונית שרירותית — לעיתים ישנה, מנותקת או בחלון אחר. המשתמש ראה
 // "לא קורה כלום" בזמן שהתוסף דפדף בלשונית אחרת. סדר העדיפות: הלשונית הפעילה עכשיו,
 // אחר כך פעילה בחלון כלשהו, ורק אז האחרונה שנצפתה.
-async function discountTab(){const tabs=await chrome.tabs.query({url:['https://start.telebank.co.il/*']});
+// ⚠ נסיגה שתוקנה 18.08.2026: עד 0.75.0 מסך הכניסה של דיסקונט היה על
+// discountbank.co.il, מארח אחר, ולכן לא נתפס כאן. משהעברתי את הכניסה ל-
+// start.telebank.co.il, **חלונית ההתחברות עצמה נראתה כמו סשן מחובר** —
+// דיסקונט עסקי „מצא חיבור", לא פתח חלון, וניסה לזהות חשבונות על דף הכניסה.
+// **לשונית על /login/ אינה סשן.**
+async function discountTab(){const all=await chrome.tabs.query({url:['https://start.telebank.co.il/*']});
+const tabs=all.filter(t=>!/\/login\//.test(t.url||''));
 if(!tabs.length)return null;
 const [active]=await chrome.tabs.query({active:true,currentWindow:true});
 const pick=tabs.find(t=>t.id===active?.id)||tabs.find(t=>t.active)||[...tabs].sort((a,b)=>(b.lastAccessed||0)-(a.lastAccessed||0))[0];
