@@ -68,7 +68,8 @@ async function returnToDashboard(tabId,force=false){
 // התקדמות הסנכרון: שלב מתוך סך, וזמן ההתחלה — הדשבורד גוזר מהם אחוז והערכת זמן.
 let progressState=null;
 async function beginProgress(total){progressState={done:0,total,startedAt:Date.now()};await chrome.storage.local.set({syncProgress:progressState})}
-async function syncStep(status){if(progressState)progressState={...progressState,done:Math.min(progressState.done+1,progressState.total)};await chrome.storage.local.set({syncStatus:status,syncProgress:progressState})}
+// action = הטקסט הקצר שנכתב בתוך הגלגל. נפרד מהסטטוס המלא, שנשאר ארוך ומפורט.
+async function syncStep(status,action=''){if(progressState)progressState={...progressState,done:Math.min(progressState.done+1,progressState.total),action};await chrome.storage.local.set({syncStatus:status,syncProgress:progressState})}
 async function endProgress(){progressState=null;await chrome.storage.local.set({syncProgress:null})}
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(/^[A-Z_]*AUTHENTICATED$/.test(m?.type||'')&&sender.tab?.id)returnToDashboard(sender.tab.id);
@@ -173,7 +174,7 @@ function acceptAutoLogin(source,tabId){const key=`${source}|${tabId||0}`,now=Dat
 function releaseAutoLogin(source,tabId){autoLoginRuns.delete(`${source}|${tabId||0}`)}
 async function maybeAutoSync(source,label,tabId){
   const st=await chrome.storage.local.get({autoSyncOnLogin:true,selectedAccountKeys:[],accounts:[],autoSyncLast:{}});
-  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
+  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // גרסאות קודמות יכלו להשאיר חשבונות מסונכרנים בלי selectedAccountKeys.
   // במקרה כזה משחזרים את הבחירה רק מן החשבונות שכבר אושרו ונשמרו, בלי לבחור
   // חשבונות חדשים שהמשתמש מעולם לא ביקש לסנכרן.
@@ -211,7 +212,7 @@ async function maybeAutoSync(source,label,tabId){
 // התנאי המקביל ל"כבר בחרת": קיים חשבון שמור מאותו מקור — כלומר סנכרנת אותו בעבר.
 async function maybeAutoRun(source,label,fn,tabId){
   const st=await chrome.storage.local.get({autoSyncOnLogin:true,accounts:[],autoSyncLast:{}});
-  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
+  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // ⚠ ישראכרט אינו יוצר שורת חשבון משלו — הכרטיסים נתלים על חשבונות הבנק. לכן
   // "כבר סונכרן פעם" נמדד אצלו לפי קיום כרטיס שהמנפיק שלו ישראכרט, ולא לפי source.
   const synced=source==='isracard'
@@ -411,11 +412,11 @@ function markNewTransactions(previous,next,syncedSources){
 }
 async function syncSource(source,keys){
   const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);
-  let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`);await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
-  await syncStep(`${cfg.label}: מסנכרן תנועות`);await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
-  await syncStep(`${cfg.label}: מסנכרן ריכוז יתרות`);await prepareRoute(tab.id,route(source,'current-account/balances'),'/current-account/balances');const summaries=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_BALANCE_SUMMARIES',keys});if(!summaries?.ok)throw Error(summaries?.error||'סנכרון ריכוז היתרות נכשל');
-  await syncStep(`${cfg.label}: קורא הלוואות`);await prepareRoute(tab.id,route(source,'credit-and-mortgage'),'/credit-and-mortgage');const loans=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'loans',keys});if(!loans?.ok)throw Error(loans?.error||'קריאת ההלוואות נכשלה');
-  await syncStep(`${cfg.label}: קורא כרטיסי אשראי`);await prepareRoute(tab.id,route(source,'plastic-cards/current-debit'),'/plastic-cards/current-debit');const cards=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'cards',keys});if(!cards?.ok)throw Error(cards?.error||'קריאת הכרטיסים נכשלה');
+  let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`,'מזהה בעל חשבון');await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
+  await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
+  await syncStep(`${cfg.label}: מסנכרן ריכוז יתרות`,'מוריד יתרות');await prepareRoute(tab.id,route(source,'current-account/balances'),'/current-account/balances');const summaries=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_BALANCE_SUMMARIES',keys});if(!summaries?.ok)throw Error(summaries?.error||'סנכרון ריכוז היתרות נכשל');
+  await syncStep(`${cfg.label}: קורא הלוואות`,'מוריד הלוואות');await prepareRoute(tab.id,route(source,'credit-and-mortgage'),'/credit-and-mortgage');const loans=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'loans',keys});if(!loans?.ok)throw Error(loans?.error||'קריאת ההלוואות נכשלה');
+  await syncStep(`${cfg.label}: קורא כרטיסי אשראי`,'מוריד כרטיסי אשראי');await prepareRoute(tab.id,route(source,'plastic-cards/current-debit'),'/plastic-cards/current-debit');const cards=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'cards',keys});if(!cards?.ok)throw Error(cards?.error||'קריאת הכרטיסים נכשלה');
   const byKey=new Map((summaries.accounts||[]).map(a=>[a.key,a]));for(const a of loans.accounts||[])byKey.set(a.key,{...(byKey.get(a.key)||{}),...a});for(const a of cards.accounts||[])byKey.set(a.key,{...(byKey.get(a.key)||{}),...a});const now=new Date().toISOString();
   return tx.accounts.map(a=>({...a,...(byKey.get(`${a.branch}-${a.accountNumber}`)||{}),nickname:owner||a.nickname,owner:owner||a.nickname,source,sourceLabel:cfg.label,selectionKey:`${source}|${a.branch}-${a.accountNumber}`,id:`${source}-${a.branch}-${a.accountNumber}`,lastSync:now,status:'מסונכרן'}));
 }

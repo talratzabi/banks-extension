@@ -67,7 +67,7 @@ document.addEventListener('change',e=>{const sel=e.target?.closest?.('.isracard-
 function renderIsracardAssignments(){const pending=[...isracardUnassigned,...calUnassigned,...maxUnassigned];let panel=$('#isracardAssignments');if(!pending.length){panel?.remove();return}if(!panel){panel=document.createElement('section');panel.id='isracardAssignments';panel.className='panel';$('#scopePanel')?.after(panel)}panel.innerHTML=`<h2>שיוך כרטיסי אשראי לחשבונות</h2><p>כרטיס שהבנק לא דיווח עליו אינו משוייך אוטומטית. בחר פעם אחת חשבון חיוב — הסנכרונים הבאים כבר יזהו אותו.</p>${pending.map(c=>`<label class="choice"><span><b>${esc(c.name||'כרטיס')} · ${esc(c.suffix)}</b><small>${esc(c.issuer||'')} · חיוב ${money(c.amount)}${c.chargeDate?` · ${esc(c.chargeDate)}`:''}</small>${assignSelect(c)}</span></label>`).join('')}`}
 function money(n){return new Intl.NumberFormat('he-IL',{style:'currency',currency:'ILS'}).format(Number(n)||0)}
 function shortDateTime(value){const d=new Date(value);if(Number.isNaN(d.getTime()))return'—';const pad=n=>String(n).padStart(2,'0');return`${d.getDate()}.${d.getMonth()+1}.${pad(d.getFullYear()%100)} ${pad(d.getHours())}:${pad(d.getMinutes())}`}
-function renderSyncStatus(raw=''){const value=String(raw||''),el=$('#syncStatus');let banner=$('#syncBanner');if(!banner){banner=document.createElement('section');banner.id='syncBanner';banner.className='panel';document.querySelector('.summary')?.before(banner)}let state='waiting',label='ממתין לחיבור';if(/שגיאה|נכשל/.test(value)){state='error';label='הסנכרון נכשל'}else if(/לפני פחות מ-|האוטומטי כבוי|תור הסנכרון|כבר רץ|לא נשמרו חשבונות|אין חיבור שאושר/.test(value)){state='waiting';label='הסנכרון דולג'}else if(/הסתיים|סונכרן|כבר עודכן/.test(value)){state='done';label='הסנכרון הסתיים'}else if(/קורא|מסנכרן|מזהה|מחפש|בודק|טוען|מתבצע|שומר|שולף|מוריד|פותח|מעדכן|ממתין להתחברות/.test(value)){state='running';label='סנכרון בתהליך'}const html=`<span class="sync-state ${state}">${label}</span><small class="sync-detail">${esc(value)}</small>`;el.innerHTML=html;banner.innerHTML=html}
+function renderSyncStatus(raw=''){const value=String(raw||''),el=$('#syncStatus');let banner=$('#syncBanner');if(!banner){banner=document.createElement('section');banner.id='syncBanner';banner.className='panel';document.querySelector('.summary')?.before(banner)}let state='waiting',label='ממתין לחיבור';if(/שגיאה|נכשל/.test(value)){state='error';label='הסנכרון נכשל'}else if(/לפני פחות מ-|האוטומטי כבוי|תור הסנכרון|כבר רץ|לא נשמרו חשבונות|אין חיבור שאושר/.test(value)){state='waiting';label='הסנכרון דולג'}else if(/הסתיים|סונכרן|כבר עודכן/.test(value)){state='done';label=/הסתיים/.test(value)?'הסנכרון הסתיים בהצלחה':'הסנכרון הסתיים'}else if(/קורא|מסנכרן|מזהה|מחפש|בודק|טוען|מתבצע|שומר|שולף|מוריד|פותח|מעדכן|ממתין להתחברות/.test(value)){state='running';label='סנכרון בתהליך'}const html=`<span class="sync-state ${state}">${label}</span><small class="sync-detail">${esc(value)}</small>`;el.innerHTML=html;banner.innerHTML=html}
 function esc(v){const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML}
 function render(){
   const visible=accounts.filter(a=>accountFilter==='both'||kindOf(a)===accountFilter);const box=$('#accounts');box.innerHTML=visible.length?'':'<div class="panel empty">אין חשבונות בסוג שנבחר.</div>';
@@ -256,11 +256,13 @@ function renderSyncProgress(p,status=''){
   const C=163.36,pct=lastProgress?Math.round(lastProgress.done/lastProgress.total*100):null;
   const wrap=document.createElement('div');
   wrap.id='syncRing';wrap.className='sync-ring';
-  wrap.innerHTML=`<svg viewBox="0 0 60 60" class="${pct==null?'spin':''}" aria-hidden="true">`+
+  const action=lastProgress&&lastProgress.action?lastProgress.action:'מסתנכרן';
+  wrap.innerHTML=`<div class="ring-wrap"><svg viewBox="0 0 60 60" class="${pct==null?'spin':''}" aria-hidden="true">`+
     `<circle cx="30" cy="30" r="26" class="ring-track"></circle>`+
     `<circle cx="30" cy="30" r="26" class="ring-fill" stroke-dasharray="${pct==null?`${C*0.25} ${C}`:C}" stroke-dashoffset="${pct==null?0:C*(1-pct/100)}"></circle>`+
-    `</svg><div class="sync-ring-text"><strong>${pct==null?'מסתנכרן':pct+'%'}</strong>`+
-    `<small id="syncEta">${lastProgress?progressLine(lastProgress):'בתהליך'}</small></div>`;
+    `</svg><div class="ring-center"><strong>${pct==null?'':pct+'%'}</strong>`+
+    `<span>${esc(action)}</span></div></div>`+
+    `<div class="sync-ring-text"><small id="syncEta">${lastProgress?progressLine(lastProgress):'בתהליך'}</small></div>`;
   banner.appendChild(wrap);
   if(progressTicker)clearInterval(progressTicker);
   progressTicker=setInterval(()=>{
@@ -270,12 +272,15 @@ function renderSyncProgress(p,status=''){
   },1000);
 }
 const syncRingStyles=document.createElement('style');
-syncRingStyles.textContent='.sync-ring{display:flex;align-items:center;gap:12px;margin-top:10px}'+
-'.sync-ring svg{width:56px;height:56px;transform:rotate(-90deg);flex:0 0 auto}'+
+syncRingStyles.textContent='.sync-ring{display:flex;align-items:center;gap:14px;margin-top:10px}'+
+'.sync-ring .ring-wrap{position:relative;width:118px;height:118px;flex:0 0 auto}'+
+'.sync-ring svg{position:absolute;inset:0;width:118px;height:118px;transform:rotate(-90deg)}'+
 '.sync-ring svg.spin{animation:syncSpin 1.1s linear infinite}'+
 '@keyframes syncSpin{to{transform:rotate(270deg)}}'+
-'.sync-ring .ring-track{fill:none;stroke:currentColor;opacity:.16;stroke-width:6}'+
-'.sync-ring .ring-fill{fill:none;stroke:currentColor;stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset .5s ease}'+
-'.sync-ring-text strong{display:block;font-size:1.15rem;font-weight:800;line-height:1.1}'+
+'.sync-ring .ring-track{fill:none;stroke:currentColor;opacity:.16;stroke-width:5}'+
+'.sync-ring .ring-fill{fill:none;stroke:currentColor;stroke-width:5;stroke-linecap:round;transition:stroke-dashoffset .5s ease}'+
+'.sync-ring .ring-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 17px;gap:3px}'+
+'.sync-ring .ring-center strong{font-size:1.25rem;font-weight:800;line-height:1}'+
+'.sync-ring .ring-center span{font-size:.63rem;font-weight:700;line-height:1.2;opacity:.85}'+
 '.sync-ring-text small{opacity:.75}';
 document.head.appendChild(syncRingStyles);
