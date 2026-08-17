@@ -51,7 +51,8 @@ async function extractSelected(keys){
 // החשבון נשמר עם balance:null ומסומן; דף ריכוז היתרות ממלא אותה בהמשך ב-syncSource.
     let balance=extractBalance();
     if(balance===null){try{await waitFor(()=>extractBalance()!==null,3000,'')}catch{}balance=extractBalance()}
-    const label=chooser.textContent.replace(/\s+/g,' ').trim();accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,balanceMissing:balance===null,transactions:extractTransactions()});
+    const rows=extractTransactions();
+    const label=chooser.textContent.replace(/\s+/g,' ').trim();accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,balanceMissing:balance===null,transactions:rows,txProbe:rows.length?'':txFingerprint()});
   }
   return accounts;
 }
@@ -221,6 +222,15 @@ function extractBalance() {
   return null;
 }
 
+// טביעת אצבע מבנית לדף התנועות, לשימוש כשלא נקראה ולו שורה אחת.
+// ⚠ מבנה בלבד — ספירות וכותרות עמודות. אין כאן שום נתון פיננסי, ובכוונה:
+// המשתמש מצלם את השורה הזו ושולח אותה.
+function txFingerprint(){
+  const n=s=>document.querySelectorAll(s).length;
+  const heads=[...document.querySelectorAll('th,[role="columnheader"]')]
+    .map(h=>(h.innerText||'').replace(/\s+/g,' ').trim()).filter(Boolean).slice(0,8);
+  return `טבלאות:${n('table')} · grid:${n('[role="grid"]')} · role=row:${n('[role="row"]')} · tr:${n('tr')} · כותרות: ${heads.join(' | ')||'—'}`;
+}
 function extractTransactions() {
   const table = [...document.querySelectorAll('table')].find(t => /תאריך/.test(t.innerText) && /(חובה|זכות)/.test(t.innerText));
   if (!table) return [];

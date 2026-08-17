@@ -463,7 +463,15 @@ async function syncSource(source,keys){
   let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`,'מזהה בעל חשבון');await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
   await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});
   // אבחון: אילו חשבונות לא נקראה להם יתרה בדף התנועות. דף ריכוז היתרות עוד עשוי למלא.
-  await chrome.storage.local.set({poalimNoBalance:(tx.accounts||[]).filter(a=>a.balanceMissing).map(a=>`${source}|${a.branch}-${a.accountNumber}`)});if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
+  await chrome.storage.local.set({poalimNoBalance:(tx.accounts||[]).filter(a=>a.balanceMissing).map(a=>`${source}|${a.branch}-${a.accountNumber}`)});
+  // אבחון: חשבון בלי ולו תנועה אחת. טביעת האצבע המבנית מוצגת על אריח הבנק,
+  // כדי שאפשר יהיה למדוד את מבנה הרשת בלי שהמשתמש ייגע בקונסול.
+  {
+    const empty=(tx.accounts||[]).find(a=>a.txProbe);
+    const diags=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
+    if(empty)diags[source]=`0 תנועות · ${empty.txProbe}`;else delete diags[source];
+    await chrome.storage.local.set({bankDiagnostics:diags});
+  }if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
   await syncStep(`${cfg.label}: מסנכרן ריכוז יתרות`,'מוריד יתרות');await prepareRoute(tab.id,route(source,'current-account/balances'),'/current-account/balances');const summaries=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_BALANCE_SUMMARIES',keys});if(!summaries?.ok)throw Error(summaries?.error||'סנכרון ריכוז היתרות נכשל');
   // ⚠ מוצר משני שנכשל לא ימחק את הליבה. תנועות ויתרות כבר נאספו, ואין שום סיבה
   // לאבד אותן בגלל דף הלוואות. וחובה withTimeout — sendMessage בלי תקרה נתקע לנצח,

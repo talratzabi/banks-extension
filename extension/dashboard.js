@@ -37,8 +37,8 @@ chrome.storage.onChanged.addListener(()=>{clearTimeout(loadTimer);loadTimer=setT
 async function load(){
   const epoch=++loadEpoch;
   document.querySelector('.sources')?.classList.add('hidden');
-  const data=await chrome.storage.local.get({accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{}});
-  statusBySource=data.statusBySource||{};
+  const data=await chrome.storage.local.get({accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{}});
+  statusBySource=data.statusBySource||{};bankDiagnostics=data.bankDiagnostics||{};
   if(epoch!==loadEpoch)return;
   accounts=data.accounts;discovered=data.discoveredAccounts;syncScope=data.syncScope;accountFilter=data.accountFilter;accountKinds=data.accountKinds;privateOwnerName=data.privateOwnerName;hideMortgages=Boolean(data.hideMortgages);isracardUnassigned=data.isracardUnassigned||[];calUnassigned=data.calUnassigned||[];maxUnassigned=data.maxUnassigned||[];isracardLastCards=data.isracardLastCards||[];calLastCards=data.calLastCards||[];maxLastCards=data.maxLastCards||[];selectedKeys=(Array.isArray(data.selectedAccountKeys)?data.selectedAccountKeys:accounts.map(a=>a.selectionKey||a.id)).map(k=>String(k).includes('|')?k:`business|${k}`);
   // תיקון רשומות בינלאומי שכבר נשמרו לפני אימות לוח הסילוקין. הערכים נמדדו
@@ -294,7 +294,7 @@ document.head.appendChild(syncRingStyles);
 // פרטי במשך שני סבבי אבחון שלמים.
 // למה בצד הדשבורד ולא ב-background: ההודעות כבר נושאות את שם הבנק, ולכן אפשר
 // לשייך אותן בקריאה — בלי לגעת בעשרות נקודות הכתיבה שבתוך זרימות הסנכרון.
-var statusBySource={};
+var statusBySource={},bankDiagnostics={};
 function bankBase(name){return String(name).split(' — ')[0]}
 function attributeStatus(value){
   const v=String(value||'');if(!v)return null;
@@ -309,6 +309,8 @@ function attributeStatus(value){
   return best?best.id:null;
 }
 function bankLine(b){
+  const diag=bankDiagnostics[b.id];
+  if(diag)return diag;   // אבחון גובר: זו השורה שהמשתמש מצלם ושולח
   const s=statusBySource[b.id];
   if(s&&s.text){const base=bankBase(b.name);const t=s.text.split(base+':').pop().trim();return t||s.text}
   return b.ready?'סנכרון פעיל':'ממתין לחיבור';
