@@ -297,6 +297,16 @@ document.head.appendChild(syncRingStyles);
 // לשייך אותן בקריאה — בלי לגעת בעשרות נקודות הכתיבה שבתוך זרימות הסנכרון.
 var statusBySource={},bankDiagnostics={};
 function bankBase(name){return String(name).split(' — ')[0]}
+// כמה זמן הודעת סנכרון נחשבת „חיה". מעבר לזה היא היסטוריה, ולא מצב.
+const LIVE_STATUS_MS=3*60*1000;
+function agoText(ms){
+  const m=Math.round(ms/60000);
+  if(m<60)return `לפני ${m} דק׳`;
+  const h=Math.round(m/60);
+  if(h<24)return `לפני ${h} שע׳`;
+  const d=Math.round(h/24);
+  return d===1?'אתמול':`לפני ${d} ימים`;
+}
 function attributeStatus(value){
   const v=String(value||'');if(!v)return null;
   let best=null;
@@ -312,8 +322,16 @@ function attributeStatus(value){
 function bankLine(b){
   const diag=bankDiagnostics[b.id];
   if(diag)return diag;   // אבחון גובר: זו השורה שהמשתמש מצלם ושולח
+  // ⚠ 18.08.2026: הסטטוס נשמר בלי גיל, ולכן אריחים הציגו „ממתין להתחברות אל
+  // פועלים עסקי" ו„קורא משכנתאות חשבון 1" שעות אחרי שהסנכרון נגמר — הודעת ביניים
+  // שהוצגה כמצב נוכחי. **הודעת ביניים שהתיישנה אינה מייצגת דבר, ותוצאה כן.**
   const s=statusBySource[b.id];
-  if(s&&s.text){const base=bankBase(b.name);const t=s.text.split(base+':').pop().trim();return t||s.text}
+  if(s&&s.text){
+    const base=bankBase(b.name),t=(s.text.split(base+':').pop()||'').trim()||s.text;
+    const age=Date.now()-(Number(s.at)||0);
+    if(age<LIVE_STATUS_MS)return t;                                   // חי — כלשונו
+    if(/הסתיים|סונכרן|עודכן|שגיאה|נכשל|דולג/.test(t))return `${t} · ${agoText(age)}`;  // תוצאה — עם גיל
+  }
   // „סנכרון פעיל" נקרא כאילו סנכרון רץ ברגע זה, והכוונה הייתה „נתמך". המלל אומר
   // עכשיו מה תעשה הלחיצה, ולא מה מצב המערכת.
   return b.ready?'לחיצה תפתח מסך כניסה':'טרם נתמך';
