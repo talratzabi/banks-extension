@@ -47,8 +47,11 @@ async function extractSelected(keys){
     const match=String(key).match(/(\d+)\s*-\s*(\d+)/);if(!match)continue;const branch=match[1],accountNumber=match[2],expected=normalize(`${branch}-${accountNumber}`);
     let chooser=findAccountChooser();if(!chooser)throw new Error('בורר החשבונות נעלם מהדף');
     if(!normalize(chooser.textContent).includes(expected)){chooser.click();await wait(350);const option=[...document.querySelectorAll('[role="option"], [role="listbox"] li')].find(el=>normalize(el.textContent).includes(expected));if(!option)throw new Error(`החשבון ${branch}-${accountNumber} נעלם מהבורר.`);option.click();await waitFor(()=>{const fresh=findAccountChooser();return fresh&&normalize(fresh.textContent).includes(expected)},12000,`לא ניתן לבחור חשבון ${branch}-${accountNumber}.`);await wait(1100)}
-    chooser=findAccountChooser();if(!chooser||!normalize(chooser.textContent).includes(expected))throw new Error(`אימות חשבון ${branch}-${accountNumber} נכשל.`);const balance=extractBalance();if(balance===null)throw new Error(`לא נמצאה יתרה לחשבון ${branch}-${accountNumber}.`);
-    const label=chooser.textContent.replace(/\s+/g,' ').trim();accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,transactions:extractTransactions()});
+    chooser=findAccountChooser();if(!chooser||!normalize(chooser.textContent).includes(expected))throw new Error(`אימות חשבון ${branch}-${accountNumber} נכשל.`);// יתרה חסרה אינה מפילה את הסנכרון. קודם המתנה לרינדור, ואם עדיין אין —
+// החשבון נשמר עם balance:null ומסומן; דף ריכוז היתרות ממלא אותה בהמשך ב-syncSource.
+    let balance=extractBalance();
+    if(balance===null){try{await waitFor(()=>extractBalance()!==null,3000,'')}catch{}balance=extractBalance()}
+    const label=chooser.textContent.replace(/\s+/g,' ').trim();accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,balanceMissing:balance===null,transactions:extractTransactions()});
   }
   return accounts;
 }

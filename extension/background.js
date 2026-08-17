@@ -139,6 +139,7 @@ async function start(scope,force=false){
   const requested=chosenSources(scope),saved=await chrome.storage.local.get({accounts:[]});const sources=force?requested:requested.filter(source=>!sourceFreshToday(source,saved.accounts));const skipped=requested.filter(source=>!sources.includes(source));
   if(!sources.length){await chrome.storage.local.set({syncScope:scope,pendingSources:[],discoveredAccounts:[],syncStatus:'כל החשבונות שנבחרו כבר סונכרנו היום'});await chrome.runtime.openOptionsPage();return{ok:true,status:'already_synced_today'}}
   await chrome.storage.local.set({syncScope:scope,pendingSources:sources,discoveredAccounts:[],syncStatus:skipped.length?`${skipped.map(s=>SOURCES[s].label).join(', ')} כבר עודכן היום; ממשיך לשאר החיבורים`:'מחפש חיבורים פעילים'});
+  discoverTries.clear();   // סבב חדש שהמשתמש ביקש — התקרה נפתחת מחדש
   for(const source of sources)await openSource(source);
   return{ok:true,status:'waiting_login'};
 }
@@ -147,7 +148,23 @@ async function openSource(source){
   if(active){await returnToDashboard(active.id,true);queueDiscover(active.id,source);return}
   await chrome.storage.local.set({syncStatus:`ממתין להתחברות אל ${cfg.label}`});const tab=tabs[0];if(tab)await chrome.tabs.update(tab.id,{url:cfg.login,active:true});else await chrome.tabs.create({url:cfg.login,active:true});
 }
-function queueDiscover(tabId,source){discoveryChain=discoveryChain.then(()=>discover(tabId,source)).catch(()=>{});return discoveryChain}
+// ⚠ שומר לולאה — אל תסיר (§9). discover מסירה את הבנק מ-pendingSources רק בהצלחה;
+// בכישלון הוא נשאר, prepareRoute מנווטת, הניווט משנה pathname, reportAuthenticated
+// יורה שוב וזה חוזר בלי סוף. עד 0.64.0 גם לא היה דיווח — catch ריק בלע את הסיבה.
+const discoverTries=new Map();
+chrome.tabs.onRemoved.addListener(id=>{for(const k of [...discoverTries.keys()])if(k.endsWith(`|${id}`))discoverTries.delete(k)});
+function queueDiscover(tabId,source){
+  const key=`${source}|${tabId}`,tries=discoverTries.get(key)||0;
+  if(tries>=3)return discoveryChain;
+  discoverTries.set(key,tries+1);
+  discoveryChain=discoveryChain.then(()=>discover(tabId,source)).catch(async e=>{
+    const label=SOURCES[source]?.label||source,attempt=tries+1;
+    await chrome.storage.local.set({syncStatus:attempt>=3
+      ?`זיהוי החשבונות ב${label} נכשל אחרי 3 ניסיונות ונעצר: ${e.message}`
+      :`זיהוי החשבונות ב${label} נכשל (ניסיון ${attempt} מתוך 3): ${e.message}`});
+  });
+  return discoveryChain;
+}
 async function discover(tabId,source){
   const state=await chrome.storage.local.get({pendingSources:[]});if(!state.pendingSources.includes(source)||running)return;
   try{
@@ -171,7 +188,6 @@ function autoSyncTooSoon(st,source){const last=Number(st.autoSyncLast?.[source]|
 const autoLoginRuns=new Map();
 let autoBusy=false;
 function acceptAutoLogin(source,tabId){const key=`${source}|${tabId||0}`,now=Date.now(),last=Number(autoLoginRuns.get(key)||0);if(now-last<AUTO_LOGIN_DEBOUNCE_MS)return false;autoLoginRuns.set(key,now);return true}
-function releaseAutoLogin(source,tabId){autoLoginRuns.delete(`${source}|${tabId||0}`)}
 async function maybeAutoSync(source,label,tabId){
   const st=await chrome.storage.local.get({autoSyncOnLogin:true,selectedAccountKeys:[],accounts:[],autoSyncLast:{}});
   if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
@@ -204,7 +220,11 @@ async function maybeAutoSync(source,label,tabId){
     if(lastError)throw lastError;
     await chrome.storage.local.set({autoSyncLast:{...st.autoSyncLast,[source]:Date.now()}});
     return true;
-  }catch(e){releaseAutoLogin(source,tabId);await chrome.storage.local.set({syncStatus:`סנכרון אוטומטי ב${label} נכשל ולא נשמר עדכון: ${e.message}`});return false}
+  // ⚠ שומר לולאה — אל תסיר (§9). כאן עמד releaseAutoLogin, שמחק את הדיבאונס של 90 השניות
+  // בדיוק כשהסנכרון נכשל. autoSyncLast נכתב רק בהצלחה, ולכן לא נותר שום שומר: הניווטים
+  // של הסנכרון עצמו יורים AUTHENTICATED, acceptAutoLogin עובר, וזה רץ שוב ונכשל שוב.
+  // עכשיו הצינון נרשם גם בכישלון — ריצה אוטומטית אחת, ואז הכדור אצל המשתמש.
+  }catch(e){await chrome.storage.local.set({autoSyncLast:{...st.autoSyncLast,[source]:Date.now()},syncStatus:`סנכרון אוטומטי ב${label} נכשל ולא נשמר עדכון: ${e.message} · לעדכון ידני לחץ על הבנק בדשבורד`});return false}
   finally{autoBusy=false}
 }
 
@@ -413,7 +433,9 @@ function markNewTransactions(previous,next,syncedSources){
 async function syncSource(source,keys){
   const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);
   let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`,'מזהה בעל חשבון');await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
-  await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
+  await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});
+  // אבחון: אילו חשבונות לא נקראה להם יתרה בדף התנועות. דף ריכוז היתרות עוד עשוי למלא.
+  await chrome.storage.local.set({poalimNoBalance:(tx.accounts||[]).filter(a=>a.balanceMissing).map(a=>`${source}|${a.branch}-${a.accountNumber}`)});if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
   await syncStep(`${cfg.label}: מסנכרן ריכוז יתרות`,'מוריד יתרות');await prepareRoute(tab.id,route(source,'current-account/balances'),'/current-account/balances');const summaries=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_BALANCE_SUMMARIES',keys});if(!summaries?.ok)throw Error(summaries?.error||'סנכרון ריכוז היתרות נכשל');
   await syncStep(`${cfg.label}: קורא הלוואות`,'מוריד הלוואות');await prepareRoute(tab.id,route(source,'credit-and-mortgage'),'/credit-and-mortgage');const loans=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'loans',keys});if(!loans?.ok)throw Error(loans?.error||'קריאת ההלוואות נכשלה');
   await syncStep(`${cfg.label}: קורא כרטיסי אשראי`,'מוריד כרטיסי אשראי');await prepareRoute(tab.id,route(source,'plastic-cards/current-debit'),'/plastic-cards/current-debit');const cards=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'cards',keys});if(!cards?.ok)throw Error(cards?.error||'קריאת הכרטיסים נכשלה');
