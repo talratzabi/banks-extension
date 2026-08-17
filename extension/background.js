@@ -41,9 +41,13 @@ const SOURCES={
 let running=false,discoveryChain=Promise.resolve();
 const mizrahiFrameData=new Map();
 // ברגע שההתחברות הושלמה — המיקוד חוזר לדשבורד והסנכרון ממשיך ברקע.
-// ⚠ לא 'לשונית מוסתרת': Chrome משהה rAF ומאט טיימרים בלשונית נסתרת, ואתר שמרנדר
-// טבלה ב-rAF לא יצייר אותה כלל. לשונית *פעילה בחלון שאינו במוקד* נשארת visible.
-// לכן הלשונית מועברת לחלון משלה עם focused:false, ולא רק active:false.
+//
+// ⚠ שינוי החלטה, 17.08.2026, בקשת טל: „הדף של פועלים — תחזיר אותו לדפדפן הראשי,
+// אבל תמיד שהתוסף יהיה בחזית." לכן הלשונית **חוזרת לחלון של הדשבורד** ואינה מופעלת.
+// זו נסיגה מודעת מ-0.60.0: לשונית לא-פעילה היא לשונית מוסתרת, ו-Chrome משהה בה rAF
+// ומאט טיימרים. אתר בנק שמרנדר טבלה ב-rAF עלול לא לצייר אותה.
+// **הסימן אם זה מתממש: סנכרון שנתקע או מחזיר טבלה ריקה, בלי שרואים דפדוף.**
+// אם יקרה — לחזור ל-windows.create({tabId,focused:false}) שהיה כאן.
 const returnedToDashboard=new Set();
 chrome.tabs.onRemoved.addListener(id=>returnedToDashboard.delete(id));
 // force=true בכניסות סנכרון מפורשות. הודעת התחברות אינה נורית כשהלשונית כבר מחוברת
@@ -51,19 +55,21 @@ chrome.tabs.onRemoved.addListener(id=>returnedToDashboard.delete(id));
 async function returnToDashboard(tabId,force=false){
   if(returnedToDashboard.has(tabId)&&!force)return;   // פעם אחת ללשונית — LEUMI_AUTHENTICATED נורה בכל ניווט
   returnedToDashboard.add(tabId);
-  try{
-    const tab=await chrome.tabs.get(tabId),win=await chrome.windows.get(tab.windowId,{populate:true});
-    if((win.tabs||[]).length>1)await chrome.windows.create({tabId,focused:false});
-  }catch{}
-  // הלשונית חייבת להיות הפעילה *בחלון שלה* כדי להישאר visible ולרנדר. בחלון נפרד היא
-  // ממילא היחידה — זה מבטח את המקרה שההעברה נכשלה. אינו מושך מיקוד לחלון.
-  try{await chrome.tabs.update(tabId,{active:true})}catch{}
-  try{
-    const [dash]=await chrome.tabs.query({url:chrome.runtime.getURL('dashboard.html')+'*'});
-    if(dash){await chrome.tabs.update(dash.id,{active:true});await chrome.windows.update(dash.windowId,{focused:true})}
-    else await chrome.runtime.openOptionsPage();
-  }catch{}
+  const findDash=async()=>{try{const [d]=await chrome.tabs.query({url:chrome.runtime.getURL('dashboard.html')+'*'});return d||null}catch{return null}};
+  let dash=await findDash();
+  if(!dash){try{await chrome.runtime.openOptionsPage()}catch{}await delay(500);dash=await findDash()}
+  if(!dash)return;
+  // מחזיר את לשונית הבנק לחלון של הדשבורד, אם סבב קודם הוציא אותה לחלון נפרד.
+  try{const tab=await chrome.tabs.get(tabId);if(tab.windowId!==dash.windowId)await chrome.tabs.move(tabId,{windowId:dash.windowId,index:-1})}catch{}
+  // הדשבורד קדימה. לשונית הבנק **אינה** מופעלת — זה מה שמשאיר את התוסף בחזית.
+  try{await chrome.tabs.update(dash.id,{active:true});await chrome.windows.update(dash.windowId,{focused:true})}catch{}
 }
+
+// התקדמות הסנכרון: שלב מתוך סך, וזמן ההתחלה — הדשבורד גוזר מהם אחוז והערכת זמן.
+let progressState=null;
+async function beginProgress(total){progressState={done:0,total,startedAt:Date.now()};await chrome.storage.local.set({syncProgress:progressState})}
+async function syncStep(status){if(progressState)progressState={...progressState,done:Math.min(progressState.done+1,progressState.total)};await chrome.storage.local.set({syncStatus:status,syncProgress:progressState})}
+async function endProgress(){progressState=null;await chrome.storage.local.set({syncProgress:null})}
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(/^[A-Z_]*AUTHENTICATED$/.test(m?.type||'')&&sender.tab?.id)returnToDashboard(sender.tab.id);
   if(m?.type==='START_AUTO_SYNC'){start(m.scope||'business',Boolean(m.force)).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
@@ -389,7 +395,7 @@ async function syncSelected(selectionKeys){
     const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);const all=saved.accounts.filter(a=>!syncedSources.includes(a.source||'business'));for(const source of syncedSources)all.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
     const marked=markNewTransactions(saved.accounts,all,syncedSources),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
     const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: ${marked.length} חשבונות`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
-  }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה: ${e.message}`});throw e}finally{running=false}
+  }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress()}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
 function transactionSyncKey(t){return JSON.stringify([t?.date||'',t?.action||'',t?.details||'',t?.reference||'',Number(t?.debit)||0,Number(t?.credit)||0,t?.balance==null?'':Number(t.balance)])}
@@ -404,12 +410,12 @@ function markNewTransactions(previous,next,syncedSources){
   })
 }
 async function syncSource(source,keys){
-  const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);
-  let owner='';if(source==='private'){await chrome.storage.local.set({syncStatus:`${cfg.label}: מזהה את בעל החשבון`});await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
-  await chrome.storage.local.set({syncStatus:`${cfg.label}: מסנכרן תנועות`});await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
-  await chrome.storage.local.set({syncStatus:`${cfg.label}: מסנכרן ריכוז יתרות`});await prepareRoute(tab.id,route(source,'current-account/balances'),'/current-account/balances');const summaries=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_BALANCE_SUMMARIES',keys});if(!summaries?.ok)throw Error(summaries?.error||'סנכרון ריכוז היתרות נכשל');
-  await chrome.storage.local.set({syncStatus:`${cfg.label}: קורא הלוואות`});await prepareRoute(tab.id,route(source,'credit-and-mortgage'),'/credit-and-mortgage');const loans=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'loans',keys});if(!loans?.ok)throw Error(loans?.error||'קריאת ההלוואות נכשלה');
-  await chrome.storage.local.set({syncStatus:`${cfg.label}: קורא כרטיסי אשראי`});await prepareRoute(tab.id,route(source,'plastic-cards/current-debit'),'/plastic-cards/current-debit');const cards=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'cards',keys});if(!cards?.ok)throw Error(cards?.error||'קריאת הכרטיסים נכשלה');
+  const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);
+  let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`);await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
+  await syncStep(`${cfg.label}: מסנכרן תנועות`);await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});if(!tx?.ok)throw Error(tx?.error||'סנכרון התנועות נכשל');
+  await syncStep(`${cfg.label}: מסנכרן ריכוז יתרות`);await prepareRoute(tab.id,route(source,'current-account/balances'),'/current-account/balances');const summaries=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_BALANCE_SUMMARIES',keys});if(!summaries?.ok)throw Error(summaries?.error||'סנכרון ריכוז היתרות נכשל');
+  await syncStep(`${cfg.label}: קורא הלוואות`);await prepareRoute(tab.id,route(source,'credit-and-mortgage'),'/credit-and-mortgage');const loans=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'loans',keys});if(!loans?.ok)throw Error(loans?.error||'קריאת ההלוואות נכשלה');
+  await syncStep(`${cfg.label}: קורא כרטיסי אשראי`);await prepareRoute(tab.id,route(source,'plastic-cards/current-debit'),'/plastic-cards/current-debit');const cards=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_PRODUCT_DETAILS',kind:'cards',keys});if(!cards?.ok)throw Error(cards?.error||'קריאת הכרטיסים נכשלה');
   const byKey=new Map((summaries.accounts||[]).map(a=>[a.key,a]));for(const a of loans.accounts||[])byKey.set(a.key,{...(byKey.get(a.key)||{}),...a});for(const a of cards.accounts||[])byKey.set(a.key,{...(byKey.get(a.key)||{}),...a});const now=new Date().toISOString();
   return tx.accounts.map(a=>({...a,...(byKey.get(`${a.branch}-${a.accountNumber}`)||{}),nickname:owner||a.nickname,owner:owner||a.nickname,source,sourceLabel:cfg.label,selectionKey:`${source}|${a.branch}-${a.accountNumber}`,id:`${source}-${a.branch}-${a.accountNumber}`,lastSync:now,status:'מסונכרן'}));
 }

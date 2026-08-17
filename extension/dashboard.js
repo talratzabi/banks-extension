@@ -37,7 +37,7 @@ chrome.storage.onChanged.addListener(()=>{clearTimeout(loadTimer);loadTimer=setT
 async function load(){
   const epoch=++loadEpoch;
   document.querySelector('.sources')?.classList.add('hidden');
-  const data=await chrome.storage.local.get({accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע'});
+  const data=await chrome.storage.local.get({accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null});
   if(epoch!==loadEpoch)return;
   accounts=data.accounts;discovered=data.discoveredAccounts;syncScope=data.syncScope;accountFilter=data.accountFilter;accountKinds=data.accountKinds;privateOwnerName=data.privateOwnerName;hideMortgages=Boolean(data.hideMortgages);isracardUnassigned=data.isracardUnassigned||[];calUnassigned=data.calUnassigned||[];maxUnassigned=data.maxUnassigned||[];isracardLastCards=data.isracardLastCards||[];calLastCards=data.calLastCards||[];maxLastCards=data.maxLastCards||[];selectedKeys=(Array.isArray(data.selectedAccountKeys)?data.selectedAccountKeys:accounts.map(a=>a.selectionKey||a.id)).map(k=>String(k).includes('|')?k:`business|${k}`);
   // תיקון רשומות בינלאומי שכבר נשמרו לפני אימות לוח הסילוקין. הערכים נמדדו
@@ -47,6 +47,7 @@ async function load(){
   for(const bank of BANK_BUTTONS)if(bank.fibi&&data.fibiConnectionNames[bank.id])bank.name=`הבינלאומי — ${data.fibiConnectionNames[bank.id]}`;
   if(!Array.isArray(data.selectedAccountKeys))await chrome.storage.local.set({selectedAccountKeys:selectedKeys});
   renderSyncStatus(data.syncStatus);
+  renderSyncProgress(data.syncProgress,data.syncStatus);
   $('#syncAll').textContent='סנכרון לפי הבחירה האחרונה';
   const totalLabel=$('#total')?.previousElementSibling;if(totalLabel)totalLabel.textContent='יתרה כוללת בכל החשבונות';
   const selectable=discovered.filter(a=>a.branch&&a.accountNumber),fresh=selectable.filter(a=>!selectedKeys.includes(a.key));
@@ -228,3 +229,53 @@ $('#accounts').onchange=async e=>{const select=e.target.closest('.account-kind')
 $('#confirmSelection').onclick=async()=>{document.querySelectorAll('.discovered-kind').forEach(s=>accountKinds[s.dataset.key]=s.value);const keys=[...document.querySelectorAll('#discoveredAccounts input:checked')].map(x=>x.value);if(!keys.length)return toast('יש לבחור לפחות חשבון אחד');await chrome.storage.local.set({selectedAccountKeys:keys,accountKinds});const button=$('#confirmSelection');button.disabled=true;button.textContent='מסנכרן את החשבונות שנבחרו…';const response=await chrome.runtime.sendMessage({type:'SYNC_SELECTED',keys});button.disabled=false;button.textContent='אישור וסנכרון המסומנים';if(!response?.ok)return toast(response?.error||'הסנכרון נכשל');toast(`${response.count} חשבונות סונכרנו`);await load()};
 function toast(text){const el=$('#toast');el.textContent=text;el.classList.remove('hidden');setTimeout(()=>el.classList.add('hidden'),4500)}
 function renderLoansTable(){const shown=accounts.filter(a=>accountFilter==='both'||kindOf(a)===accountFilter),allRows=[],seen=new Set();for(const a of shown){const ownerKey=`${a.branch}-${a.accountNumber}`;for(const l of a.loans||[]){if(!l||(Number(l.balance)<=0&&Number(l.nextPayment)<=0)||l.accountKey&&l.accountKey!==ownerKey)continue;const fingerprint=[a.source,ownerKey,l.type,l.originalPrincipal,l.balance,l.endDate,l.nextPayment,l.nextPaymentDate,l.interest].join('|');if(seen.has(fingerprint))continue;seen.add(fingerprint);allRows.push({account:a,loan:l})}}allRows.sort((x,y)=>String(x.account.sourceLabel).localeCompare(String(y.account.sourceLabel),'he')||String(x.account.branch).localeCompare(String(y.account.branch),'he')||String(x.account.accountNumber).localeCompare(String(y.account.accountNumber),'he')||Number(y.loan.balance||0)-Number(x.loan.balance||0));const box=$('#allLoans'),hasMortgages=allRows.some(r=>r.loan.isMortgage),rows=hideMortgages?allRows.filter(r=>!r.loan.isMortgage):allRows,toggle=hasMortgages?`<button type="button" id="toggleMortgages" class="button secondary">${hideMortgages?'החזר משכנתאות':'הסר משכנתאות'}</button>`:'';if(!rows.length){box.innerHTML=`${toggle}<div class="empty">לא נמצאו הלוואות בחשבונות המוצגים.</div>`;return}const short=v=>{const s=String(v||'').replace(/\s+/g,' ').trim();return s&&s.length<=60?s:'—'},remaining=l=>{const m=String(l.installments||'').match(/(\d+)\s*\/\s*(\d+)/);if(m){const paid=Number(m[1]),total=Number(m[2]);return total>=paid?`${total-paid}/${total}`:'—'}const left=Number(l.remainingInstallments),total=Number(l.totalInstallments);return Number.isFinite(left)&&left>=0&&Number.isFinite(total)&&total>0?`${left}/${total}`:'—'};const monthly=rows.reduce((sum,row)=>sum+(Number(row.loan.nextPayment)||0),0);box.innerHTML=`${toggle}<div class="loans-table-wrap"><table class="loans-table"><thead><tr><th>בנק וחשבון</th><th>יתרה</th><th>תשלומים שנותרו</th><th>תשלום קרוב</th><th>תשלום סופי</th><th>ריבית</th><th>החזר קרוב</th></tr></thead><tbody>${rows.map(({account:a,loan:l})=>`<tr><td><b>${esc(a.sourceLabel||'בנק')}</b> · ${esc(a.branch)}-${esc(a.accountNumber)} ${l.isMortgage?'<span class="mortgage-tag">משכנתא</span>':''}</td><td>${l.balance==null?'—':money(l.balance)}</td><td dir="ltr">${esc(remaining(l))}</td><td>${esc(short(l.nextPaymentDate))}</td><td>${esc(short(l.endDate))}</td><td>${esc(short(l.interest))}</td><td><b>${l.nextPayment==null?'—':money(l.nextPayment)}</b></td></tr>`).join('')}</tbody></table></div><div class="loans-total"><span>סה״כ החזר חודשי</span><strong>${money(monthly)}</strong></div>`}
+
+
+// ── טבעת התקדמות הסנכרון ─────────────────────────────────────────────────
+// האחוז מגיע מ-syncProgress שנכתב ב-background (שלב מתוך סך). הערכת הזמן נגזרת
+// מקצב השלבים בפועל — זמן שחלף חלקי שלבים שהושלמו — ולא ממספר קבוע כלשהו.
+// אין נתוני שלבים (בנק שטרם חוברו לו) → טבעת מסתובבת בלי אחוז, במקום מספר מומצא.
+var progressTicker=null,lastProgress=null;
+function etaText(p){
+  if(!p||!p.done||!p.startedAt)return '';
+  const elapsed=Date.now()-p.startedAt;
+  if(elapsed<4000)return 'מחשב זמן…';
+  const remain=Math.round((elapsed/p.done)*(p.total-p.done)/1000);
+  if(remain<=0)return 'עוד רגע';
+  if(remain<60)return `נותרו כ-${remain} שנ׳`;
+  return `נותרו כ-${Math.floor(remain/60)}:${String(remain%60).padStart(2,'0')} דק׳`;
+}
+function progressLine(p){return `שלב ${p.done} מתוך ${p.total} · ${etaText(p)}`}
+function renderSyncProgress(p,status=''){
+  const banner=document.getElementById('syncBanner');
+  if(!banner)return;
+  document.getElementById('syncRing')?.remove();
+  lastProgress=p&&p.total?p:null;
+  const busy=/קורא|מסנכרן|מזהה|מחפש|בודק|טוען|מתבצע|שומר|שולף|מוריד|פותח|מעדכן/.test(String(status||''));
+  if(!lastProgress&&!busy){if(progressTicker){clearInterval(progressTicker);progressTicker=null}return}
+  const C=163.36,pct=lastProgress?Math.round(lastProgress.done/lastProgress.total*100):null;
+  const wrap=document.createElement('div');
+  wrap.id='syncRing';wrap.className='sync-ring';
+  wrap.innerHTML=`<svg viewBox="0 0 60 60" class="${pct==null?'spin':''}" aria-hidden="true">`+
+    `<circle cx="30" cy="30" r="26" class="ring-track"></circle>`+
+    `<circle cx="30" cy="30" r="26" class="ring-fill" stroke-dasharray="${pct==null?`${C*0.25} ${C}`:C}" stroke-dashoffset="${pct==null?0:C*(1-pct/100)}"></circle>`+
+    `</svg><div class="sync-ring-text"><strong>${pct==null?'מסתנכרן':pct+'%'}</strong>`+
+    `<small id="syncEta">${lastProgress?progressLine(lastProgress):'בתהליך'}</small></div>`;
+  banner.appendChild(wrap);
+  if(progressTicker)clearInterval(progressTicker);
+  progressTicker=setInterval(()=>{
+    const el=document.getElementById('syncEta');
+    if(!el||!lastProgress){clearInterval(progressTicker);progressTicker=null;return}
+    el.textContent=progressLine(lastProgress);
+  },1000);
+}
+const syncRingStyles=document.createElement('style');
+syncRingStyles.textContent='.sync-ring{display:flex;align-items:center;gap:12px;margin-top:10px}'+
+'.sync-ring svg{width:56px;height:56px;transform:rotate(-90deg);flex:0 0 auto}'+
+'.sync-ring svg.spin{animation:syncSpin 1.1s linear infinite}'+
+'@keyframes syncSpin{to{transform:rotate(270deg)}}'+
+'.sync-ring .ring-track{fill:none;stroke:currentColor;opacity:.16;stroke-width:6}'+
+'.sync-ring .ring-fill{fill:none;stroke:currentColor;stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset .5s ease}'+
+'.sync-ring-text strong{display:block;font-size:1.15rem;font-weight:800;line-height:1.1}'+
+'.sync-ring-text small{opacity:.75}';
+document.head.appendChild(syncRingStyles);
