@@ -458,6 +458,11 @@ async function prepareLeumiRoute(tabId,url){const path=new URL(url).pathname;
 // ומגיע למעטפת ריקה; אם התפריט נכשל — נופלים למסלול הישן כמו שהיה.
 // ⚠ חובה withTimeout: goRoute לוחץ בתפריט, ה-SPA מנווט וה-content script מת
 // באמצע — ואז התשובה לא מגיעה לעולם והסנכרון תלוי בלי להיכשל.
+// ⚠ רענון התוסף (↻) הורג את ה-content script בלשוניות שכבר פתוחות.
+// הלשונית נשארת מחוברת אבל LEUMI_GO לא מגיע לאף אחד, ולפני 0.57.2
+// התוצאה הייתה כישלון. מזריקים מחדש — בלי לנווט ובלי להרוס את הסשן.
+try{await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),5000,'בדיקת סקריפט לאומי')}
+catch{try{await chrome.scripting.executeScript({target:{tabId},files:['leumi-content.js']});await delay(400)}catch{}}
 try{const go=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_GO',path}),30000,'ניווט בתפריט לאומי');
 if(go?.ok){const ping=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),8000,'בדיקת דף לאומי');
 if(ping?.ok)return}}catch{}
