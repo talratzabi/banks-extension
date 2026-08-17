@@ -505,16 +505,19 @@ const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)bal
 // שמירת הצילומים לא מסכנת את הסנכרון: אם היא נכשלת, היתרות והתנועות כבר בידינו.
 let saved=0;try{saved=await harvestLeumiCheques(tabId,result,txUrl)}catch(e){await chrome.storage.local.set({chequeError:e.message})}
 await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}`});return result}
-async function harvestLeumiCheques(tabId,accounts,txUrl){const have=await chequeKeys();let saved=0,routed=false;
+async function harvestLeumiCheques(tabId,accounts,txUrl){const have=await chequeKeys();let saved=0,routed=false,asked=0,failed=0,why='';
 for(const a of accounts){const wanted=(a.transactions||[]).filter(t=>t.cheque&&t.reference&&!have.has(chequeId(a.selectionKey,t.reference))).map(t=>({date:t.date,reference:t.reference}));
 // ניווט אחד לכל הקציר; מעבר בין חשבונות נעשה בתוך הדף ולא בטעינה מחדש.
-if(!wanted.length)continue;if(!routed){await prepareLeumiRoute(tabId,txUrl);routed=true}
+if(!wanted.length)continue;asked+=wanted.length;
+if(!routed){try{await prepareLeumiRoute(tabId,txUrl);routed=true}catch(e){why=`המעבר לדף התנועות נכשל: ${e.message}`;break}}
 // באצוות, כדי שכשל באמצע לא יזרוק את מה שכבר ירד
 for(let i=0;i<wanted.length;i+=6){const batch=wanted.slice(i,i+6);let r=null;
 await chrome.storage.local.set({syncStatus:`לאומי: שומר צילומי שיקים מקומית ${Math.min(i+batch.length,wanted.length)}/${wanted.length}`});
-try{r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_CHEQUE_IMAGES',wanted:batch,key:a.key}),120000,'צילומי שיקים בלאומי')}catch{}
-if(!r?.ok)continue;
+try{r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_CHEQUE_IMAGES',wanted:batch,key:a.key}),120000,'צילומי שיקים בלאומי')}catch(e){why=why||e.message}
+if(!r?.ok){failed+=batch.length;why=why||r?.error||'הדף לא החזיר צילומים';continue}
 for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue;await chequePut({id:chequeId(a.selectionKey,reference),selectionKey:a.selectionKey,reference,front:img.front,back:img.back||'',savedAt:new Date().toISOString()});saved++}}}
+await chrome.storage.local.set({leumiChequeReport:{asked,saved,failed,why,at:new Date().toISOString()}});
+if(asked&&!saved)await chrome.storage.local.set({syncStatus:`לאומי: לא נשמר אף צילום שיק מתוך ${asked} מבוקשים — ${why||'ללא סיבה'}`});
 return saved}
 async function openLeumiCheque(m){const tabs=await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']});if(!tabs[0])throw Error('יש להתחבר ללאומי כדי להציג צילום שיק');await chrome.tabs.update(tabs[0].id,{url:'https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/checks/cleared-checks/',active:true});await delay(1600);const r=await chrome.tabs.sendMessage(tabs[0].id,{type:'LEUMI_OPEN_CHEQUE',branch:m.branch,accountNumber:m.accountNumber,date:m.date,amount:m.amount});if(!r?.ok)throw Error(r?.error||'צילום השיק לא נמצא');return{ok:true}}
 
