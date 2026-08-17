@@ -50,6 +50,7 @@ async function load(){
   renderSyncStatus(data.syncStatus);
   renderSyncProgress(data.syncProgress,data.syncStatus);
   await rememberBankStatus(data.syncStatus,data.statusBySource);
+  {const b=$('#syncAll');if(b&&!b.disabled)b.textContent=syncAllLabel();}
   $('#syncAll').textContent='סנכרון לפי הבחירה האחרונה';
   const totalLabel=$('#total')?.previousElementSibling;if(totalLabel)totalLabel.textContent='יתרה כוללת בכל החשבונות';
   const selectable=discovered.filter(a=>a.branch&&a.accountNumber),fresh=selectable.filter(a=>!selectedKeys.includes(a.key));
@@ -60,7 +61,7 @@ async function load(){
   setActiveView(discovered.length&&activeView!=='selection'?'selection':activeView);
 }
 function renderScope(){const syncToggleState=()=>chrome.storage.local.get({autoSyncOnLogin:true}).then(x=>{for(const c of document.querySelectorAll('[id="autoSyncOnLogin"]'))c.checked=x.autoSyncOnLogin});let panel=$('#scopePanel');if(!panel){panel=document.createElement('section');panel.id='scopePanel';panel.className='panel scope-panel';document.querySelector('.sources')?.before(panel)}panel.onchange=async e=>{const c=e.target.closest('#autoSyncOnLogin');if(c)await chrome.storage.local.set({autoSyncOnLogin:c.checked})};
-panel.innerHTML=`<h2>הבנקים וכרטיסי האשראי שלי</h2><p>לחץ על הגוף שברצונך לחבר או לסנכרן.</p><label class="auto-sync"><input type="checkbox" id="autoSyncOnLogin"> <span>סנכרון אוטומטי בכל כניסה לבנק<small>בכל התחברות חדשה מעדכן לבד את החשבונות שכבר בחרת</small></span></label><div class="bank-grid">${BANK_BUTTONS.map(b=>`<button class="bank-button ${b.ready?'ready':''}" data-bank="${b.id}"><img src="${b.logo}" alt=""><span><b>${b.name}</b><small>${esc(bankLine(b))}</small></span></button>`).join('')}</div><h3>אילו חשבונות להציג?</h3><div class="scope-choice"><label><input type="radio" name="accountFilter" value="business" ${accountFilter==='business'?'checked':''}> עסקיים</label><label><input type="radio" name="accountFilter" value="private" ${accountFilter==='private'?'checked':''}> פרטיים</label><label><input type="radio" name="accountFilter" value="both" ${accountFilter==='both'?'checked':''}> כולם</label></div>`;panel.onclick=async e=>{const button=e.target.closest('.bank-button');if(!button)return;const bank=BANK_BUTTONS.find(b=>b.id===button.dataset.bank);if(bank.fibi)return startFibi(bank.id,button);if(bank.leumi)return startLeumi(button);if(bank.discountBusiness)return startDiscountBusiness(button);if(bank.discountPrivate)return startDiscountPrivate(button);if(bank.mizrahi)return startMizrahi(button);if(bank.yahav)return startYahav(button);if(bank.isracard)return startIsracard(button);if(bank.cal)return startCal(button);if(bank.max)return startMax(button);if(bank.ready)return startChosenSync(bank.id,button);await chrome.runtime.sendMessage({type:'OPEN_EXTERNAL_BANK',url:bank.url});toast(`${bank.name}: האתר הרשמי נפתח; חיבור הסנכרון יתווסף בשלב הבא`)};panel.onchange=async e=>{if(e.target.name==='accountFilter'){accountFilter=e.target.value;await chrome.storage.local.set({accountFilter});render()}}
+panel.innerHTML=`<h2>הבנקים וכרטיסי האשראי שלי</h2><p>לחיצה על בנק או חברת אשראי תפתח את מסך הכניסה שלו. אחרי שתתחבר, הסנכרון ירוץ ברקע והתוסף יישאר לפניך.</p><label class="auto-sync"><input type="checkbox" id="autoSyncOnLogin"> <span>סנכרון אוטומטי בכל כניסה לבנק<small>בכל התחברות חדשה מעדכן לבד את החשבונות שכבר בחרת</small></span></label><div class="bank-grid">${BANK_BUTTONS.map(b=>`<button class="bank-button ${b.ready?'ready':''}" data-bank="${b.id}"><img src="${b.logo}" alt=""><span><b>${b.name}</b><small>${esc(bankLine(b))}</small></span></button>`).join('')}</div><h3>אילו חשבונות להציג?</h3><div class="scope-choice"><label><input type="radio" name="accountFilter" value="business" ${accountFilter==='business'?'checked':''}> עסקיים</label><label><input type="radio" name="accountFilter" value="private" ${accountFilter==='private'?'checked':''}> פרטיים</label><label><input type="radio" name="accountFilter" value="both" ${accountFilter==='both'?'checked':''}> כולם</label></div>`;panel.onclick=async e=>{const button=e.target.closest('.bank-button');if(!button)return;const bank=BANK_BUTTONS.find(b=>b.id===button.dataset.bank);if(bank.fibi)return startFibi(bank.id,button);if(bank.leumi)return startLeumi(button);if(bank.discountBusiness)return startDiscountBusiness(button);if(bank.discountPrivate)return startDiscountPrivate(button);if(bank.mizrahi)return startMizrahi(button);if(bank.yahav)return startYahav(button);if(bank.isracard)return startIsracard(button);if(bank.cal)return startCal(button);if(bank.max)return startMax(button);if(bank.ready)return startChosenSync(bank.id,button);await chrome.runtime.sendMessage({type:'OPEN_EXTERNAL_BANK',url:bank.url});toast(`${bank.name}: האתר הרשמי נפתח; חיבור הסנכרון יתווסף בשלב הבא`)};panel.onchange=async e=>{if(e.target.name==='accountFilter'){accountFilter=e.target.value;await chrome.storage.local.set({accountFilter});render()}}
 syncToggleState();}
 function cardSrc(c){const s=String(c?.issuer||'');return /MAX|מקס/i.test(s)?'max':/כאל|CAL/i.test(s)?'cal':'isracard'}
 function assignSelect(c){return`<select class="isracard-account" data-suffix="${esc(c.suffix)}" data-src="${esc(cardSrc(c))}"><option value="">ממתין לשיוך — בחר חשבון</option>${accounts.map(a=>`<option value="${esc(a.id)}">${esc(a.sourceLabel)} · ${esc(a.branch)}-${esc(a.accountNumber)}${a.nickname||a.owner?` · ${esc(a.nickname||a.owner)}`:''}</option>`).join('')}</select>`}
@@ -313,7 +314,16 @@ function bankLine(b){
   if(diag)return diag;   // אבחון גובר: זו השורה שהמשתמש מצלם ושולח
   const s=statusBySource[b.id];
   if(s&&s.text){const base=bankBase(b.name);const t=s.text.split(base+':').pop().trim();return t||s.text}
-  return b.ready?'סנכרון פעיל':'ממתין לחיבור';
+  // „סנכרון פעיל" נקרא כאילו סנכרון רץ ברגע זה, והכוונה הייתה „נתמך". המלל אומר
+  // עכשיו מה תעשה הלחיצה, ולא מה מצב המערכת.
+  return b.ready?'לחיצה תפתח מסך כניסה':'טרם נתמך';
+}
+// ⚠ הכפתור הגדול נקרא „סנכרון הכול" אך מסנכרן **רק פועלים** — `chosenSources`
+// מחזיר business/private בלבד. המלל אומר עכשיו את מה שקורה בפועל.
+function syncAllLabel(){
+  return syncScope==='both'?'התחברות וסנכרון — פועלים עסקי ופרטי'
+    :syncScope==='private'?'התחברות וסנכרון — פועלים פרטי'
+    :'התחברות וסנכרון — פועלים עסקי';
 }
 async function rememberBankStatus(value,stored){
   const id=attributeStatus(value);
