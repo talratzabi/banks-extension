@@ -453,7 +453,12 @@ await chrome.storage.local.set({pendingLeumi:false,leumiAttempts:0,discoveredAcc
 const LEUMI_TX_URL='https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/nis-accounts/nis-transactions/',LEUMI_LOAN_URL='https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/credits/loans/';
 // ⚠ LEUMI_PING עונה מכל דף ב-hb2, כולל gate-keeper. בלי בדיקת הנתיב הקוד המשיך לדף השגוי
 // ודיווח "לא נמצאה רשימת החשבונות" במקום פשוט לנווט שוב.
-async function prepareLeumiRoute(tabId,url){const path=new URL(url).pathname;await chrome.tabs.update(tabId,{url,active:true});const started=Date.now();let last='העמוד עדיין נטען',renav=0;let seen='';
+async function prepareLeumiRoute(tabId,url){const path=new URL(url).pathname;
+// ניווט מתוך האפליקציה קודם. ניווט לפי כתובת מאבד את הקשר הסשן
+// ומגיע למעטפת ריקה; אם התפריט נכשל — נופלים למסלול הישן כמו שהיה.
+try{const go=await chrome.tabs.sendMessage(tabId,{type:'LEUMI_GO',path});
+if(go?.ok){const ping=await chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'});if(ping?.ok)return}}catch{}
+await chrome.tabs.update(tabId,{url,active:true});const started=Date.now();let last='העמוד עדיין נטען',renav=0;let seen='';
 // ⚠ אין להתנות על tab.status==='complete'. באתר של לאומי בקשה תלויה משאירה את הלשונית
 // ב-loading לצמיתות, והתנאי הזה חסם את כל התהליך גם כשהדף עצמו שמיש לחלוטין.
 while(Date.now()-started<60000){await delay(500);try{const tab=await chrome.tabs.get(tabId);seen=`${tab.status} · ${tab.url}`;

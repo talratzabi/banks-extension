@@ -3,7 +3,28 @@ if(window.__leumiSyncLoaded)return;window.__leumiSyncLoaded=true;
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const txt=el=>{if(!el)return'';let visible=el.innerText||el.textContent||'';const isAccountArrow=el.matches?.('main button,button[aria-expanded],button[aria-haspopup]')&&!/\d/.test(visible);if(isAccountArrow)visible+=` ${el.parentElement?.innerText||''} ${el.parentElement?.parentElement?.innerText||''}`;const meta=['aria-label','title','data-account','data-account-number','data-value'].map(name=>el.getAttribute?.(name)||'').filter(Boolean).join(' ');return`${visible} ${meta}`.replace(/\s+/g,' ').trim()};
 const money=value=>{const s=String(value||'').replace(/[−–]/g,'-');if(!/\d/.test(s))return null;const neg=s.includes('-'),n=Number(s.replace(/[,₪\s-]/g,'').replace(/[^0-9.]/g,''));return Number.isFinite(n)?(neg?-n:n):null};
-chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'').then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
+// ⚠ נמדד 17.08.2026: ניווט לפי כתובת נוחת על מעטפת ריקה — אותו דף נתן
+// 0 בוררים ו-0 שורות, מול 2 ו-22 כשמגיעים אליו מהתפריט. בלי בורר
+// בדף, syncSelected מדלג על selectAccount לגמרי וקורא את החשבון הלא נכון.
+const MENU_ROUTES=[
+ {path:'/nis-accounts/nis-transactions',parent:'עובר ושב שקלים',child:'תנועות בחשבון שקלים'},
+ {path:'/credits/loans',parent:'אשראי',child:'הלוואות'},
+ {path:'/checks/cleared-checks',parent:'שיקים',child:'שיקים מזומנים'}];
+const menuItem=name=>[...document.querySelectorAll('a,button,[role="link"],[role="menuitem"]')].find(el=>normalized(txt(el))===name);
+async function goRoute(path){
+const route=MENU_ROUTES.find(r=>String(path).includes(r.path));
+if(!route)return{ok:false,error:`אין מסלול תפריט ל-${path}`};
+if(location.pathname.includes(route.path)&&accountTabs().length)return{ok:true,already:true};
+let child=menuItem(route.child);
+if(!child){const parent=menuItem(route.parent);
+if(!parent)return{ok:false,error:`הפריט ${route.parent} לא נמצא בתפריט`};
+realClick(parent);
+for(let i=0;i<14&&!child;i++){await wait(300);child=menuItem(route.child)}}
+if(!child)return{ok:false,error:`הפריט ${route.child} לא נמצא בתפריט`};
+realClick(child);
+for(let i=0;i<50;i++){await wait(300);if(location.pathname.includes(route.path))return{ok:true}}
+return{ok:false,error:`הניווט ל-${route.child} לא הגיע ל-${route.path}`}}
+chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'').then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
 // הרחבת שורת התנועה מזריקה את צילום השיק כ-data:image ישירות ל-DOM — קדמי ואחורי.
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
