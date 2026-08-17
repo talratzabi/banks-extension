@@ -231,10 +231,36 @@ function txFingerprint(){
     .map(h=>(h.innerText||'').replace(/\s+/g,' ').trim()).filter(Boolean).slice(0,8);
   return `טבלאות:${n('table')} · grid:${n('[role="grid"]')} · role=row:${n('[role="row"]')} · tr:${n('tr')} · כותרות: ${heads.join(' | ')||'—'}`;
 }
+// קורא שני, לרשת שאינה <table>. נכתב 17.08.2026 אחרי שפועלים פרטי החזיר אפס תנועות
+// בעוד הדף מציג אותן. הכותרות נמדדו מצילום של הדף: תאריך | הפעולה | חובה | זכות | יתרה בש"ח.
+// ⚠ מיפוי לפי טקסט הכותרת ולא לפי היסט קבוע — הדפוס שכבר מוכח בלאומי. היסט קבוע
+// נשבר ברגע שהבנק מוסיף עמודת אייקון, וכאן יש כאלה.
+function gridTransactions(){
+  const t=s=>String(s||'').replace(/[‎‏‪-‮]/g,'').replace(/\s+/g,' ').trim();
+  const rows=[...document.querySelectorAll('[role="row"]')];
+  const headRow=rows.find(r=>r.querySelector('[role="columnheader"]'));
+  if(!headRow)return [];
+  const heads=[...headRow.querySelectorAll('[role="columnheader"]')].map(h=>t(h.innerText));
+  const at=re=>heads.findIndex(h=>re.test(h));
+  const iDate=at(/תאריך/),iAction=at(/פעולה|תנועה|תיאור/),iDebit=at(/חובה/),iCredit=at(/זכות/),iBal=at(/יתרה/);
+  if(iDate<0||iBal<0)return [];
+  const out=[];
+  for(const row of rows){
+    if(row.querySelector('[role="columnheader"]'))continue;
+    const cells=[...row.querySelectorAll('[role="cell"],[role="gridcell"]')].map(c=>t(c.innerText));
+    if(!cells.length)continue;
+    const date=(cells[iDate]||'').match(/\d{1,2}\/\d{1,2}\/\d{2,4}/);   // „ו׳ 14/08/26" → 14/08/26
+    if(!date)continue;
+    out.push({date:date[0],action:iAction<0?'':cells[iAction]||'',details:'',reference:'',
+      debit:iDebit<0?null:parseMoney(cells[iDebit]),credit:iCredit<0?null:parseMoney(cells[iCredit]),
+      balance:parseMoney(cells[iBal])});
+  }
+  return out.slice(0,100);
+}
 function extractTransactions() {
   const table = [...document.querySelectorAll('table')].find(t => /תאריך/.test(t.innerText) && /(חובה|זכות)/.test(t.innerText));
-  if (!table) return [];
-  return [...table.querySelectorAll('tbody tr, [role="rowgroup"] [role="row"]')].map(row => {
+  if (!table) return gridTransactions();
+  const fromTable = [...table.querySelectorAll('tbody tr, [role="rowgroup"] [role="row"]')].map(row => {
     const cells = [...row.querySelectorAll('td,[role="cell"]')].map(cell => cell.innerText.replace(/\s+/g, ' ').trim());
     if (cells.length < 5 || !/\d{2}\/\d{2}\/\d{2,4}/.test(cells[0])) return null;
     if(cells.length<7)return{date:(cells[0].match(/\d{2}\/\d{2}\/\d{2,4}/)||[])[0]||cells[0],action:cells[1]||'',details:'',reference:'',debit:parseMoney(cells[2]),credit:parseMoney(cells[3]),balance:parseMoney(cells[4])};
@@ -248,6 +274,8 @@ function extractTransactions() {
       balance: parseMoney(cells[cells.length - 1])
     };
   }).filter(Boolean).slice(0, 100);
+  // טבלה שנמצאה אך לא הניבה שורות — עדיין ייתכן שהנתונים ברשת role שלצידה.
+  return fromTable.length ? fromTable : gridTransactions();
 }
 
 function findByTextOrAria(text, selector) {
