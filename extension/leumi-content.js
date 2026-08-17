@@ -67,12 +67,21 @@ el.dispatchEvent(new MouseEvent('mouseup',{...o,buttons:0}));el.dispatchEvent(ne
 try{el.click()}catch{}}
 // שורות הבורר מזוהות לפי התוכן שלהן עצמן — מספר חשבון וסכום באותו אלמנט — ולא לפי role,
 // כי בלאומי הן div-ים רגילים. נבחר האלמנט הקטן ביותר בכל שרשרת כדי לא לתפוס עטיפות.
+const OPTION_ROLE='[role="option"],[role="menuitem"],[role="menuitemradio"],[role="radio"]';
 function optionPool(){const best=new Map();
-for(const el of document.querySelectorAll('[role="option"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="listitem"],li,tr,div,button,a')){
+for(const el of document.querySelectorAll(OPTION_ROLE+',[role="listitem"],li,tr,div,button,a')){
 if(inDataGrid(el))continue;
 const own=ownText(el);if(!own||own.length>200)continue;
-const a=parseAccount(own);if(!a||!/-?[\d,]+\.\d{2}/.test(own))continue;
-const prev=best.get(a.key);if(!prev||ownText(prev).length>own.length)best.set(a.key,el)}
+const a=parseAccount(own);if(!a)continue;
+const isOpt=el.matches(OPTION_ROLE);
+// ⚠ נמדד 17.08.2026: הבורר של לאומי מציג שם ומספר חשבון בלבד, **בלי יתרה**.
+// דרישת הסכום דחתה את כל שש האפשרויות והזיהוי נפל לחשבון אחד.
+// סכום נדרש עכשיו מאלמנט כללי בלבד, כמסנן רעש.
+if(!isOpt&&!/-?[\d,]+\.\d{2}/.test(own))continue;
+const prev=best.get(a.key);
+// אפשרות אמיתית גוברת על אלמנט כללי — אחרת שורת המטבע בדף
+// תמונת המצב תופסת את החשבון ונותנת לו את השם "NIS".
+if(!prev||(isOpt&&!prev.matches(OPTION_ROLE))||(isOpt===prev.matches(OPTION_ROLE)&&ownText(prev).length>own.length))best.set(a.key,el)}
 return[...best.values()]}
 // שם החשבון הוא כל מה שנשאר אחרי הסרת הסכום, מספר החשבון וברכת הפתיחה — ולא "המילה
 // האחרונה לפני הספרות", שהפכה את "דפנה מלכה- מלכה משק חקלאי מניב" ל-"מניב".
