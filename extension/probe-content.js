@@ -24,6 +24,31 @@ function gridShape(){
     path:dated[0]?chain(dated[0].el):''};
 }
 
+// ⚠ נוסף 18.08.2026 — כדי לממש „תחילת איסוף נתונים" צריך לבקש מהאתר טווח תאריכים,
+// ואת בורר התאריכים אין לנחש. pickers() מסנן לפי „חשבון" ולכן פספס אותו לגמרי.
+// כאן מצולם כל שדה, בורר, כפתור ותווית שנראים כמו בקרת תקופה. קריאה בלבד.
+const RANGE=/תארי|טווח|תקופה|מתאריך|עד תאריך|חודש|לתקופה|\b(?:from|to|date|period|range)\b/i;
+// fromDate / dateFrom הם השמות הנפוצים, ולכן מפרידים camelCase לפני ההתאמה.
+const deCamel=v=>String(v||'').replace(/([a-z])([A-Z])/g,'$1 $2');
+function dateControls(){
+  const inputs=[...document.querySelectorAll('input')].map(el=>({
+    type:el.type||'',id:el.id||'',name:el.name||'',placeholder:el.placeholder||'',
+    aria:flat(el.getAttribute('aria-label')),value:String(el.value||'').slice(0,20),
+    readOnly:!!el.readOnly,path:chain(el)}))
+    .filter(x=>x.type==='date'||RANGE.test(deCamel(`${x.id} ${x.name} ${x.placeholder} ${x.aria} ${x.value}`)))
+    .slice(0,20);
+  const selects=[...document.querySelectorAll('select')].map(el=>({
+    id:el.id||'',name:el.name||'',aria:flat(el.getAttribute('aria-label')),
+    options:[...el.options].slice(0,14).map(op=>flat(op.textContent)),path:chain(el)})).slice(0,20);
+  const triggers=[...document.querySelectorAll('button,[role="button"],[role="tab"],[role="combobox"],a')]
+    .map(el=>({tag:el.tagName.toLowerCase(),txt:own(el).slice(0,40),
+      aria:flat(el.getAttribute('aria-label')),expanded:el.getAttribute('aria-expanded'),path:chain(el)}))
+    .filter(x=>RANGE.test(deCamel(`${x.txt} ${x.aria}`))).slice(0,25);
+  const labels=[...document.querySelectorAll('label,legend,[role="heading"]')]
+    .map(el=>own(el).slice(0,50)).filter(t=>RANGE.test(t)).slice(0,25);
+  return{inputs,selects,triggers,labels};
+}
+
 function pickers(){
   return[...document.querySelectorAll('button,[role="button"],[role="combobox"],select,a')]
     .map(el=>({tag:el.tagName.toLowerCase(),role:el.getAttribute('role')||'',txt:own(el).slice(0,80),
@@ -50,7 +75,7 @@ function snapshot(){
     return{url:location.href,host:location.hostname,title:document.title.slice(0,90),
       bodyLen:(document.body.innerText||'').length,
       roleCounts:roleCounts(),tables:document.querySelectorAll('table').length,
-      grid:gridShape(),pickers:pickers(),accounts:accountLike(),
+      grid:gridShape(),pickers:pickers(),dateControls:dateControls(),accounts:accountLike(),
       frames:[...document.querySelectorAll('iframe')].map(f=>{let d=null;try{d=f.contentDocument}catch{}
         return{id:f.id||'',src:String(f.src||'').slice(0,120),sameOrigin:!!d,innerRows:d?d.querySelectorAll('tr,[role="row"]').length:-1}}),
       nav:[...document.querySelectorAll('a,[role="menuitem"],[role="tab"],nav button')].map(own).filter(t=>t&&t.length<40).slice(0,40),

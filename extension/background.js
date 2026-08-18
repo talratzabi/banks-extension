@@ -788,8 +788,14 @@ function leumiTab(tabs){return tabs.find(t=>t.url?.includes('/digitalfront/'))||
 // מדידה של הלשונית הפעילה, לצורך כתיבת מתאם לבנק חדש. קריאה בלבד: אין לחיצות,
 // אין ניווט, ואין שינוי מצב באתר. הצילום נשמר ל-bankProbe ונקרא משם.
 async function probeActiveTab(){
-  const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
-  if(!tab?.id)throw Error('לא נמצאה לשונית פעילה');
+  // ⚠ 18.08.2026 — היה כאן {active:true,currentWindow:true}, ולכן הכפתור מדד **את
+  // הדשבורד עצמו**: הלחיצה מתבצעת בחלון הדשבורד, ושם הלשונית הפעילה היא הדשבורד.
+  // התוצאה הייתה תמיד „הלשונית הפעילה אינה דף בנק (chrome-extension://…)".
+  // הבחירה הנכונה: הלשונית ה-https הפעילה שנצפתה לאחרונה, בכל החלונות.
+  const candidates=(await chrome.tabs.query({active:true})).filter(t=>t?.id&&/^https:/.test(t.url||''));
+  candidates.sort((a,b)=>(b.lastAccessed||0)-(a.lastAccessed||0));
+  const tab=candidates[0];
+  if(!tab?.id)throw Error('לא נמצאה לשונית בנק פתוחה — פתח את דף הבנק והשאר אותו הלשונית הפעילה בחלון שלו');
   if(!/^https:/.test(tab.url||''))throw Error(`הלשונית הפעילה אינה דף בנק (${tab.url||'ללא כתובת'})`);
   try{await chrome.scripting.executeScript({target:{tabId:tab.id},files:['probe-content.js']})}
   catch(e){throw Error(`אין הרשאה למדוד את ${new URL(tab.url).hostname} — יש להוסיף אותו ל-host_permissions. (${e.message})`)}
