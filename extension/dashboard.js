@@ -114,12 +114,15 @@ async function renderCardMonthPicker(){
     bar.onchange=async e=>{const sel=e.target.closest('#cardMonthSelect');if(!sel)return;cardMonth=sel.value;await renderAllCards()};
     bar.onclick=async e=>{
       const y=e.target.closest('#loadCardYear');
-      if(y){if(!confirm('טעינת שנה אחורה מישראכרט: עוברת על כל כרטיס בכל חודש שחסר, ולוקחת מספר דקות. אם אינך מחובר — האתר ייפתח ותצטרך ללחוץ שוב. כאל ו-MAX אינם נתמכים עדיין. להמשיך?'))return;
+      if(y){const pick=String(document.querySelector('#cardYearCard')?.value||'').replace(/\D/g,'');
+        if(!confirm(pick
+          ?`טעינת 12 חודשים לכרטיס ${pick}: כ-12 דפים, כדקה. אם אינך מחובר — האתר ייפתח ותצטרך ללחוץ שוב. להמשיך?`
+          :'טעינת שנה אחורה לכל הכרטיסים: 12 חודשים × כל כרטיס, מספר דקות ארוכות, והסשן של ישראכרט עלול להיסגר באמצע. עדיף לבחור כרטיס אחד בבורר. להמשיך בכל זאת?'))return;
         y.disabled=true;const yt=y.textContent;y.textContent='טוען…';
-        const r=await chrome.runtime.sendMessage({type:'LOAD_CARD_YEAR',months:12});
+        const r=await chrome.runtime.sendMessage({type:'LOAD_CARD_YEAR',months:12,suffixes:pick?[pick]:[]});
         y.disabled=false;y.textContent=yt;
         if(!r?.ok)return toast(r?.error||'טעינת השנה נכשלה');
-        toast(r.loaded?`נטענו ${r.loaded} חודשים`:'כל החודשים כבר היו שמורים');
+        toast(r.disconnected?`ישראכרט ניתק את הסשן — נשמרו ${r.loaded} חודשים. התחבר ולחץ שוב.`:r.loaded?`נטענו ${r.loaded} חודשים`:'כל החודשים כבר היו שמורים');
         return renderAllCards()}
       const b=e.target.closest('#loadCardMonth');if(!b)return;
       b.disabled=true;const t=b.textContent;b.textContent='טוען מהאתר…';
@@ -128,6 +131,12 @@ async function renderCardMonthPicker(){
       if(!r?.ok)return toast(r?.error||'טעינת החודש נכשלה');
       toast(`נטענו ${r.cards} כרטיסים לחודש ${monthLabel(cardMonth)}`);await renderAllCards()};
   }
+  // ⚠ 18.08.2026 — טעינת שנה לכל הכרטיסים היא 12×N דפים עם שהייה מחויבת, והסשן
+  // של ישראכרט נסגר באמצע. הבורר מאפשר שנה לכרטיס אחד — 12 דפים, כדקה.
+  const yearCards=(()=>{const seen=new Map();
+    for(const c of isracardLastCards||[])if(c?.suffix&&!isOtherIssuer(c))seen.set(String(c.suffix),c);
+    for(const a of accounts||[])for(const c of a.cards||[])if(c?.suffix&&!isOtherIssuer(c)&&!seen.has(String(c.suffix)))seen.set(String(c.suffix),c);
+    return [...seen.values()]})();
   const saved=(await chrome.runtime.sendMessage({type:'CARD_MONTHS'}))?.months||[];
   const months=lastTwelveMonths();
   bar.innerHTML=`<label>חודש חיוב: <select id="cardMonthSelect">`
@@ -135,6 +144,10 @@ async function renderCardMonthPicker(){
     +months.map(m=>`<option value="${m}" ${cardMonth===m?'selected':''}>${monthLabel(m)}${saved.includes(m)?'':' — לא נטען'}</option>`).join('')
     +`</select></label>`
     +(cardMonth&&!saved.includes(cardMonth)?`<button type="button" class="button" id="loadCardMonth">טען חודש זה — ישראכרט</button>`:'')
+    +`<label>טעינת 12 חודשים: <select id="cardYearCard">`
+      +`<option value="">כל הכרטיסים — ארוך, והסשן עלול להיסגר</option>`
+      +yearCards.map(c=>`<option value="${esc(c.suffix)}">כרטיס ${esc(c.suffix)}${c.name?` — ${esc(c.name)}`:''}</option>`).join('')
+      +`</select></label>`
     +`<button type="button" class="button secondary" id="loadCardYear">טען שנה אחורה — ישראכרט</button>`
     +`<small class="sync-detail">${saved.length?`שמורים ${saved.length} חודשים`:'טרם נשמרה היסטוריה'}${cardMonth?` · מוצג ${monthLabel(cardMonth)}`:''}</small>`;
 }

@@ -382,6 +382,7 @@ async function storeCardMonth(month,cards){
   await cardHistPrune(12);
 }
 let isracardHistoryBusy=false;
+const DISCONNECT_STREAK=6;
 async function isracardSummaryFromHome(tabId){
   // בדיוק כמו הסנכרון הראשי: מתחילים תמיד מדף ריכוז הכרטיסים. בעמוד עסקות של
   // כרטיס יחיד אין רשימת כרטיסים ולכן טעינת שנה נכשלה או קראה רק כרטיס אחד.
@@ -507,7 +508,11 @@ async function loadIsracardYear(months=12,suffixes=[]){
   await chrome.storage.local.set({syncStatus:`ישראכרט: מתחיל קריאה של ${todo.length} חודשים עבור ${active.length} כרטיסים`});
     // הגלגל גם בטעינת השנה, לא רק בסנכרון הרגיל. כל צעד = כרטיס בחודש.
   await beginProgress(todo.length*Math.max(1,active.length));
-  let done=0,failed=[],oldestLoaded={},inactiveBefore=new Set();
+  // ⚠ 18.08.2026 — 8 כרטיסים × 12 חודשים = 96 דפים, וכל דף מחויב בשהייה של 4 שניות.
+  // הסשן של ישראכרט נסגר באמצע, וכל שאר הקריאות חזרו ריקות: הגלגל הראה 96/96
+  // בעוד שנשמרו 6 חודשים בלבד. רצף כשלים על כרטיסים שונים אינו תקלת כרטיס אלא
+  // ניתוק — עוצרים ואומרים זאת, במקום לטחון עוד 40 דפים ריקים.
+  let done=0,failed=[],oldestLoaded={},inactiveBefore=new Set(),streak=0,disconnected=false;
   for(const month of todo){
     const out=[];
     for(let i=0;i<active.length;i++){
@@ -518,28 +523,32 @@ async function loadIsracardYear(months=12,suffixes=[]){
       const pageStarted=Date.now();
       await syncStep(`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`,`כרטיס ${card.suffix} · ${String(month).slice(0,2)}/${String(month).slice(2)}`);
       try{
-        out.push(await readIsracardCardMonth(tab.id,card,month));oldestLoaded[String(card.suffix)]=month;
+        out.push(await readIsracardCardMonth(tab.id,card,month));oldestLoaded[String(card.suffix)]=month;streak=0;
       }catch(e){
         if(/אינו זמין בבורר/.test(String(e?.message||''))&&oldestLoaded[String(card.suffix)]){
           inactiveBefore.add(String(card.suffix));
           await chrome.storage.local.set({syncStatus:`כרטיס ${card.suffix}: פעיל מחודש ${oldestLoaded[String(card.suffix)]} — לא נדרשת קריאה לחודשים קודמים`});
-        }else failed.push(`${month}/${card.suffix}`)
+        }else{failed.push(`${month}/${card.suffix}`);streak++}
       }
       finally{
         // זמן שהייה מינימלי מחייב לכל דף, גם אם בחירת החודש או הקריאה נכשלו.
         // בלי finally כשל עבר מיד לדף הבא ונראה כאילו המנגנון מדלג על הכול.
         const remaining=4000-(Date.now()-pageStarted);if(remaining>0)await delay(remaining);
       }
+      if(streak>=DISCONNECT_STREAK){disconnected=true;break}
     }
     if(out.length){await cardHistDeleteMonths([month],[...requested]);await storeCardMonth(month,out);done++}
     else failed.push(month);
+    if(disconnected)break;
   }
   await endProgress();
   const state=await chrome.storage.local.get({isracardActiveSince:{}}),activeSince={...(state.isracardActiveSince||{})};
   for(const card of active){const suffix=String(card.suffix);if(inactiveBefore.has(suffix))activeSince[suffix]=oldestLoaded[suffix];else delete activeSince[suffix]}
   await chrome.storage.local.set({isracardActiveSince:activeSince});
-  await chrome.storage.local.set({syncStatus:`היסטוריית כרטיסים: נטענו ${done} חודשים${failed.length?`, נכשלו ${failed.join(', ')}`:''}`});
-  return{ok:true,loaded:done,failed};
+  await chrome.storage.local.set({syncStatus:disconnected
+    ?`ישראכרט ניתק את הסשן — נשמרו ${done} חודשים ונעצרנו. התחבר שוב ולחץ על טעינת השנה; מה שנשמר נשאר.`
+    :`היסטוריית כרטיסים: נטענו ${done} חודשים${failed.length?`, נכשלו ${failed.join(', ')}`:''}`});
+  return{ok:true,loaded:done,failed,disconnected};
   }finally{isracardHistoryBusy=false;await restoreSyncTabs()}
 }
 async function syncSelected(selectionKeys){
