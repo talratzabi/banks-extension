@@ -367,7 +367,7 @@ document.addEventListener('click',async e=>{
   try{
     const r=await chrome.runtime.sendMessage({type:'CARD_HISTORY_DELETE_CARD',suffix});
     if(!r?.ok)throw Error(r?.error||'המחיקה נכשלה');
-    toast(`נמחקו ${r.removed} רשומות של כרטיס ${suffix}`);
+    toast(`כרטיס ${suffix} הוסר · ${r.removed} חודשי היסטוריה · ${r.cards||0} הופעות בחשבונות`);
     await load();
   }catch(err){toast(`מחיקת כרטיס ${suffix} נכשלה: ${err.message}`)}
   finally{b.disabled=false;b.textContent=original}

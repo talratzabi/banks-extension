@@ -108,6 +108,28 @@ async function beginProgress(total){progressState={done:0,total,startedAt:Date.n
 // action = הטקסט הקצר שנכתב בתוך הגלגל. נפרד מהסטטוס המלא, שנשאר ארוך ומפורט.
 async function syncStep(status,action=''){if(progressState)progressState={...progressState,done:Math.min(progressState.done+1,progressState.total),action};await chrome.storage.local.set({syncStatus:status,syncProgress:progressState})}
 async function endProgress(){progressState=null;await chrome.storage.local.set({syncProgress:null})}
+// מחיקת כרטיס = היסטוריה **וגם** הכרטיס עצמו. נוסף 18.08.2026 אחרי דיווח:
+// „במחק כרטיס החיוב הקרוב נשאר" — כי נמחקה רק ההיסטוריה, בעוד החיוב הקרוב
+// מוצג מתוך accounts[].cards. מחיקה חלקית גרועה ממחיקה שלא קרתה: היא נראית
+// כאילו עבדה.
+async function deleteCardEverywhere(suffix){
+  const key=String(suffix||'').replace(/\D/g,'');
+  if(!key)return{ok:false,error:'לא צוין מספר כרטיס'};
+  const removed=await cardHistDeleteCard(suffix);
+  const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{},isracardActiveSince:{}});
+  const digits=c=>String((c&&c.suffix)||c||'').replace(/\D/g,'');
+  const hit=c=>{const d=digits(c);return d&&(d.endsWith(key)||key.endsWith(d))};
+  let cards=0;
+  const accounts=st.accounts.map(a=>{const keep=(a.cards||[]).filter(c=>!hit(c));cards+=(a.cards||[]).length-keep.length;return{...a,cards:keep}});
+  const strip=list=>(list||[]).filter(c=>!hit(c));
+  const assignments={...st.isracardAssignments},activeSince={...st.isracardActiveSince};
+  for(const k of Object.keys(assignments))if(hit(k))delete assignments[k];
+  for(const k of Object.keys(activeSince))if(hit(k))delete activeSince[k];
+  await chrome.storage.local.set({accounts,isracardUnassigned:strip(st.isracardUnassigned),
+    calUnassigned:strip(st.calUnassigned),maxUnassigned:strip(st.maxUnassigned),
+    isracardAssignments:assignments,isracardActiveSince:activeSince});
+  return{ok:true,removed,cards};
+}
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(/^[A-Z_]*AUTHENTICATED$/.test(m?.type||'')&&sender.tab?.id)returnToDashboard(sender.tab.id);
   if(m?.type==='START_AUTO_SYNC'){start(m.scope||'business',Boolean(m.force)).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
@@ -147,7 +169,7 @@ await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsr
   if(m?.type==='LOAD_CARD_MONTH'){loadIsracardMonth(String(m.month||'')).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='LOAD_CARD_YEAR'){const suffixes=Array.isArray(m.suffixes)?m.suffixes:[];loadIsracardYear(Number(m.months)||12,suffixes).then(reply).catch(async e=>{const card=suffixes.length?` לכרטיס ${suffixes.join(', ')}`:'';await chrome.storage.local.set({syncStatus:`ישראכרט${card}: הסנכרון לא התחיל — ${e.message}`});reply({ok:false,error:e.message})});return true}
   if(m?.type==='CARD_MONTHS'){cardHistMonths().then(months=>reply({ok:true,months})).catch(e=>reply({ok:false,error:e.message}));return true}
-  if(m?.type==='CARD_HISTORY_DELETE_CARD'){cardHistDeleteCard(m.suffix).then(removed=>reply({ok:true,removed})).catch(e=>reply({ok:false,error:e.message}));return true}
+  if(m?.type==='CARD_HISTORY_DELETE_CARD'){deleteCardEverywhere(m.suffix).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='CARD_HISTORY_STATS'){cardHistStats().then(stats=>reply({ok:true,stats})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='CARD_MONTH_DATA'){cardHistGetMonth(String(m.month||'')).then(rows=>reply({ok:true,rows})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='OPEN_DASHBOARD'){chrome.runtime.openOptionsPage();reply({ok:true});return}
@@ -781,7 +803,19 @@ async function waitIsracardReady(tabId,suffix,month='',previousFingerprint=''){
   }
   throw Error(`כרטיס ${suffix}: חודש ${month||'נוכחי'} סומן אך טבלת העסקאות לא התייצבה`)
 }
-async function startIsracard(){const tab=await isracardTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — חיבור 1'});await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);await chrome.tabs.update(tab.id,{url:ISRACARD_HOME});await delay(1800);try{const result=await runIsracard(tab.id);return{ok:true,status:'done',...result}}catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();throw e}}
+async function startIsracard(){const tab=await isracardTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — חיבור 1'});await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);await chrome.tabs.update(tab.id,{url:ISRACARD_HOME});await delay(1800);
+  // ⚠ 18.08.2026 — לשונית על StatusPage **אינה הוכחה שהמשתמש מחובר**: זו בדיוק
+  // הכתובת שנפתחת גם להתחברות, ו-isracardTab מסנן רק כתובות עם login/signin.
+  // בלי הבדיקה הזו הסנכרון התחיל לפני שהמשתמש הקליד, לא מצא כרטיסים, ונכשל
+  // אחרי 12 ניסיונות — „רשימת הכרטיסים לא נטענה". **דף אינו סשן עד שהוא מוכיח זאת.**
+  // הגייט של ISRACARD_AUTHENTICATED כבר דורש שהרשימה מרונדרת, ולכן פשוט ממתינים לו.
+  let ready=null;
+  try{await prepareIsracard(tab.id);ready=await chrome.tabs.sendMessage(tab.id,{type:'ISRACARD_SUMMARY'})}catch{}
+  if(!ready?.cards?.length){
+    await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — התחבר בחלון שנפתח, והסנכרון יתחיל מעצמו'});
+    return{ok:true,status:'waiting_login'};
+  }
+  try{const result=await runIsracard(tab.id);return{ok:true,status:'done',...result}}catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();throw e}}
 async function runIsracard(tabId){await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<12;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length)throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');const active=summary.cards.filter(c=>!c.cancelled),details=[];
   // הגלגל מציג את ארבע הספרות של הכרטיס הנקרא כרגע, לבקשת טל.
 await beginProgress(active.length);
