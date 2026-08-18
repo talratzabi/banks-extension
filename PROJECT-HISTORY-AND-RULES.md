@@ -524,6 +524,11 @@ C:\Users\User\Documents\Codex\2026-08-15\new-chat\outputs\banks-extension-v0.45.
 
 בדיקת תחביר לדוגמה:
 
+⚠ **18.08.2026 — הנתיב שלהלן כבר אינו קיים.** תיקיית `codex-runtimes` נמחקה,
+ואין `node`, `deno` או `bun` ב-PATH. **הדרך היחידה שעובדת היום** היא זו שב-`AGENTS.md` §5:
+`python -m http.server` על תיקיית `extension`, ואז `new Function(src)` בדפדפן
+עם `?v=<חותם>` ו-`cache:'no-store'`. הנתיב נשמר לתיעוד בלבד:
+
 ```powershell
 & 'C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' --check outputs\poalim-sync-extension\background.js
 & 'C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' --check outputs\poalim-sync-extension\dashboard.js

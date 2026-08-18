@@ -167,7 +167,14 @@ await chrome.storage.local.set({pendingLeumi:transient,syncStatus:`שגיאה ב
   if(m?.type==='PROBE_ACTIVE_TAB'){probeActiveTab().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='ISRACARD_AUTHENTICATED'&&sender.tab?.id){maybeAutoRun('isracard','ישראכרט',async id=>{// ⚠ runIsracard קורא את רשימת הכרטיסים מדף הסטטוס. startIsracard מנווט לשם קודם,
 // והמסלול האוטומטי דילג על כך — ולכן הרשימה 'לא נטענה' כשהמשתמש היה בדף כרטיס בודד.
-await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsracard(id)},sender.tab.id).catch(()=>{});reply({ok:true});return}
+// ⚠ 18.08.2026 — הניווט הזה הוא שהפיל את הסנכרון האוטומטי. ISRACARD_AUTHENTICATED
+// נשלח **רק** מדף שכבר מציג את רשימת הכרטיסים (isracard-content.js דורש
+// „נותר לניצול|מסגרת" ופוסל /transactions), ולכן הרענון זרק דף מוכן ונתן לו
+// 1800ms + 9 שניות לעלות מחדש — פחות מטעינה קרה של האתר. נמדד באחסון: כניסה
+// 10:38:39 · קריאת רשימה 10:38:41 · כשל 10:38:50.
+// קוראים קודם מהדף הטעון; הניווט נשאר כמסלול גיבוי, עם תקציב המתנה גדול יותר.
+try{return await runIsracard(id,8)}catch{}
+await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsracard(id,40)},sender.tab.id).catch(()=>{});reply({ok:true});return}
   if(m?.type==='CAL_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingCal:false,pendingCalSuffix:''}).then(x=>{if(x.pendingCal)runCal(t,x.pendingCalSuffix).catch(()=>{});else maybeAutoRun('cal','כאל',runCal,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='MAX_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingMax:false,pendingMaxSuffix:''}).then(x=>{if(x.pendingMax)runMax(t,x.pendingMaxSuffix).catch(()=>{});else maybeAutoRun('max','MAX',runMax,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='LOAD_CARD_MONTH'){loadIsracardMonth(String(m.month||'')).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
@@ -794,6 +801,16 @@ const MAX_LOGIN='https://www.max.co.il/login';
 const LEUMI_LOGIN='https://hb2.bankleumi.co.il/H/Login.html';
 async function isracardTab(){const tabs=await chrome.tabs.query({url:['https://web.isracard.co.il/*']});return tabs.find(t=>!/login|signin/i.test(t.url||''))||null}
 async function prepareIsracard(tabId){try{const p=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_PING_V3'});if(p?.ok&&p.adapterVersion===3)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['isracard-content.js']});await delay(350);const p=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_PING_V3'});if(!p?.ok||p.adapterVersion!==3)throw Error('מתאם ישראכרט החדש לא נטען')}
+// ⚠ 18.08.2026 — כשהרשימה אינה נטענת יש שני חשודים: הדף לא הספיק לעלות, או ש-cards()
+// כבר אינו מזהה את ה-DOM. בלי דגימה אי אפשר להכריע, וכל סבב הבא מתחיל שוב מניחוש.
+// הדגימה נשמרת מקומית ב-bankDiagnostics.isracard ואינה נשלחת לשום מקום.
+async function saveIsracardMiss(tabId){
+  try{
+    const sample=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_BUTTONS_SAMPLE'});
+    const st=await chrome.storage.local.get({bankDiagnostics:{}});
+    await chrome.storage.local.set({bankDiagnostics:{...st.bankDiagnostics,isracard:{at:Date.now(),...sample}}});
+  }catch{}
+}
 async function waitIsracardReady(tabId,suffix,month='',previousFingerprint=''){
   const wanted=String(month||'').replace(/\D/g,'');let candidate='',stable=0,firstMatch=0;
   for(let i=0;i<60;i++){
@@ -823,7 +840,7 @@ async function startIsracard(){const tab=await isracardTab();if(!tab){await chro
     return{ok:true,status:'waiting_login'};
   }
   try{const result=await runIsracard(tab.id);return{ok:true,status:'done',...result}}catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();throw e}}
-async function runIsracard(tabId){await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<12;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length)throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');const active=summary.cards.filter(c=>!c.cancelled),details=[];
+async function runIsracard(tabId,attempts=40){await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<attempts;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length){await saveIsracardMiss(tabId);throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');}const active=summary.cards.filter(c=>!c.cancelled),details=[];
   // הגלגל מציג את ארבע הספרות של הכרטיס הנקרא כרגע, לבקשת טל.
 await beginProgress(active.length);
 for(let i=0;i<active.length;i++){const card=active[i];await syncStep(`ישראכרט: קורא כרטיס ${i+1} מתוך ${active.length} · ${card.suffix}`,`כרטיס ${card.suffix}`);await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?cardSuffix=${encodeURIComponent(card.suffix)}`});await waitIsracardReady(tabId,card.suffix);let read={ok:true,transactions:[]};try{read=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_TRANSACTIONS_V3'})}catch{}
