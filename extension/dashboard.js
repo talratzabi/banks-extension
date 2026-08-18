@@ -37,7 +37,11 @@ chrome.storage.onChanged.addListener(()=>{clearTimeout(loadTimer);loadTimer=setT
 async function load(){
   const epoch=++loadEpoch;
   document.querySelector('.sources')?.classList.add('hidden');
-  const data=await chrome.storage.local.get({accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{}});
+  const data=await chrome.storage.local.get({accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{},hiddenCards:[]});
+  hiddenCards=(data.hiddenCards||[]).map(x=>String(x).replace(/\D/g,'')).filter(Boolean);
+  // כרטיס שהוסתר אינו חוזר דרך סנכרון: הסינון כאן, לפני כל רינדור.
+  data.accounts=(data.accounts||[]).map(a=>({...a,cards:(a.cards||[]).filter(c=>!cardHidden(c))}));
+  for(const k of ['isracardUnassigned','calUnassigned','maxUnassigned'])data[k]=(data[k]||[]).filter(c=>!cardHidden(c));
   statusBySource=data.statusBySource||{};bankDiagnostics=data.bankDiagnostics||{};
   if(epoch!==loadEpoch)return;
   accounts=data.accounts;discovered=data.discoveredAccounts;syncScope=data.syncScope;accountFilter=data.accountFilter;accountKinds=data.accountKinds;privateOwnerName=data.privateOwnerName;hideMortgages=Boolean(data.hideMortgages);isracardUnassigned=data.isracardUnassigned||[];calUnassigned=data.calUnassigned||[];maxUnassigned=data.maxUnassigned||[];isracardLastCards=data.isracardLastCards||[];calLastCards=data.calLastCards||[];maxLastCards=data.maxLastCards||[];selectedKeys=(Array.isArray(data.selectedAccountKeys)?data.selectedAccountKeys:accounts.map(a=>a.selectionKey||a.id)).map(k=>String(k).includes('|')?k:`business|${k}`);
@@ -84,7 +88,7 @@ function render(){
     box.appendChild(card);
   });
   const sums={balance:visible.reduce((s,a)=>s+(Number(a.balance)||0),0),limit:visible.reduce((s,a)=>s+(Number(a.creditLimit)||0),0),available:visible.reduce((s,a)=>s+(Number(a.availableCredit)||0),0),cards:visible.reduce((s,a)=>s+(Number(a.upcomingCardCharges)||0),0),loans:visible.reduce((s,a)=>s+(a.loans||[]).filter(l=>!hideMortgages||!l.isMortgage).reduce((n,l)=>n+(Number(l.balance)||0),0),0)};$('#count').textContent=visible.length;$('#total').textContent=money(sums.balance);let totals=$('#accountsTotals');if(!totals){totals=document.createElement('section');totals.id='accountsTotals';totals.className='panel accounts-total accounts-view';box.after(totals)}totals.innerHTML=`<h3>סיכום כללי · ${visible.length} חשבונות</h3><div class="accounts-total-grid"><div><span>יתרת עו״ש כוללת</span><strong>${money(sums.balance)}</strong></div><div><span>מסגרות אשראי</span><strong>${money(sums.limit)}</strong></div><div><span>יתרה זמינה</span><strong>${money(sums.available)}</strong></div><div><span>חיובי כרטיסים קרובים</span><strong>${money(sums.cards)}</strong></div><div><span>יתרת הלוואות כוללת</span><strong>${money(sums.loans)}</strong></div></div>`;
-  const cardTotalCell=totals.querySelector('.accounts-total-grid div:nth-child(4) strong');if(cardTotalCell)cardTotalCell.textContent=money(dedupedCardTotal(visible));const dates=accounts.map(a=>a.lastSync).filter(Boolean).sort();$('#lastSync').textContent=dates.length?shortDateTime(dates.at(-1)):'טרם בוצע';renderTransactions();renderAllCards().catch(e=>console.warn('renderAllCards',e));renderLoansTable();
+  const cardTotalCell=totals.querySelector('.accounts-total-grid div:nth-child(4) strong');if(cardTotalCell)cardTotalCell.textContent=money(dedupedCardTotal(visible));const dates=accounts.map(a=>a.lastSync).filter(Boolean).sort();$('#lastSync').textContent=dates.length?shortDateTime(dates.at(-1)):'טרם בוצע';renderTransactions();renderAllCards().then(renderHiddenCards).catch(e=>console.warn('renderAllCards',e));renderLoansTable();
 }
 function dedupedCardTotal(visible){const cards=new Map(),fallback=[];for(const a of visible){if((a.cards||[]).length)for(const c of a.cards){const key=String(c.suffix||`${a.id}-${cards.size}`);cards.set(key,Number(c.amount)||0)}else fallback.push(Number(a.upcomingCardCharges)||0)}const hasIsracard=accountFilter==='both'&&isracardLastCards.length>0;if(hasIsracard)for(const c of isracardLastCards)cards.set(String(c.suffix),Number(c.amount)||0);return[...cards.values()].reduce((s,n)=>s+n,0)+(hasIsracard?0:fallback.reduce((s,n)=>s+n,0))}
 function accountCardTotal(a){if(!(a.cards||[]).length)return a.upcomingCardCharges==null?null:Number(a.upcomingCardCharges)||0;const bySuffix=new Map();for(const c of a.cards)bySuffix.set(String(c.suffix||bySuffix.size),Number(c.amount)||0);return[...bySuffix.values()].reduce((s,n)=>s+n,0)}
@@ -138,7 +142,7 @@ const cardHistoryMark=suffix=>{const stat=cardHistoryStats[String(suffix)]||{},n
 const isOtherIssuer=card=>/\b(?:MAX|CAL)\b|כאל|מקס/i.test(`${card.issuer||''} ${card.name||''}`),cardSyncControl=(account,card)=>{const text=`${card.issuer||''} ${card.name||''}`,cal=/\bCAL\b|כאל/i.test(text)?`<button type="button" class="button secondary sync-cal-card" data-suffix="${esc(card.suffix||'')}">סנכרן שנה מכאל</button>`:'',max=/\bMAX\b|מקס/i.test(text)?`<button type="button" class="button secondary sync-max-card" data-suffix="${esc(card.suffix||'')}">סנכרן שנה מ‑MAX</button>`:'',isracard=isOtherIssuer(card)?'':`${cardHistoryMark(card.suffix)} <button type="button" class="button secondary sync-card-history" data-suffix="${esc(card.suffix||'')}">${cardHistoryStats[String(card.suffix)]?.count?'סנכרן מחדש מישראכרט':'סנכרן שנה מישראכרט'}</button>`,bank=account?` <button type="button" class="button secondary sync-bank-card" data-source="${esc(account.source||'business')}" data-suffix="${esc(card.suffix||'')}">עדכן מהבנק</button>`:'';return`${cal}${max}${isracard}${bank}`};
 async function renderAllCards(){const history=await chrome.runtime.sendMessage({type:'CARD_HISTORY_STATS'}),state=await chrome.storage.local.get({isracardActiveSince:{}});cardHistoryStats=history?.stats||{};for(const [suffix,activeSince] of Object.entries(state.isracardActiveSince||{})){cardHistoryStats[suffix]||(cardHistoryStats[suffix]={});cardHistoryStats[suffix].activeSince=activeSince}await renderCardMonthPicker();
 calLastCards=[...new Map([...calLastCards,...maxLastCards].map(c=>[String(c.suffix),c])).values()];
-if(cardMonth){const rows=(await chrome.runtime.sendMessage({type:'CARD_MONTH_DATA',month:cardMonth}))?.rows||[];
+if(cardMonth){const rows=((await chrome.runtime.sendMessage({type:'CARD_MONTH_DATA',month:cardMonth}))?.rows||[]).filter(c=>!cardHidden(c));
  const box=document.querySelector('#allCards');
  if(!rows.length){box.innerHTML='<div class="empty">החודש הזה עדיין לא נשמר. בחר "טען חודש זה מהאתר" כשאתה מחובר לישראכרט.</div>';return}
  box.innerHTML=rows.map(c=>`<section class="detail-card"><div class="statement-head"><div><h4>${esc(c.name||'כרטיס')} · ${esc(c.suffix)} ${cardHistoryMark(c.suffix)} <button type="button" class="button secondary sync-card-history" data-suffix="${esc(c.suffix)}">${cardHistoryButton(c.suffix)}</button></h4><small>${esc(c.issuer||'')} · חודש ${esc(monthLabel(c.month))}</small></div><strong>${c.amount==null?'—':money(c.amount)}</strong></div>`
@@ -371,4 +375,36 @@ document.addEventListener('click',async e=>{
     await load();
   }catch(err){toast(`מחיקת כרטיס ${suffix} נכשלה: ${err.message}`)}
   finally{b.disabled=false;b.textContent=original}
+});
+
+
+// ── כרטיסים שהוסתרו ──────────────────────────────────────────────────────
+// מחיקה מקומית אינה מוחקת את הכרטיס אצל חברת האשראי, ולכן סנכרון מחזיר אותו.
+// הרשימה הזו היא מה שמונע את החזרה — והיא הפיכה, כי הסתרה בטעות קורית.
+var hiddenCards=[];
+function cardHidden(c){
+  const d=String((c&&c.suffix)||c||'').replace(/\D/g,'');
+  return !!d&&hiddenCards.some(h=>h&&(d.endsWith(h)||h.endsWith(d)));
+}
+function renderHiddenCards(){
+  const box=document.querySelector('#allCards');
+  if(!box)return;
+  document.getElementById('hiddenCardsNote')?.remove();
+  if(!hiddenCards.length)return;
+  const note=document.createElement('div');
+  note.id='hiddenCardsNote';note.className='empty';
+  note.style.cssText='margin-top:10px;text-align:start';
+  note.innerHTML=`כרטיסים שהוסתרו: ${hiddenCards.map(h=>`<span class="source-badge">${esc(h)}</span> `
+    +`<button type="button" class="button secondary restore-card" data-suffix="${esc(h)}">החזר</button>`).join(' · ')}`;
+  box.appendChild(note);
+}
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('.restore-card');
+  if(!b||!b.dataset.suffix)return;
+  e.preventDefault();e.stopPropagation();
+  const suffix=b.dataset.suffix;
+  const st=await chrome.storage.local.get({hiddenCards:[]});
+  await chrome.storage.local.set({hiddenCards:(st.hiddenCards||[]).filter(h=>String(h)!==String(suffix))});
+  toast(`כרטיס ${suffix} יוצג שוב אחרי הסנכרון הבא`);
+  await load();
 });

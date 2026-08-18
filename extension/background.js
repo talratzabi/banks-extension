@@ -116,7 +116,7 @@ async function deleteCardEverywhere(suffix){
   const key=String(suffix||'').replace(/\D/g,'');
   if(!key)return{ok:false,error:'לא צוין מספר כרטיס'};
   const removed=await cardHistDeleteCard(suffix);
-  const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{},isracardActiveSince:{}});
+  const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{},isracardActiveSince:{},hiddenCards:[]});
   const digits=c=>String((c&&c.suffix)||c||'').replace(/\D/g,'');
   const hit=c=>{const d=digits(c);return d&&(d.endsWith(key)||key.endsWith(d))};
   let cards=0;
@@ -125,9 +125,13 @@ async function deleteCardEverywhere(suffix){
   const assignments={...st.isracardAssignments},activeSince={...st.isracardActiveSince};
   for(const k of Object.keys(assignments))if(hit(k))delete assignments[k];
   for(const k of Object.keys(activeSince))if(hit(k))delete activeSince[k];
+  // ⚠ מחיקה מקומית אינה מוחקת את הכרטיס אצל חברת האשראי: הסנכרון הבא מחזיר אותו,
+  // והמשתמש רואה כרטיס שמחק „חוזר מהמתים". לכן הסיומת נשמרת ברשימת הסתרה קבועה,
+  // והתצוגה מסננת לפיה — גם אחרי סנכרונים הבאים. ניתן להחזרה מהדשבורד.
+  const hiddenCards=[...new Set([...(st.hiddenCards||[]).map(x=>String(x).replace(/\D/g,'')),key])].filter(Boolean);
   await chrome.storage.local.set({accounts,isracardUnassigned:strip(st.isracardUnassigned),
     calUnassigned:strip(st.calUnassigned),maxUnassigned:strip(st.maxUnassigned),
-    isracardAssignments:assignments,isracardActiveSince:activeSince});
+    isracardAssignments:assignments,isracardActiveSince:activeSince,hiddenCards});
   return{ok:true,removed,cards};
 }
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
