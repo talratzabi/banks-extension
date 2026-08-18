@@ -168,6 +168,15 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(m?.type==='MIZRAHI_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingMizrahi:false}).then(x=>{if(x.pendingMizrahi)runMizrahi(t).catch(()=>{});else maybeAutoRun('mizrahi','מזרחי־טפחות',runMizrahi,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='MIZRAHI_FRAME_REPORT'&&sender.tab?.id){const old=mizrahiFrameData.get(sender.tab.id)||{transactions:[],loans:[]};mizrahiFrameData.set(sender.tab.id,{transactions:Array.isArray(m.transactions)&&m.transactions.length?m.transactions:old.transactions,loans:Array.isArray(m.loans)&&m.loans.length?m.loans:old.loans});reply({ok:true});return}
   if(m?.type==='DISCOUNT_AUTHENTICATED'&&sender.tab?.id){const privateSite=String(sender.tab.url||'').includes('/retail3/'),source=privateSite?'discount-private':'discount-business',label=privateSite?'דיסקונט פרטי':'דיסקונט עסקי';chrome.storage.local.get({pendingDiscountBusiness:false,pendingDiscountPrivate:false}).then(x=>{if(privateSite?!x.pendingDiscountPrivate:!x.pendingDiscountBusiness)maybeAutoSync(source,label,sender.tab.id).catch(()=>{})});handleDiscountAuthenticated(sender.tab.id).catch(()=>{});reply({ok:true});return}
+  // ⚠ 18.08.2026 — צילום שנשמר רק בסוף האצווה אבד כולו כשהאצווה חרגה מהתקרה.
+  // נמדד: total 32 · saved 18 · failed 14 · why „לא השיב תוך 300 שניות". כל שיק
+  // שנקלט נשמר עכשיו מיד, ולכן timeout מאבד לכל היותר את זה שבאוויר.
+  if(m?.type==='LEUMI_CHEQUE_IMAGE'&&m.reference&&m.front){
+    const key=chequeCtx.selectionKey;
+    if(key){const id=chequeId(key,String(m.reference));
+      chequePut({id,selectionKey:key,reference:String(m.reference),front:m.front,back:m.back||'',savedAt:new Date().toISOString()})
+        .then(()=>{chequeCtx.savedRefs.add(String(m.reference))}).catch(()=>{})}
+    reply({ok:true});return}
   if(m?.type==='LEUMI_CHEQUE_PROGRESS'){chequeCtx.done++;const at=chequeCtx.base+chequeCtx.done,tot=chequeCtx.total||m.total;chrome.storage.local.set({syncStatus:`לאומי: שומר צילומי שיקים ${at}/${tot}`+(chequeCtx.base?` · ${chequeCtx.base} כבר היו שמורים`:'')+(chequeCtx.noRef?` · ${chequeCtx.noRef} ללא אסמכתא`:'')});reply({ok:true});return}
 if(m?.type==='LEUMI_AUTHENTICATED'&&sender.tab?.id){chrome.storage.local.get({pendingLeumi:false}).then(x=>{if(!x.pendingLeumi)maybeAutoSync('leumi','לאומי',sender.tab.id).catch(()=>{})});discoverLeumi(sender.tab.id).catch(async e=>{
 // ⚠ תקלת חיבור היא רגעית. כיבוי pendingLeumi כאן גרם לכך שכל אירוע התחברות נוסף
@@ -769,21 +778,31 @@ const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)bal
 // שמירת הצילומים לא מסכנת את הסנכרון: אם היא נכשלת, היתרות והתנועות כבר בידינו.
 let saved=0;try{saved=await harvestLeumiCheques(tabId,result,txUrl)}catch(e){await chrome.storage.local.set({chequeError:e.message})}
 await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}`});return result}
-let chequeCtx={base:0,total:0,noRef:0,done:0};
-async function harvestLeumiCheques(tabId,accounts,txUrl){const have=await chequeKeys();let saved=0,routed=false,asked=0,failed=0,why='';
+let chequeCtx={base:0,total:0,noRef:0,done:0,selectionKey:'',savedRefs:new Set()};
+async function harvestLeumiCheques(tabId,accounts,txUrl){const have=await chequeKeys();let saved=0,routed=false,asked=0,failed=0,why='',stuck=0;
 {let total=0,noRef=0,already=0;
 for(const a of accounts)for(const t of(a.transactions||[]))if(t.cheque){total++;
 if(!t.reference)noRef++;else if(have.has(chequeId(a.selectionKey,t.reference)))already++}
-chequeCtx={base:already,total,noRef,done:0}}
+chequeCtx={base:already,total,noRef,done:0,selectionKey:'',savedRefs:new Set()}}
 for(const a of accounts){const wanted=(a.transactions||[]).filter(t=>t.cheque&&t.reference&&!have.has(chequeId(a.selectionKey,t.reference))).map(t=>({date:t.date,reference:t.reference}));
 // ניווט אחד לכל הקציר; מעבר בין חשבונות נעשה בתוך הדף ולא בטעינה מחדש.
-if(!wanted.length)continue;asked+=wanted.length;
+if(!wanted.length)continue;asked+=wanted.length;chequeCtx.selectionKey=a.selectionKey;
 if(!routed){try{await prepareLeumiRoute(tabId,txUrl);routed=true}catch(e){why=`המעבר לדף התנועות נכשל: ${e.message}`;break}}
 // באצוות, כדי שכשל באמצע לא יזרוק את מה שכבר ירד
 for(let i=0;i<wanted.length;i+=6){const batch=wanted.slice(i,i+6);let r=null;
 try{r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_CHEQUE_IMAGES',wanted:batch,key:a.key,offset:i,total:wanted.length}),300000,'צילומי שיקים בלאומי')}catch(e){why=why||e.message}
-if(!r?.ok){failed+=batch.length;why=why||r?.error||'הדף לא החזיר צילומים';continue}
-for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue;await chequePut({id:chequeId(a.selectionKey,reference),selectionKey:a.selectionKey,reference,front:img.front,back:img.back||'',savedAt:new Date().toISOString()});saved++}}}
+if(!r?.ok){
+      // ⚠ מה שנשמר חי אינו כישלון, גם אם האצווה כולה לא חזרה.
+      failed+=batch.filter(x=>!chequeCtx.savedRefs.has(String(x.reference))).length;
+      why=why||r?.error||'הדף לא החזיר צילומים';
+      // אצווה שנתקעה משאירה את הדף תקוע, והבאה אחריה תיתקע גם היא — 300 שניות כל אחת.
+      // ניתוב מחדש נותן הזדמנות אחת; שתי תקיעות רצופות עוצרות את הקציר.
+      if(++stuck>=2){why=`${why} — נעצר אחרי שתי אצוות תקועות`;break}
+      try{await prepareLeumiRoute(tabId,txUrl)}catch(err){why=why||err.message;break}
+      continue}
+    stuck=0;
+for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue;await chequePut({id:chequeId(a.selectionKey,reference),selectionKey:a.selectionKey,reference,front:img.front,back:img.back||'',savedAt:new Date().toISOString()});chequeCtx.savedRefs.add(String(reference));saved++}}}
+  saved=Math.max(saved,chequeCtx.savedRefs.size);
 await chrome.storage.local.set({leumiChequeReport:{total:chequeCtx.total,already:chequeCtx.base,noReference:chequeCtx.noRef,asked,saved,failed,why,at:new Date().toISOString()}});
 if(asked&&!saved)await chrome.storage.local.set({syncStatus:`לאומי: לא נשמר אף צילום שיק מתוך ${asked} מבוקשים — ${why||'ללא סיבה'}`});
 return saved}
