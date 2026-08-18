@@ -117,8 +117,20 @@ function currentBalance(){
 // להפוך בטעות ליתרה, וגם לא נציג "יתרה זמינה" הכוללת את מסגרת האשראי.
 const headings=[...document.querySelectorAll('h1,h2,h3,h4,[role="heading"]')].filter(el=>/עובר ושב|יתרת עו[״"']?ש/.test(text(el)));
 for(const h of headings){for(const el of [h,h.parentElement,h.parentElement?.parentElement]){const s=text(el);const after=s.match(/(?:עובר ושב|יתרת עו[״"']?ש)[^₪\d-]{0,35}₪?\s*(-?[\d,]+\.\d{2})/);if(after){const n=money(after[1]);if(n!=null&&Math.abs(n)<1e8)return n}}}
-const rows=transactions().filter(r=>r.balance!=null);if(rows.length){const stamp=s=>{const p=String(s).split(/[./]/).map(Number),y=p[2]<100?2000+p[2]:p[2];return new Date(y,p[1]-1,p[0]).getTime()||0};const latest=[...rows].sort((a,b)=>stamp(b.date)-stamp(a.date))[0].balance;if(Math.abs(latest)<1e8)return latest}
+const rows=transactions().filter(r=>r.balance!=null);if(rows.length){const latest=latestRowBalance(rows);if(latest!=null&&Math.abs(latest)<1e8)return latest}
 return valueAfter('יתרת עו"ש')}
+// ⚠ 18.08.2026 — היתרה נקראה כ„שורה הראשונה של התאריך האחרון" ולא כאחרונה שבו.
+// sort יציב, ולכן בתאריך עם כמה תנועות ניצחה הראשונה. נמדד אצל טל ב-17/08/2026:
+// העברה 250,000- (יתרה 267,664.63-) · הקמת הלוואה 300,000+ (32,335.37) ·
+// עמלה 1,350- (30,985.37). היתרה שנשמרה הייתה **267,664.63-** — בדיוק הראשונה.
+// הבחירה עכשיו: התאריך המאוחר ביותר, ובתוכו **המופע האחרון לפי סדר הטבלה**
+// (הטבלה מסודרת מהישן לחדש — כך נשמר מערך התנועות באחסון).
+function latestRowBalance(rows){
+  const stamp=s=>{const p=String(s).split(/[./]/).map(Number),y=p[2]<100?2000+p[2]:p[2];return new Date(y,p[1]-1,p[0]).getTime()||0};
+  let best=null;
+  for(let i=0;i<rows.length;i++){const t=stamp(rows[i].date);if(best===null||t>=best.t)best={t,balance:rows[i].balance}}
+  return best?best.balance:null;
+}
 function labelMoney(labels){for(const label of labels){const value=valueAfter(label);if(value!=null)return value}return null}
 function loanValue(s,labels){for(const label of labels){const m=s.match(new RegExp(`${label}[^\\d-]{0,35}(-?[\\d,]+(?:\\.\\d{1,2})?)`));if(m)return money(m[1])}return null}
 function loanDate(s,labels){for(const label of labels){const m=s.match(new RegExp(`${label}[^\\d]{0,30}(\\d{1,2}[./]\\d{1,2}[./]\\d{2,4})`));if(m)return m[1]}return''}
