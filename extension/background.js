@@ -1,8 +1,20 @@
 importScripts('cheque-store.js','card-history.js','yahav.js');
 // התקנה או עדכון מבטלים תהליך חלקי ומנקים בורר זמני ישן. במהלך זיהוי פעיל
 // הרשימה נשמרת; היא אינה אמורה לחזור לאחר רענון או בזמן חיבור לבנק אחר.
-const freshStart={pendingLeumi:false,pendingDiscountBusiness:false,pendingDiscountPrivate:false,pendingMizrahi:false,pendingYahav:false,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:[]};
-chrome.runtime.onInstalled.addListener(details=>{const patch={...freshStart};if(details?.reason==='install')patch.autoSyncOnLogin=true;chrome.storage.local.set(patch).then(scanAuthenticatedTabs)});
+// ⚠ 18.08.2026 — `pendingSources` נוסף לאיפוס. discover מסירה ממנו בנק **רק בהצלחה**
+// (§ההערה בשורה ~228), ולכן סנכרון שנקטע השאיר אותו תקוע לצמיתות — וגם הפעלה מחדש
+// של הדפדפן לא ניקתה אותו. במצב הזה handleAuthenticatedNavigation נכנס למסלול
+// queueDiscover, **שאינו בודק את autoSyncOnLogin ואף צינון**, וכל כניסה לפועלים נחטפה.
+const freshStart={pendingLeumi:false,pendingDiscountBusiness:false,pendingDiscountPrivate:false,pendingMizrahi:false,pendingYahav:false,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:[],pendingSources:[]};
+// ⚠ 18.08.2026, החלטת טל: הסנכרון האוטומטי **כבוי בברירת מחדל**, ונדלק רק בלחיצה.
+// הכניסה לבנק שייכת למשתמש; התוסף אינו לוקח לשונית שהוא לא פתח בלי בקשה מפורשת.
+// המעבר מוחל פעם אחת גם על התקנות קיימות — בלעדיו הערך `true` שכבר שמור גובר.
+async function applyAutoSyncDefaultOff(){
+  const st=await chrome.storage.local.get({autoSyncDefaultOffApplied:false});
+  if(st.autoSyncDefaultOffApplied)return;
+  await chrome.storage.local.set({autoSyncOnLogin:false,autoSyncDefaultOffApplied:true});
+}
+chrome.runtime.onInstalled.addListener(details=>{const patch={...freshStart};if(details?.reason==='install')patch.autoSyncOnLogin=false;chrome.storage.local.set(patch).then(applyAutoSyncDefaultOff).then(scanAuthenticatedTabs)});
 chrome.runtime.onStartup.addListener(()=>{chrome.storage.local.set(freshStart).then(scanAuthenticatedTabs)});
 
 // ── חיווי מצב על סמל התוסף ────────────────────────────────────────────────
@@ -274,7 +286,7 @@ function acceptAutoLogin(source,tabId){const key=`${source}|${tabId||0}`,now=Dat
 // מעל הסטטוס של בנק ב' שבאמצע עבודה — וזה הסתיר מהמשתמש את סיבת הכישלון האמיתית.
 async function maybeAutoSync(source,label,tabId){
   if(running)return false;
-  const st=await chrome.storage.local.get({autoSyncOnLogin:true,selectedAccountKeys:[],accounts:[],autoSyncLast:{},autoSyncFailed:{}});
+  const st=await chrome.storage.local.get({autoSyncOnLogin:false,selectedAccountKeys:[],accounts:[],autoSyncLast:{},autoSyncFailed:{}});
   if(autoRetryTooSoon(st,source))return false;   // ניסיון קודם נכשל — שקט, ההודעה שלו עדיין על המסך
   if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;if(/שגיאה|נכשל/.test((await chrome.storage.local.get({syncStatus:''})).syncStatus||''))return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // גרסאות קודמות יכלו להשאיר חשבונות מסונכרנים בלי selectedAccountKeys.
@@ -318,7 +330,7 @@ async function maybeAutoSync(source,label,tabId){
 // התנאי המקביל ל"כבר בחרת": קיים חשבון שמור מאותו מקור — כלומר סנכרנת אותו בעבר.
 async function maybeAutoRun(source,label,fn,tabId){
   if(running)return false;
-  const st=await chrome.storage.local.get({autoSyncOnLogin:true,accounts:[],autoSyncLast:{}});
+  const st=await chrome.storage.local.get({autoSyncOnLogin:false,accounts:[],autoSyncLast:{}});
   if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;if(/שגיאה|נכשל/.test((await chrome.storage.local.get({syncStatus:''})).syncStatus||''))return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // ⚠ ישראכרט אינו יוצר שורת חשבון משלו — הכרטיסים נתלים על חשבונות הבנק. לכן
   // "כבר סונכרן פעם" נמדד אצלו לפי קיום כרטיס שהמנפיק שלו ישראכרט, ולא לפי source.
