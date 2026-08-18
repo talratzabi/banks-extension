@@ -5,7 +5,7 @@ importScripts('cheque-store.js','card-history.js','yahav.js');
 // (§ההערה בשורה ~228), ולכן סנכרון שנקטע השאיר אותו תקוע לצמיתות — וגם הפעלה מחדש
 // של הדפדפן לא ניקתה אותו. במצב הזה handleAuthenticatedNavigation נכנס למסלול
 // queueDiscover, **שאינו בודק את autoSyncOnLogin ואף צינון**, וכל כניסה לפועלים נחטפה.
-const freshStart={pendingLeumi:false,pendingDiscountBusiness:false,pendingDiscountPrivate:false,pendingMizrahi:false,pendingYahav:false,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:[],pendingSources:[]};
+const freshStart={pendingIsracard:false,pendingIsracardAt:0,pendingLeumi:false,pendingDiscountBusiness:false,pendingDiscountPrivate:false,pendingMizrahi:false,pendingYahav:false,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:[],pendingSources:[]};
 // ⚠ 18.08.2026, החלטת טל: הסנכרון האוטומטי **כבוי בברירת מחדל**, ונדלק רק בלחיצה.
 // הכניסה לבנק שייכת למשתמש; התוסף אינו לוקח לשונית שהוא לא פתח בלי בקשה מפורשת.
 // המעבר מוחל פעם אחת גם על התקנות קיימות — בלעדיו הערך `true` שכבר שמור גובר.
@@ -177,7 +177,7 @@ await chrome.storage.local.set({pendingLeumi:transient,syncStatus:`שגיאה ב
   if(m?.type==='OPEN_LEUMI_CHEQUE'){openLeumiCheque(m).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='DISCOUNT_PROGRESS'){chrome.storage.local.set({syncStatus:String(m.text||'')});reply({ok:true});return}
   if(m?.type==='PROBE_ACTIVE_TAB'){probeActiveTab().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
-  if(m?.type==='ISRACARD_AUTHENTICATED'&&sender.tab?.id){maybeAutoRun('isracard','ישראכרט',async id=>{// ⚠ runIsracard קורא את רשימת הכרטיסים מדף הסטטוס. startIsracard מנווט לשם קודם,
+  if(m?.type==='ISRACARD_AUTHENTICATED'&&sender.tab?.id){isracardOnAuth(sender.tab.id,async id=>{// ⚠ runIsracard קורא את רשימת הכרטיסים מדף הסטטוס. startIsracard מנווט לשם קודם,
 // והמסלול האוטומטי דילג על כך — ולכן הרשימה 'לא נטענה' כשהמשתמש היה בדף כרטיס בודד.
 // ⚠ 18.08.2026 — הניווט הזה הוא שהפיל את הסנכרון האוטומטי. ISRACARD_AUTHENTICATED
 // נשלח **רק** מדף שכבר מציג את רשימת הכרטיסים (isracard-content.js דורש
@@ -186,7 +186,7 @@ await chrome.storage.local.set({pendingLeumi:transient,syncStatus:`שגיאה ב
 // 10:38:39 · קריאת רשימה 10:38:41 · כשל 10:38:50.
 // קוראים קודם מהדף הטעון; הניווט נשאר כמסלול גיבוי, עם תקציב המתנה גדול יותר.
 try{return await runIsracard(id,8)}catch{}
-await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsracard(id,40)},sender.tab.id).catch(()=>{});reply({ok:true});return}
+await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsracard(id,40)}).catch(()=>{});reply({ok:true});return}
   if(m?.type==='CAL_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingCal:false,pendingCalSuffix:''}).then(x=>{if(x.pendingCal)runCal(t,x.pendingCalSuffix).catch(()=>{});else maybeAutoRun('cal','כאל',runCal,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='MAX_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingMax:false,pendingMaxSuffix:''}).then(x=>{if(x.pendingMax)runMax(t,x.pendingMaxSuffix).catch(()=>{});else maybeAutoRun('max','MAX',runMax,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='LOAD_CARD_MONTH'){loadIsracardMonth(String(m.month||'')).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
@@ -328,6 +328,22 @@ async function maybeAutoSync(source,label,tabId){
 
 // אותם שומרים, לבנקים שיש להם מסלול ריצה משלהם ואינם עוברים דרך syncSelected.
 // התנאי המקביל ל"כבר בחרת": קיים חשבון שמור מאותו מקור — כלומר סנכרנת אותו בעבר.
+// ⚠ 18.08.2026 — ישראכרט הוא היעד היחיד שלא היה לו דגל pending משלו, ולכן
+// ISRACARD_AUTHENTICATED נכנס ישירות לשער הסנכרון האוטומטי. מרגע ש-0.87.0 כיבתה
+// את autoSyncOnLogin בברירת מחדל, **גם סנכרון שהמשתמש ביקש נבלע שם ומעולם לא התחיל**
+// — נמדד באחסון: „זוהתה כניסה לישראכרט, אך הסנכרון האוטומטי כבוי" באמצע לחיצה
+// של טל. התקדים הנכון הוא pendingCal: דגל שהמשתמש הדליק גובר על השער.
+// ⚠ הדגל פג אחרי PENDING_TTL_MS ונצרך פעם אחת — דגל ישן שנשאר דלוק הוא
+// בדיוק המנגנון שחוטף כניסה מאוחרת שאינה קשורה לתוסף.
+const PENDING_TTL_MS=15*60*1000;
+async function isracardOnAuth(tabId,fn){
+  const st=await chrome.storage.local.get({pendingIsracard:false,pendingIsracardAt:0});
+  const fresh=st.pendingIsracard&&Date.now()-Number(st.pendingIsracardAt||0)<PENDING_TTL_MS;
+  if(st.pendingIsracard)await chrome.storage.local.set({pendingIsracard:false,pendingIsracardAt:0});
+  if(!fresh)return maybeAutoRun('isracard','ישראכרט',fn,tabId);
+  try{return await fn(tabId)}
+  catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();return false}
+}
 async function maybeAutoRun(source,label,fn,tabId){
   if(running)return false;
   const st=await chrome.storage.local.get({autoSyncOnLogin:false,accounts:[],autoSyncLast:{}});
@@ -839,7 +855,7 @@ async function waitIsracardReady(tabId,suffix,month='',previousFingerprint=''){
   }
   throw Error(`כרטיס ${suffix}: חודש ${month||'נוכחי'} סומן אך טבלת העסקאות לא התייצבה`)
 }
-async function startIsracard(){const tab=await isracardTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — חיבור 1'});await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);await chrome.tabs.update(tab.id,{url:ISRACARD_HOME});await delay(1800);
+async function startIsracard(){await chrome.storage.local.set({pendingIsracard:true,pendingIsracardAt:Date.now()});const tab=await isracardTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — חיבור 1'});await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);await chrome.tabs.update(tab.id,{url:ISRACARD_HOME});await delay(1800);
   // ⚠ 18.08.2026 — לשונית על StatusPage **אינה הוכחה שהמשתמש מחובר**: זו בדיוק
   // הכתובת שנפתחת גם להתחברות, ו-isracardTab מסנן רק כתובות עם login/signin.
   // בלי הבדיקה הזו הסנכרון התחיל לפני שהמשתמש הקליד, לא מצא כרטיסים, ונכשל
