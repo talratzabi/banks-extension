@@ -86,6 +86,14 @@ async function returnToDashboard(tabId,force=false){
     const dashWin=await chrome.windows.get(dash.windowId).catch(()=>null),src=dashWin||win;
     const box={};
     for(const k of ['left','top','width','height'])if(Number.isFinite(src[k]))box[k]=src[k];
+    // ⚠ 18.08.2026: חלון עבודה בגודל ובמיקום **זהים** לדשבורד מכוסה לחלוטין, ו-Chrome
+    // מסמן חלון מכוסה כנסתר ומשהה בו rAF — הסיכון שנרשם ב-0.62.0. ישראכרט נפל בדיוק
+    // כך: רשימת הכרטיסים רונדרה לפני שהחלון ירד לרקע, ואחרי הניווט מחדש לא רונדרה שוב.
+    // היסט קטן משאיר שוליים גלויים בכל צד, בלי לשנות את הפריסה (1720 -> 1664).
+    if(Number.isFinite(box.left))box.left+=28;
+    if(Number.isFinite(box.top))box.top+=28;
+    if(Number.isFinite(box.width))box.width=Math.max(1100,box.width-56);
+    if(Number.isFinite(box.height))box.height=Math.max(700,box.height-56);
     if((win.tabs||[]).length>1){await chrome.windows.create({tabId,focused:false,...box});detachedForSync.add(tabId)}
     // לשונית שכבר לבדה בחלון — לא מעבירים, אבל כן מוודאים שהחלון בגודל שולחני.
     else if(Object.keys(box).length)await chrome.windows.update(tab.windowId,box).catch(()=>{});
