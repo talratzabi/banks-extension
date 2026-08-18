@@ -1103,8 +1103,22 @@ if(Date.now()-discountLastRun<DISCOUNT_COOLDOWN_MS){const wait=Math.ceil((DISCOU
 if(state.discountAttempts>=DISCOUNT_MAX_ATTEMPTS){await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0,syncStatus:`דיסקונט עסקי: ${DISCOUNT_MAX_ATTEMPTS} ניסיונות נכשלו — נעצר כדי לא להיכנס ללולאה. התחבר ידנית והפעל שוב.`});await chrome.runtime.openOptionsPage();return}
 discountBusy=true;discountLastRun=Date.now();
 await chrome.storage.local.set({discountAttempts:state.discountAttempts+1});
-try{return await runDiscoverDiscount(tabId,state)}finally{discountBusy=false;await restoreSyncTabs()}}
-async function runDiscoverDiscount(tabId,state){abortIfRequested();await prepareDiscountContent(tabId);const r=await raceAbort(withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),120000,'זיהוי הישויות'));
+// ⚠ 18.08.2026 — „טענתי, לחצתי, לא עובד". נמדד: הסטטוס קפא על „מזהה ישויות
+// וחשבונות" ולא נכתב אחריו **דבר**, וגם discountEntityReport נשאר ריק. הסיבה:
+// כשל כאן חזר רק ב-reply → טוסט חולף בדשבורד, ולא נכתב לשום מקום. כלומר לא היה
+// שום עקבות למדוד. עכשיו כל כשל נכתב לסטטוס **ולאחסון, עם כתובת הלשונית**.
+try{return await runDiscoverDiscount(tabId,state)}
+catch(e){const tab=await chrome.tabs.get(tabId).catch(()=>null);
+  await chrome.storage.local.set({discountDiscoverError:{message:String(e?.message||e).slice(0,200),url:String(tab?.url||'').slice(0,200),at:new Date().toISOString()},
+    syncStatus:`דיסקונט עסקי: ${String(e?.message||'הזיהוי נכשל').slice(0,140)}`});
+  throw e}
+finally{discountBusy=false;await restoreSyncTabs()}}
+async function runDiscoverDiscount(tabId,state){abortIfRequested();await prepareDiscountContent(tabId);// ⚠ ההמתנה הזו הייתה אילמת: עד 120 שניות בלי אף כתיבת סטטוס, ולכן „תקוע" ו„נכשל"
+// נראו זהים. פעימה כל 5 שניות, ותקרה של 60 שניות — די והותר לדף שכבר טעון.
+let beat=0;const heartbeat=setInterval(()=>{beat+=5;chrome.storage.local.set({syncStatus:`דיסקונט עסקי: ממתין לתשובת הדף (${beat} שנ' מתוך 60)`})},5000);
+let r=null;
+try{r=await raceAbort(withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),60000,'זיהוי הישויות'))}
+finally{clearInterval(heartbeat)}
 // שומרים את צילום המצב לפני שזורקים, כדי שהתיקון הבא ייכתב ממדידה ולא מהשערה.
 if(r?.probe)await chrome.storage.local.set({discountProbe:r.probe});
 if(!r?.ok)throw Error(r?.error||'זיהוי החשבונות נכשל');const raw=r.accounts||[];
