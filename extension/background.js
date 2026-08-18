@@ -378,6 +378,24 @@ async function maybeAutoRun(source,label,fn,tabId){
 // ── היסטוריית חיובים לכרטיסים ─────────────────────────────────────────────
 // הכתובת של ישראכרט כבר תומכת בחודש (monthAndYear=MMYYYY) ו-waitIsracardReady כבר מאמת
 // שהחודש שנטען הוא זה שביקשנו. לכן קריאת חודש היסטורי היא אותו מסלול בדיוק, עם פרמטר.
+// ⚠ „תחילת איסוף נתונים" — הגדרה גלובלית אחת (collectSince, YYYY-MM-DD) שחלה על
+// כל הבנקים והכרטיסים. נוספה 18.08.2026 לבקשת טל. הכלל: תנועה שתאריכה קודם לגבול
+// אינה נשמרת, וחודש שקודם לו אינו נקרא בכלל. תאריך שלא ניתן לפענוח **נשמר** —
+// עדיף להשאיר רשומה מסופקת מאשר למחוק בשקט.
+async function collectSinceMs(){const st=await chrome.storage.local.get({collectSince:''});const t=Date.parse(String(st.collectSince||''));return Number.isFinite(t)?t:0}
+function txDateMs(v){const s=String(v||'').trim();
+  let m=s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/);
+  if(m){const y=Number(m[3]);return Date.UTC(y<100?2000+y:y,Number(m[2])-1,Number(m[1]))}
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]));
+  const t=Date.parse(s);return Number.isFinite(t)?t:NaN}
+function keepSince(value,since){if(!since)return true;const ms=txDateMs(value);return !Number.isFinite(ms)||ms>=since}
+async function applyCollectSince(accounts){
+  const since=await collectSinceMs();if(!since)return accounts;
+  const keep=t=>keepSince(t?.date||t?.valueDate||t?.transactionDate,since);
+  return (accounts||[]).map(a=>({...a,
+    transactions:(a.transactions||[]).filter(keep),
+    cards:(a.cards||[]).map(c=>({...c,transactions:(c.transactions||[]).filter(keep)}))}));
+}
 const mmYYYY=d=>`${String(d.getMonth()+1).padStart(2,'0')}${d.getFullYear()}`;
 async function storeCardMonth(month,cards){
   const rawMonth=String(month||''),normalizedMonth=rawMonth.replace(/\D/g,'');
@@ -507,8 +525,15 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   }
   const active=summary.cards.filter(c=>!c.cancelled&&(!requested.size||requested.has(String(c.suffix))));
   if(!active.length)throw Error(requested.size?'הכרטיס שנבחר לא נמצא בחיבור ישראכרט הפעיל':'לא נמצאו כרטיסים פעילים');
-  const wanted=[];const d=new Date();
+  let wanted=[];const d=new Date();
   for(let i=0;i<months;i++){wanted.push(mmYYYY(d));d.setMonth(d.getMonth()-1)}
+  // גבול האיסוף חל גם כאן: אין טעם לפתוח דף של חודש שהמשתמש ביקש לא לאסוף.
+  {const since=await collectSinceMs();
+   if(since){const bound=new Date(since),boundOrd=bound.getUTCFullYear()*100+bound.getUTCMonth()+1;
+     const before=wanted.length;
+     wanted=wanted.filter(m=>Number(String(m).slice(2))*100+Number(String(m).slice(0,2))>=boundOrd);
+     if(wanted.length<before)await chrome.storage.local.set({syncStatus:`ישראכרט: ${before-wanted.length} חודשים קודמים לתחילת איסוף הנתונים ולא ייקראו`});
+     if(!wanted.length){await chrome.storage.local.set({syncStatus:'כל 12 החודשים קודמים לתאריך תחילת איסוף הנתונים — אין מה לאסוף'});return{ok:true,loaded:0,failed:[],skipped:0}}}}
   // טעינת שנה היא רענון מלא. אין לדלג לפי קיום חודש במסד: ריצה ישנה עלולה הייתה
   // לשמור את אותו דף תחת חודשים שונים. מוחקים רק את 12 חודשי המטמון המבוקשים;
   // כל חודש חוזר לתצוגה רק לאחר שהקריאה החדשה שלו הסתיימה ואומתה.
@@ -596,7 +621,7 @@ async function syncSelected(selectionKeys){
   try{
     const grouped={business:[],private:[],leumi:[],'discount-business':[],'discount-private':[],mizrahi:[]};for(const selectionKey of selectionKeys){const parts=String(selectionKey).split('|');if(parts.length===2&&grouped[parts[0]])grouped[parts[0]].push(parts[1]);else grouped.business.push(selectionKey)}
     const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);const all=saved.accounts.filter(a=>!syncedSources.includes(a.source||'business'));for(const source of syncedSources)all.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
-    const marked=markNewTransactions(saved.accounts,all,syncedSources),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
+    const marked=await applyCollectSince(markNewTransactions(saved.accounts,all,syncedSources)),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
     const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: ${marked.length} חשבונות`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress();await restoreSyncTabs()}
 }
@@ -784,7 +809,8 @@ async function harvestLeumiCheques(tabId,accounts,txUrl){const have=await cheque
 for(const a of accounts)for(const t of(a.transactions||[]))if(t.cheque){total++;
 if(!t.reference)noRef++;else if(have.has(chequeId(a.selectionKey,t.reference)))already++}
 chequeCtx={base:already,total,noRef,done:0,selectionKey:'',savedRefs:new Set()}}
-for(const a of accounts){const wanted=(a.transactions||[]).filter(t=>t.cheque&&t.reference&&!have.has(chequeId(a.selectionKey,t.reference))).map(t=>({date:t.date,reference:t.reference}));
+const chequeSince=await collectSinceMs();
+  for(const a of accounts){const wanted=(a.transactions||[]).filter(t=>t.cheque&&t.reference&&keepSince(t.date,chequeSince)&&!have.has(chequeId(a.selectionKey,t.reference))).map(t=>({date:t.date,reference:t.reference}));
 // ניווט אחד לכל הקציר; מעבר בין חשבונות נעשה בתוך הדף ולא בטעינה מחדש.
 if(!wanted.length)continue;asked+=wanted.length;chequeCtx.selectionKey=a.selectionKey;
 if(!routed){try{await prepareLeumiRoute(tabId,txUrl);routed=true}catch(e){why=`המעבר לדף התנועות נכשל: ${e.message}`;break}}
