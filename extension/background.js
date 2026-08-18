@@ -416,6 +416,10 @@ async function clickIsracardMonth(tabId,month){
     const names=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'],clean=v=>String(v||'').replace(/\s+/g,' ').trim(),target=String(wanted||'').replace(/\D/g,''),buttons=[...document.querySelectorAll('button')],months=buttons.filter(b=>names.includes(clean(b.innerText).replace(/\s+\d{2,4}$/,''))),selectedIndex=months.findIndex(b=>b.getAttribute('aria-selected')==='true');if(!/^\d{6}$/.test(target)||selectedIndex<0)return{ok:false,error:'החודש הפעיל לא זוהה'};const selectedText=clean(months[selectedIndex].innerText),name=names.find(x=>selectedText.includes(x)),year=selectedText.match(/(?:^|\s)(\d{2,4})(?:\s|$)/)?.[1];if(!name||!year)return{ok:false,error:'שנת החודש הפעיל לא זוהתה'};const current=`${String(names.indexOf(name)+1).padStart(2,'0')}${year.length===2?'20'+year:year}`;if(current===target)return{ok:true,month:current,clicked:false};const offset=(Number(target.slice(2))-Number(current.slice(2)))*12+Number(target.slice(0,2))-Number(current.slice(0,2)),button=months[selectedIndex+offset];if(!button)return{ok:false,error:`החודש ${target} אינו זמין בבורר`};button.click();return{ok:true,clicked:true,from:current,target};
   }});last=result[0]?.result||{ok:false,error:'הלחיצה על החודש לא בוצעה'};
   if(last.ok)return last;
+  // ⚠ 18.08.2026 — „אינו זמין בבורר" מוחזר **רק** כשהבורר כבר טעון והחודש פשוט אינו
+  // ברשימה (selectedIndex>=0 הוא תנאי מוקדם). זו תשובה סופית, ו-24 ניסיונות ×
+  // 500ms שרפו 12 שניות לכל חודש שאינו קיים — בדיוק מה שהאט כרטיס חדש או ריק.
+  if(/אינו זמין בבורר/.test(String(last.error||'')))return last;
   await chrome.storage.local.set({syncStatus:`ישראכרט: ממתין לבורר החודשים (${attempt+1}/24)`});
   await delay(500);
   }
@@ -522,7 +526,12 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   // הסשן של ישראכרט נסגר באמצע, וכל שאר הקריאות חזרו ריקות: הגלגל הראה 96/96
   // בעוד שנשמרו 6 חודשים בלבד. רצף כשלים על כרטיסים שונים אינו תקלת כרטיס אלא
   // ניתוק — עוצרים ואומרים זאת, במקום לטחון עוד 40 דפים ריקים.
-  let done=0,failed=[],oldestLoaded={},inactiveBefore=new Set(),streak=0,disconnected=false;
+  // ⚠ 18.08.2026 — „פעיל מחודש X" כבר נשמר ב-isracardActiveSince מריצות קודמות,
+  // אבל הריצה לא השתמשה בו והיתה מגלה אותו מחדש בכל פעם — כלומר משלמת שוב את
+  // מחיר החודשים שאינם קיימים. עכשיו הידע הזה מזריע את הסריקה מראש.
+  const knownSince=(await chrome.storage.local.get({isracardActiveSince:{}})).isracardActiveSince||{};
+  const ord=m=>{const v=String(m||'').replace(/\D/g,'');return v.length===6?Number(v.slice(2)+v.slice(0,2)):0};
+  let done=0,failed=[],oldestLoaded={},inactiveBefore=new Set(),streak=0,disconnected=false,preSkipped=0;
   for(const month of todo){
     const out=[];
     for(let i=0;i<active.length;i++){
@@ -530,14 +539,23 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
       // כרטיס חדש אינו קיים בחודשים שקדמו להנפקתו. לאחר שבורר החודשים של
       // ישראכרט מודיע שהחודש אינו זמין, מפסיקים לבקש חודשים ישנים יותר עבורו.
       if(inactiveBefore.has(String(card.suffix)))continue;
+      // כרטיס שכבר ידוע כפעיל רק מחודש מסוים — אין טעם לבקש חודשים שקדמו לו.
+      if(knownSince[String(card.suffix)]&&ord(month)<ord(knownSince[String(card.suffix)])){preSkipped++;continue}
       const pageStarted=Date.now();let pageOk=false;
       await syncStep(`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`,`כרטיס ${card.suffix} · ${String(month).slice(0,2)}/${String(month).slice(2)}`);
       try{
         out.push(await readIsracardCardMonth(tab.id,card,month));oldestLoaded[String(card.suffix)]=month;streak=0;pageOk=true;
       }catch(e){
-        if(/אינו זמין בבורר/.test(String(e?.message||''))&&oldestLoaded[String(card.suffix)]){
-          inactiveBefore.add(String(card.suffix));
-          await chrome.storage.local.set({syncStatus:`כרטיס ${card.suffix}: פעיל מחודש ${oldestLoaded[String(card.suffix)]} — לא נדרשת קריאה לחודשים קודמים`});
+        // ⚠ הסריקה יורדת מהחודש החדש לישן, ולכן חודש שאינו בבורר מבטיח שגם כל
+        // הקודמים לו אינם שם. עד 18.08.2026 נדרש כאן חודש שנטען קודם, ולכן כרטיס
+        // חדש או כרטיס בלי חיובים שנפל כבר בחודש הראשון סרק את כל 12 החודשים
+        // אחד-אחד — כל אחד מהם בעלות מלאה. עכשיו די בסימן אחד כדי לסגור אותו.
+        if(/אינו זמין בבורר/.test(String(e?.message||''))){
+          const suffix=String(card.suffix),since=oldestLoaded[suffix];
+          inactiveBefore.add(suffix);
+          await chrome.storage.local.set({syncStatus:since
+            ?`כרטיס ${suffix}: פעיל מחודש ${since} — לא נדרשת קריאה לחודשים קודמים`
+            :`כרטיס ${suffix}: ישראכרט אינו מציע את חודש ${month} — הכרטיס חדש או ללא חיובים, מדלג על החודשים הקודמים`});
         }else{failed.push(`${month}/${card.suffix}`);streak++}
       }
       finally{
@@ -555,8 +573,9 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   }
   await endProgress();
   const state=await chrome.storage.local.get({isracardActiveSince:{}}),activeSince={...(state.isracardActiveSince||{})};
-  for(const card of active){const suffix=String(card.suffix);if(inactiveBefore.has(suffix))activeSince[suffix]=oldestLoaded[suffix];else delete activeSince[suffix]}
+  for(const card of active){const suffix=String(card.suffix);if(inactiveBefore.has(suffix)&&oldestLoaded[suffix])activeSince[suffix]=oldestLoaded[suffix];else delete activeSince[suffix]}
   await chrome.storage.local.set({isracardActiveSince:activeSince});
+  if(preSkipped)await chrome.storage.local.set({syncStatus:`ישראכרט: דילג על ${preSkipped} קריאות לחודשים שקדמו למועד הפתיחה הידוע של הכרטיסים`});
   await chrome.storage.local.set({syncStatus:disconnected
     ?`ישראכרט ניתק את הסשן — נשמרו ${done} חודשים ונעצרנו. התחבר שוב ולחץ על טעינת השנה; מה שנשמר נשאר.`
     :`היסטוריית כרטיסים: נטענו ${done} חודשים${failed.length?`, נכשלו ${failed.join(', ')}`:''}`});
