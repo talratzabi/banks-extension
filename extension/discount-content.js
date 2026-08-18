@@ -28,10 +28,24 @@ buttons:[...document.querySelectorAll('button,[role="button"],[role="combobox"]'
 head:f(document.body.innerText).slice(0,500)}}catch(e){return{probeError:e.message}}}
 const entityButton=()=>{const all=[...document.querySelectorAll('button[aria-haspopup],[role="combobox"],button,[role="button"]')].filter(b=>ENTITY.test(text(b))&&!b.closest('[role="menu"],[role="listbox"],[role="dialog"]'));return all.find(b=>b.hasAttribute('aria-haspopup')||b.hasAttribute('aria-expanded'))||all[0]};
 const entityId=v=>(String(v).match(/\b(\d{9})\b/)||[])[1]||'';
+// ⚠ 18.08.2026 — נמדד מתוך discountProbe של הריצה שנכשלה, ולא שוחזר בהשערה:
+//   trigger="024844714 טל רצבי" · expanded=true · menus=0 · listboxes=0 · menuItems=[]
+//   ובטקסט הדף היו כל חמש הישויות. כלומר **הבורר נפתח, אבל האפשרויות אינן בתוך
+//   role=menu/listbox** — ולכן menuEntities החזיר ריק ו„לא זוהו ישויות" הוצג.
+// לכן נוספה נפילה לאחור רחבה: כל אלמנט לחיץ שמכיל מזהה בן 9 ספרות, שאינו הבורר
+// עצמו ואינו עוטף מועמד אחר (הפנימי ביותר בלבד). המסלול המקורי נשאר ראשון.
+const menuEntitiesLoose=()=>{
+  const trigger=entityButton();
+  const raw=[...document.querySelectorAll('button,[role="button"],[role="option"],[role="menuitem"],li,a,div[tabindex]')]
+    .filter(el=>ENTITY.test(text(el))&&text(el).length<90&&el!==trigger&&!(trigger&&el.contains(trigger)));
+  // הפנימי ביותר: אלמנט שמכיל מועמד אחר הוא מכולה, לא אפשרות.
+  return raw.filter(el=>!raw.some(other=>other!==el&&el.contains(other)));
+};
 async function entityOptions(){const trigger=entityButton();if(!trigger)throw Error('לא נמצא בורר הישויות בדיסקונט עסקי');
 const already=menuEntities();if(already.length)return already;
 realClick(trigger);
 for(let i=0;i<40;i++){await wait(250);const opts=menuEntities();if(opts.length)return opts}
+const loose=menuEntitiesLoose();if(loose.length)return loose;
 return menuEntities()}
 // ⚠ מעבר בין ישויות טוען מחדש את הדף והורג את ה-content script — הערוץ נסגר באמצע
 // ('message channel closed'). לכן הזיהוי אינו עובר בין ישויות: הוא מונה אותן בלבד.
