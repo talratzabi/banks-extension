@@ -792,15 +792,24 @@ async function probeActiveTab(){
   // הדשבורד עצמו**: הלחיצה מתבצעת בחלון הדשבורד, ושם הלשונית הפעילה היא הדשבורד.
   // התוצאה הייתה תמיד „הלשונית הפעילה אינה דף בנק (chrome-extension://…)".
   // הבחירה הנכונה: הלשונית ה-https הפעילה שנצפתה לאחרונה, בכל החלונות.
-  const candidates=(await chrome.tabs.query({active:true})).filter(t=>t?.id&&/^https:/.test(t.url||''));
-  candidates.sort((a,b)=>(b.lastAccessed||0)-(a.lastAccessed||0));
-  const tab=candidates[0];
-  if(!tab?.id)throw Error('לא נמצאה לשונית בנק פתוחה — פתח את דף הבנק והשאר אותו הלשונית הפעילה בחלון שלו');
+  // ⚠ 18.08.2026 — lastAccessed אינו קיים בכל גרסאות Chrome, ואז המיון שרירותי
+  // והמדידה נופלת על לשונית זרה. לכן קודם כל **מארחי בנק מוכרים** מתוך
+  // host_permissions, ורק אחר כך כל https אחר.
+  const BANK_HOST=/(bankhapoalim|bankhapoalim\.biz|leumi|bankleumi|bank-yahav|yahav|discountbank|telebank|fibi|mizrahi-tefahot|isracard|cal-online|max)\./i;
+  const open_=(await chrome.tabs.query({})).filter(t=>t?.id&&/^https:/.test(t.url||''));
+  const rank=t=>(BANK_HOST.test(new URL(t.url).hostname)?0:1);
+  open_.sort((a,b)=>rank(a)-rank(b)||(b.lastAccessed||0)-(a.lastAccessed||0)||(b.active?1:0)-(a.active?1:0));
+  const tab=open_[0];
+  if(!tab?.id)throw Error('לא נמצאה לשונית בנק פתוחה — פתח את דף הבנק ונסה שוב');
+  if(rank(tab))throw Error(`הלשונית שנמצאה אינה אתר בנק מוכר (${new URL(tab.url).hostname}) — פתח את דף הבנק ונסה שוב`);
+  // ⚠ המדידה נתקעה אצל טל והכפתור נשאר „מודד…" בלי סוף: לא היה טיימאאוט ולא היה
+  // שום סימן איזו לשונית נבחרה. שני הדברים מטופלים כאן — קודם מדווחים, ואז מודדים.
+  await chrome.storage.local.set({syncStatus:`מודד את ${new URL(tab.url).hostname}…`});
   if(!/^https:/.test(tab.url||''))throw Error(`הלשונית הפעילה אינה דף בנק (${tab.url||'ללא כתובת'})`);
-  try{await chrome.scripting.executeScript({target:{tabId:tab.id},files:['probe-content.js']})}
-  catch(e){throw Error(`אין הרשאה למדוד את ${new URL(tab.url).hostname} — יש להוסיף אותו ל-host_permissions. (${e.message})`)}
+  try{await withTimeout(chrome.scripting.executeScript({target:{tabId:tab.id},files:['probe-content.js']}),15000,'הזרקת הגשש')}
+  catch(e){throw Error(`הגשש לא נטען ב-${new URL(tab.url).hostname}: ${e.message}`)}
   await delay(400);
-  const r=await chrome.tabs.sendMessage(tab.id,{type:'BANK_PROBE'});
+  const r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'BANK_PROBE'}),20000,'המדידה');
   if(!r?.ok)throw Error(r?.error||'המדידה לא החזירה דבר');
   await chrome.storage.local.set({bankProbe:r.probe,syncStatus:`נמדד: ${r.probe.host} · ${r.probe.grid?.datedRows||0} שורות עם תאריך · ${r.probe.accounts?.length||0} מספרי חשבון`});
   return{ok:true,host:r.probe.host};
