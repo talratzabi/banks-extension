@@ -366,7 +366,7 @@ document.addEventListener('click',async e=>{
   if(!b||!b.dataset.suffix)return;
   e.preventDefault();e.stopPropagation();
   const suffix=b.dataset.suffix;
-  if(!confirm(`למחוק את כל היסטוריית הכרטיס ${suffix} מהמחשב הזה?\n\nהנתונים אצל חברת האשראי אינם נמחקים, ואפשר לסנכרן שוב.`))return;
+  if(!confirm(`להסיר את כרטיס ${suffix} מהתצוגה?\n\nההיסטוריה השמורה תימחק, והכרטיס לא יחזור בסנכרון הבא.\nהנתונים אצל חברת האשראי אינם נמחקים — אפשר לשחזר מ"כרטיסים שהוסרו".`))return;
   const original=b.textContent;b.disabled=true;b.textContent='מוחק…';
   try{
     const r=await chrome.runtime.sendMessage({type:'CARD_HISTORY_DELETE_CARD',suffix});
@@ -381,7 +381,7 @@ document.addEventListener('click',async e=>{
 // ── כרטיסים שהוסתרו ──────────────────────────────────────────────────────
 // מחיקה מקומית אינה מוחקת את הכרטיס אצל חברת האשראי, ולכן סנכרון מחזיר אותו.
 // הרשימה הזו היא מה שמונע את החזרה — והיא הפיכה, כי הסתרה בטעות קורית.
-var hiddenCards=[];
+var hiddenCards=[],removedCardsOpen=false;
 function cardHidden(c){
   const d=String((c&&c.suffix)||c||'').replace(/\D/g,'');
   return !!d&&hiddenCards.some(h=>h&&(d.endsWith(h)||h.endsWith(d)));
@@ -389,22 +389,38 @@ function cardHidden(c){
 function renderHiddenCards(){
   const box=document.querySelector('#allCards');
   if(!box)return;
-  document.getElementById('hiddenCardsNote')?.remove();
+  document.getElementById('removedCardsBox')?.remove();
   if(!hiddenCards.length)return;
-  const note=document.createElement('div');
-  note.id='hiddenCardsNote';note.className='empty';
-  note.style.cssText='margin-top:10px;text-align:start';
-  note.innerHTML=`כרטיסים שהוסתרו: ${hiddenCards.map(h=>`<span class="source-badge">${esc(h)}</span> `
-    +`<button type="button" class="button secondary restore-card" data-suffix="${esc(h)}">החזר</button>`).join(' · ')}`;
-  box.appendChild(note);
+  const open=removedCardsOpen;
+  const wrap=document.createElement('section');
+  wrap.id='removedCardsBox';
+  wrap.className='panel';
+  wrap.style.cssText='margin-top:14px';
+  wrap.innerHTML=`<button type="button" id="removedCardsToggle" class="button secondary">`
+    +`כרטיסים שהוסרו · ${hiddenCards.length} ${open?'▲':'▼'}</button>`
+    +(open?`<p style="margin:10px 0 6px">הכרטיסים האלה הוסרו מהתצוגה ואינם חוזרים בסנכרון. `
+      +`הנתונים אצל חברת האשראי לא נמחקו — שחזור יחזיר אותם בסנכרון הבא.</p>`
+      +`<div class="removed-cards">${hiddenCards.map(h=>`<div class="removed-card-row" style="display:flex;align-items:center;gap:10px;padding:6px 0">`
+        +`<span class="source-badge">כרטיס ${esc(h)}</span>`
+        +`<button type="button" class="button secondary restore-card" data-suffix="${esc(h)}">שחזר כרטיס</button>`
+      +`</div>`).join('')}</div>`:'');
+  box.appendChild(wrap);
 }
 document.addEventListener('click',async e=>{
   const b=e.target.closest('.restore-card');
   if(!b||!b.dataset.suffix)return;
   e.preventDefault();e.stopPropagation();
   const suffix=b.dataset.suffix;
+  if(!confirm(`לשחזר את כרטיס ${suffix}? הוא יופיע שוב אחרי הסנכרון הבא.`))return;
   const st=await chrome.storage.local.get({hiddenCards:[]});
   await chrome.storage.local.set({hiddenCards:(st.hiddenCards||[]).filter(h=>String(h)!==String(suffix))});
   toast(`כרטיס ${suffix} יוצג שוב אחרי הסנכרון הבא`);
   await load();
+});
+
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#removedCardsToggle'))return;
+  e.preventDefault();
+  removedCardsOpen=!removedCardsOpen;
+  renderHiddenCards();
 });
