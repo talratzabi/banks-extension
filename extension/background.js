@@ -116,9 +116,18 @@ async function returnToDashboard(tabId,force=false){
 
 // התקדמות הסנכרון: שלב מתוך סך, וזמן ההתחלה — הדשבורד גוזר מהם אחוז והערכת זמן.
 let progressState=null;
-async function beginProgress(total){progressState={done:0,total,startedAt:Date.now()};await chrome.storage.local.set({syncProgress:progressState})}
+// ⚠ „עצור סנכרון" — נוסף 18.08.2026 לבקשת טל, ליד הגלגל. הדגל נבדק בנקודות
+// שהלולאות עוברות בהן בכל צעד: syncStep (בנקים וכרטיסים), אצוות השיקים, לולאת
+// חודשי ישראכרט ולולאת הישויות בדיסקונט. אין הרג באמצע כתיבה — הבדיקה תמיד
+// לפני הצעד הבא, ולכן מה שנשמר עד העצירה נשאר שמור.
+let abortFlag=false;
+function abortIfRequested(){if(abortFlag)throw Error(ABORT_MESSAGE)}
+const ABORT_MESSAGE='הסנכרון נעצר לבקשתך';
+async function clearAbort(){abortFlag=false;await chrome.storage.local.set({syncAbort:false})}
+async function requestAbort(){abortFlag=true;await chrome.storage.local.set({syncAbort:true,syncStatus:'עוצר את הסנכרון…'});return{ok:true}}
+async function beginProgress(total){await clearAbort();progressState={done:0,total,startedAt:Date.now()};await chrome.storage.local.set({syncProgress:progressState})}
 // action = הטקסט הקצר שנכתב בתוך הגלגל. נפרד מהסטטוס המלא, שנשאר ארוך ומפורט.
-async function syncStep(status,action=''){if(progressState)progressState={...progressState,done:Math.min(progressState.done+1,progressState.total),action};await chrome.storage.local.set({syncStatus:status,syncProgress:progressState})}
+async function syncStep(status,action=''){abortIfRequested();if(progressState)progressState={...progressState,done:Math.min(progressState.done+1,progressState.total),action};await chrome.storage.local.set({syncStatus:status,syncProgress:progressState})}
 async function endProgress(){progressState=null;await chrome.storage.local.set({syncProgress:null})}
 // מחיקת כרטיס = היסטוריה **וגם** הכרטיס עצמו. נוסף 18.08.2026 אחרי דיווח:
 // „במחק כרטיס החיוב הקרוב נשאר" — כי נמחקה רק ההיסטוריה, בעוד החיוב הקרוב
@@ -185,6 +194,7 @@ const transient=/Receiving end does not exist|message port closed|No tab with id
 await chrome.storage.local.set({pendingLeumi:transient,syncStatus:`שגיאה בלאומי: ${e.message}${transient?' — נשאר דרוך, רענן את לשונית לאומי והוא ימשיך מעצמו':''}`});await chrome.runtime.openOptionsPage()});reply({ok:true});return}
   if(m?.type==='OPEN_LEUMI_CHEQUE'){openLeumiCheque(m).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='DISCOUNT_PROGRESS'){chrome.storage.local.set({syncStatus:String(m.text||'')});reply({ok:true});return}
+  if(m?.type==='ABORT_SYNC'){requestAbort().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='PROBE_ACTIVE_TAB'){probeActiveTab().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='ISRACARD_AUTHENTICATED'&&sender.tab?.id){isracardOnAuth(sender.tab.id,async id=>{// ⚠ runIsracard קורא את רשימת הכרטיסים מדף הסטטוס. startIsracard מנווט לשם קודם,
 // והמסלול האוטומטי דילג על כך — ולכן הרשימה 'לא נטענה' כשהמשתמש היה בדף כרטיס בודד.
@@ -572,6 +582,7 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
       const card=active[i];
       // כרטיס חדש אינו קיים בחודשים שקדמו להנפקתו. לאחר שבורר החודשים של
       // ישראכרט מודיע שהחודש אינו זמין, מפסיקים לבקש חודשים ישנים יותר עבורו.
+      abortIfRequested();
       if(inactiveBefore.has(String(card.suffix)))continue;
       // כרטיס שכבר ידוע כפעיל רק מחודש מסוים — אין טעם לבקש חודשים שקדמו לו.
       if(knownSince[String(card.suffix)]&&ord(month)<ord(knownSince[String(card.suffix)])){preSkipped++;continue}
@@ -629,7 +640,7 @@ async function syncSelected(selectionKeys){
     if(syncedSources.includes('discount-private'))await chrome.storage.local.set({pendingDiscountPrivate:false});
     const marked=await applyCollectSince(markNewTransactions(saved.accounts,all,syncedSources)),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
     const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: ${marked.length} חשבונות`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
-  }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress();await restoreSyncTabs()}
+  }catch(e){await chrome.storage.local.set({syncStatus:e.message===ABORT_MESSAGE?`${ABORT_MESSAGE} — מה שנקרא עד כאן נשמר`:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress();await clearAbort();await restoreSyncTabs()}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
 function transactionSyncKey(t){return JSON.stringify([t?.date||'',t?.action||'',t?.details||'',t?.reference||'',Number(t?.debit)||0,Number(t?.credit)||0,t?.balance==null?'':Number(t.balance)])}
@@ -836,7 +847,7 @@ const chequeSince=await collectSinceMs();
 if(!wanted.length)continue;asked+=wanted.length;chequeCtx.selectionKey=a.selectionKey;
 if(!routed){try{await prepareLeumiRoute(tabId,txUrl);routed=true}catch(e){why=`המעבר לדף התנועות נכשל: ${e.message}`;break}}
 // באצוות, כדי שכשל באמצע לא יזרוק את מה שכבר ירד
-for(let i=0;i<wanted.length;i+=6){const batch=wanted.slice(i,i+6);let r=null;
+for(let i=0;i<wanted.length;i+=6){if(abortFlag){why=why||ABORT_MESSAGE;break}const batch=wanted.slice(i,i+6);let r=null;
 try{r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_CHEQUE_IMAGES',wanted:batch,key:a.key,offset:i,total:wanted.length}),300000,'צילומי שיקים בלאומי')}catch(e){why=why||e.message}
 if(!r?.ok){
       // ⚠ מה שנשמר חי אינו כישלון, גם אם האצווה כולה לא חזרה.
@@ -1085,6 +1096,7 @@ await chrome.storage.local.set({discoveredAccounts:[...otherBanks,...raw.map(asC
 await chrome.runtime.openOptionsPage();
 for(let i=0;i<raw.length;i++){const a=raw[i],want=a.entityId||a.key;
 // ⚠ יציאה באמצע: אם הדגל נסגר (סנכרון שהמשתמש סיים, או עצירה), אין להמשיך לנווט.
+if(abortFlag)break;
 if(!(await chrome.storage.local.get({pendingDiscountBusiness:false})).pendingDiscountBusiness)break;
 await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: מזהה מספר חשבון ${i+1} מתוך ${raw.length}`});if(a.branch&&a.accountNumber)continue;
 // מעבר ישות הוא SPA ולעיתים ההודעה הראשונה חוזרת לפני שהכותרת ומספר החשבון

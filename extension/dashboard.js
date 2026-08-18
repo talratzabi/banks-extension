@@ -295,7 +295,7 @@ $('#chequeModal').classList.remove('hidden')}
 $('#closeChequeModal').onclick=()=>$('#chequeModal').classList.add('hidden');
 $('#chequeModal').onclick=e=>{if(e.target.id==='chequeModal')e.currentTarget.classList.add('hidden')};
 $('#allLoans').onclick=async e=>{if(!e.target.closest('#toggleMortgages'))return;hideMortgages=!hideMortgages;await chrome.storage.local.set({hideMortgages});render();toast(hideMortgages?'המשכנתאות הוסרו מהתצוגה ומהסיכומים':'המשכנתאות הוחזרו לתצוגה ולסיכומים')};
-const chequeStyles=document.createElement('style');chequeStyles.textContent='.collect-since select{margin-inline-start:8px;font:inherit;padding:4px 8px;border-radius:8px}.collect-since{align-items:center}.auto-sync{display:inline-flex;align-items:center;gap:6px;font-weight:800;color:#173b86;background:#eef4ff;border-radius:999px;padding:8px 14px}.choice-id{font-variant-numeric:tabular-nums;font-weight:800;letter-spacing:.02em;direction:ltr;text-align:right;display:block}.cheque-shots{display:grid;gap:14px}.cheque-shots figure{margin:0}.cheque-shots figcaption{font-weight:800;margin-bottom:6px;color:#6d788b}.cheque-shots img{width:100%;max-width:640px;border:1px solid #e5eaf1;border-radius:10px;display:block}';document.head.appendChild(chequeStyles);
+const chequeStyles=document.createElement('style');chequeStyles.textContent='#stopSync{margin-top:6px;display:block}.collect-since select{margin-inline-start:8px;font:inherit;padding:4px 8px;border-radius:8px}.collect-since{align-items:center}.auto-sync{display:inline-flex;align-items:center;gap:6px;font-weight:800;color:#173b86;background:#eef4ff;border-radius:999px;padding:8px 14px}.choice-id{font-variant-numeric:tabular-nums;font-weight:800;letter-spacing:.02em;direction:ltr;text-align:right;display:block}.cheque-shots{display:grid;gap:14px}.cheque-shots figure{margin:0}.cheque-shots figcaption{font-weight:800;margin-bottom:6px;color:#6d788b}.cheque-shots img{width:100%;max-width:640px;border:1px solid #e5eaf1;border-radius:10px;display:block}';document.head.appendChild(chequeStyles);
 $('#accounts').onchange=async e=>{const select=e.target.closest('.account-kind');if(!select)return;accountKinds[select.dataset.key]=select.value;await chrome.storage.local.set({accountKinds});render()};
 $('#confirmSelection').onclick=async()=>{document.querySelectorAll('.discovered-kind').forEach(s=>accountKinds[s.dataset.key]=s.value);const keys=[...document.querySelectorAll('#discoveredAccounts input:checked')].map(x=>x.value);if(!keys.length)return toast('יש לבחור לפחות חשבון אחד');await chrome.storage.local.set({selectedAccountKeys:keys,accountKinds});const button=$('#confirmSelection');button.disabled=true;button.textContent='מסנכרן את החשבונות שנבחרו…';const response=await chrome.runtime.sendMessage({type:'SYNC_SELECTED',keys});button.disabled=false;button.textContent='אישור וסנכרון המסומנים';if(!response?.ok)return toast(response?.error||'הסנכרון נכשל');toast(`${response.count} חשבונות סונכרנו`);await load()};
 function toast(text){const el=$('#toast');el.textContent=text;el.classList.remove('hidden');setTimeout(()=>el.classList.add('hidden'),4500)}
@@ -327,6 +327,10 @@ function etaText(p){
   return `נותרו כ-${Math.floor(remain/60)}:${String(remain%60).padStart(2,'0')} דק׳`;
 }
 function progressLine(p){return `שלב ${p.done} מתוך ${p.total} · ${etaText(p)}`}
+document.addEventListener('click',async e=>{const b=e.target.closest('#stopSync');if(!b)return;
+  b.disabled=true;b.textContent='עוצר…';
+  try{await chrome.runtime.sendMessage({type:'ABORT_SYNC'});toast('בקשת העצירה נשלחה — הסנכרון ייעצר בסוף הצעד הנוכחי')}
+  catch(err){b.disabled=false;b.textContent='עצור סנכרון';toast(err?.message||'בקשת העצירה לא נשלחה')}});
 function renderSyncProgress(p,status=''){
   const banner=document.getElementById('syncBanner');
   if(!banner)return;
@@ -343,7 +347,9 @@ function renderSyncProgress(p,status=''){
     `<circle cx="30" cy="30" r="26" class="ring-fill" stroke-dasharray="${pct==null?`${C*0.25} ${C}`:C}" stroke-dashoffset="${pct==null?0:C*(1-pct/100)}"></circle>`+
     `</svg><div class="ring-center"><strong>${pct==null?'':pct+'%'}</strong>`+
     `<span>${esc(action)}</span></div></div>`+
-    `<div class="sync-ring-text"><small id="syncEta">${lastProgress?progressLine(lastProgress):'בתהליך'}</small></div>`;
+    `<div class="sync-ring-text"><small id="syncEta">${lastProgress?progressLine(lastProgress):'בתהליך'}</small>`+
+    // ⚠ „עצור סנכרון" ליד הגלגל, לבקשת טל. עצירה בין צעד לצעד — מה שנשמר נשאר.
+    `<button type="button" class="button secondary" id="stopSync">עצור סנכרון</button></div>`;
   banner.appendChild(wrap);
   if(progressTicker)clearInterval(progressTicker);
   progressTicker=setInterval(()=>{
