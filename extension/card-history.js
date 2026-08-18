@@ -42,6 +42,17 @@ async function cardHistStats(){
   for(const item of Object.values(out)){item.months.sort().reverse();item.count=item.months.length}
   return out;
 }
+// מוחק את כל היסטוריית הכרטיס, בכל החודשים. נוסף 18.08.2026 לבקשת טל:
+// כרטיס שנטען בטעות לא היה ניתן להסרה, ורק הצטבר בתצוגה.
+async function cardHistDeleteCard(suffix){
+  const key=String(suffix||'');if(!key)return 0;
+  const db=await cardHistDb();return new Promise((resolve,reject)=>{
+    const tx=db.transaction(CARDHIST_STORE,'readwrite'),st=tx.objectStore(CARDHIST_STORE),req=st.getAll();let n=0;
+    req.onsuccess=()=>{for(const r of req.result||[])if(String(r.suffix)===key){st.delete(r.id);n++}};
+    req.onerror=()=>reject(req.error);tx.oncomplete=()=>resolve(n);tx.onerror=()=>reject(tx.error);
+    tx.onabort=()=>reject(tx.error||Error('מחיקת היסטוריית הכרטיס בוטלה'));
+  });
+}
 async function cardHistDeleteMonths(months,suffixes=[]){
   const wanted=new Set((months||[]).map(String)),cards=new Set((suffixes||[]).map(String));if(!wanted.size)return 0;
   const db=await cardHistDb();return new Promise((resolve,reject)=>{

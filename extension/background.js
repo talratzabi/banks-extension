@@ -147,6 +147,7 @@ await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsr
   if(m?.type==='LOAD_CARD_MONTH'){loadIsracardMonth(String(m.month||'')).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='LOAD_CARD_YEAR'){const suffixes=Array.isArray(m.suffixes)?m.suffixes:[];loadIsracardYear(Number(m.months)||12,suffixes).then(reply).catch(async e=>{const card=suffixes.length?` לכרטיס ${suffixes.join(', ')}`:'';await chrome.storage.local.set({syncStatus:`ישראכרט${card}: הסנכרון לא התחיל — ${e.message}`});reply({ok:false,error:e.message})});return true}
   if(m?.type==='CARD_MONTHS'){cardHistMonths().then(months=>reply({ok:true,months})).catch(e=>reply({ok:false,error:e.message}));return true}
+  if(m?.type==='CARD_HISTORY_DELETE_CARD'){cardHistDeleteCard(m.suffix).then(removed=>reply({ok:true,removed})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='CARD_HISTORY_STATS'){cardHistStats().then(stats=>reply({ok:true,stats})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='CARD_MONTH_DATA'){cardHistGetMonth(String(m.month||'')).then(rows=>reply({ok:true,rows})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='OPEN_DASHBOARD'){chrome.runtime.openOptionsPage();reply({ok:true});return}
@@ -384,7 +385,7 @@ async function readIsracardCardMonth(tabId,card,month){
 }
 async function loadIsracardMonth(month){
   let tab=await isracardTab();
-  if(!tab){await chrome.windows.create({url:ISRACARD_LOGIN,type:'popup',width:560,height:780,focused:true});
+  if(!tab){await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});
     await chrome.storage.local.set({syncStatus:'ישראכרט: נפתח האתר — התחבר ואז בחר את החודש שוב'});
     return{ok:false,error:'נפתח אתר ישראכרט. התחבר, ואז נסה שוב.'}}
   if(running||autoBusy||isracardHistoryBusy)throw Error('סנכרון אחר כבר רץ — המתן לסיומו ונסה שוב');
@@ -409,7 +410,7 @@ async function loadIsracardYear(months=12,suffixes=[]){
   // ⚠ אם אין לשונית מחוברת — פותחים את האתר במקום לזרוק שגיאה. isracardTab מתעלם
   // מדפי התחברות, ולכן גם כשהמשתמש עומד על מסך הכניסה נראה כאילו "אין לשונית".
   let tab=await isracardTab();
-  if(!tab){await chrome.windows.create({url:ISRACARD_LOGIN,type:'popup',width:560,height:780,focused:true});
+  if(!tab){await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});
     await chrome.storage.local.set({syncStatus:'ישראכרט: נפתח האתר — התחבר ואז לחץ שוב על "טען שנה אחורה"'});
     return{ok:false,error:'נפתח אתר ישראכרט. התחבר, ואז לחץ שוב.'}}
   if(running||autoBusy||isracardHistoryBusy)throw Error('סנכרון אחר כבר רץ — המתן לסיומו ונסה שוב');
@@ -751,7 +752,11 @@ const ISRACARD_HOME='https://web.isracard.co.il/StatusPage';
 // הועתק כלשונו, בלי returnUrl מורכב — הזרימה ממילא מנווטת ל-StatusPage בעצמה.
 // ⚠ מארח **אחר** (digital) מזה שבו מזוהה סשן (web), ולכן חלונית ההתחברות אינה
 // יכולה להיחשב סשן מחובר. זו המלכודת שהפילה את דיסקונט ב-0.75.1 — כאן היא לא קיימת.
-const ISRACARD_LOGIN='https://digital.isracard.co.il/personalarea/Login/';
+// ⚠ 18.08.2026 — הכתובת נמדדה נכון, אבל **המארח שגוי לזרימה**. ההתחברות עליו
+// אינה מבטיחה סשן על web.isracard.co.il, שם הסנכרון קורא את רשימת הכרטיסים,
+// והתוצאה הייתה "רשימת הכרטיסים לא נטענה" לסירוגין. נשמר לתיעוד; אינו בשימוש.
+// **הפתיחה חזרה ל-ISRACARD_HOME, שממנו האתר מפנה להתחברות ומחזיר לאותו מארח.**
+const ISRACARD_LOGIN_UNUSED='https://digital.isracard.co.il/personalarea/Login/';
 // שלוש כתובות כניסה נוספות, כולן נמדדו 18.08.2026 מתוך ה-href באתרי הבנקים.
 // כאל ולאומי יושבות על מארחי הסשן שלהן, ולכן `calTab` ו-`leumiSession` מסננים
 // אותן במפורש. מקס — `/login` בטווח השאילתה של `maxTab`, ולכן גם שם.
@@ -776,7 +781,7 @@ async function waitIsracardReady(tabId,suffix,month='',previousFingerprint=''){
   }
   throw Error(`כרטיס ${suffix}: חודש ${month||'נוכחי'} סומן אך טבלת העסקאות לא התייצבה`)
 }
-async function startIsracard(){const tab=await isracardTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — חיבור 1'});await chrome.windows.create({url:ISRACARD_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);await chrome.tabs.update(tab.id,{url:ISRACARD_HOME});await delay(1800);try{const result=await runIsracard(tab.id);return{ok:true,status:'done',...result}}catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();throw e}}
+async function startIsracard(){const tab=await isracardTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — חיבור 1'});await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);await chrome.tabs.update(tab.id,{url:ISRACARD_HOME});await delay(1800);try{const result=await runIsracard(tab.id);return{ok:true,status:'done',...result}}catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();throw e}}
 async function runIsracard(tabId){await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<12;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length)throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');const active=summary.cards.filter(c=>!c.cancelled),details=[];
   // הגלגל מציג את ארבע הספרות של הכרטיס הנקרא כרגע, לבקשת טל.
 await beginProgress(active.length);

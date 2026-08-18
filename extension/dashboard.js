@@ -134,7 +134,7 @@ async function renderCardMonthPicker(){
     +`<button type="button" class="button secondary" id="loadCardYear">טען שנה אחורה — ישראכרט</button>`
     +`<small class="sync-detail">${saved.length?`שמורים ${saved.length} חודשים`:'טרם נשמרה היסטוריה'}${cardMonth?` · מוצג ${monthLabel(cardMonth)}`:''}</small>`;
 }
-const cardHistoryMark=suffix=>{const stat=cardHistoryStats[String(suffix)]||{},n=Number(stat.count)||0,since=stat.activeSince;return n?`<span class="source-badge">כבר סונכרן · ${n} חודשים${since?` · פעיל מחודש ${esc(monthLabel(since))}`:''}</span>`:''},cardHistoryButton=suffix=>`${cardHistoryStats[String(suffix)]?.count?'סנכרן מחדש':'סנכרן שנה'}`;
+const cardHistoryMark=suffix=>{const stat=cardHistoryStats[String(suffix)]||{},n=Number(stat.count)||0,since=stat.activeSince;const months=n===1?'חודש אחד':`${n} חודשים`;return n?`<span class="source-badge">כבר סונכרן · ${months}${since?` · פעיל מחודש ${esc(monthLabel(since))}`:''}</span> <button type="button" class="button secondary delete-card-history" data-suffix="${esc(String(suffix||''))}" title="מוחק את היסטוריית הכרטיס השמורה מקומית">מחק כרטיס</button>`:''},cardHistoryButton=suffix=>`${cardHistoryStats[String(suffix)]?.count?'סנכרן מחדש':'סנכרן שנה'}`;
 const isOtherIssuer=card=>/\b(?:MAX|CAL)\b|כאל|מקס/i.test(`${card.issuer||''} ${card.name||''}`),cardSyncControl=(account,card)=>{const text=`${card.issuer||''} ${card.name||''}`,cal=/\bCAL\b|כאל/i.test(text)?`<button type="button" class="button secondary sync-cal-card" data-suffix="${esc(card.suffix||'')}">סנכרן שנה מכאל</button>`:'',max=/\bMAX\b|מקס/i.test(text)?`<button type="button" class="button secondary sync-max-card" data-suffix="${esc(card.suffix||'')}">סנכרן שנה מ‑MAX</button>`:'',isracard=isOtherIssuer(card)?'':`${cardHistoryMark(card.suffix)} <button type="button" class="button secondary sync-card-history" data-suffix="${esc(card.suffix||'')}">${cardHistoryStats[String(card.suffix)]?.count?'סנכרן מחדש מישראכרט':'סנכרן שנה מישראכרט'}</button>`,bank=account?` <button type="button" class="button secondary sync-bank-card" data-source="${esc(account.source||'business')}" data-suffix="${esc(card.suffix||'')}">עדכן מהבנק</button>`:'';return`${cal}${max}${isracard}${bank}`};
 async function renderAllCards(){const history=await chrome.runtime.sendMessage({type:'CARD_HISTORY_STATS'}),state=await chrome.storage.local.get({isracardActiveSince:{}});cardHistoryStats=history?.stats||{};for(const [suffix,activeSince] of Object.entries(state.isracardActiveSince||{})){cardHistoryStats[suffix]||(cardHistoryStats[suffix]={});cardHistoryStats[suffix].activeSince=activeSince}await renderCardMonthPicker();
 calLastCards=[...new Map([...calLastCards,...maxLastCards].map(c=>[String(c.suffix),c])).values()];
@@ -352,3 +352,23 @@ async function rememberBankStatus(value,stored){
   statusBySource=next;
   await chrome.storage.local.set({statusBySource:next});
 }
+
+
+// ── מחיקת היסטוריית כרטיס ────────────────────────────────────────────────
+// לבקשת טל 18.08.2026: כרטיס שנטען בטעות לא היה ניתן להסרה.
+// ⚠ פעולה הרסנית, ולכן אישור מפורש עם מספר הכרטיס בגוף השאלה.
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('.delete-card-history');
+  if(!b||!b.dataset.suffix)return;
+  e.preventDefault();e.stopPropagation();
+  const suffix=b.dataset.suffix;
+  if(!confirm(`למחוק את כל היסטוריית הכרטיס ${suffix} מהמחשב הזה?\n\nהנתונים אצל חברת האשראי אינם נמחקים, ואפשר לסנכרן שוב.`))return;
+  const original=b.textContent;b.disabled=true;b.textContent='מוחק…';
+  try{
+    const r=await chrome.runtime.sendMessage({type:'CARD_HISTORY_DELETE_CARD',suffix});
+    if(!r?.ok)throw Error(r?.error||'המחיקה נכשלה');
+    toast(`נמחקו ${r.removed} רשומות של כרטיס ${suffix}`);
+    await load();
+  }catch(err){toast(`מחיקת כרטיס ${suffix} נכשלה: ${err.message}`)}
+  finally{b.disabled=false;b.textContent=original}
+});
