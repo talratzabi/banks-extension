@@ -115,14 +115,16 @@ async function renderCardMonthPicker(){
     bar.onclick=async e=>{
       const y=e.target.closest('#loadCardYear');
       if(y){const pick=String(document.querySelector('#cardYearCard')?.value||'').replace(/\D/g,'');
+        const onlyMissingAsk=!!document.querySelector('#cardYearOnlyMissing')?.checked;
         if(!confirm(pick
-          ?`טעינת 12 חודשים לכרטיס ${pick}: כ-12 דפים, כדקה. אם אינך מחובר — האתר ייפתח ותצטרך ללחוץ שוב. להמשיך?`
+          ?`טעינת 12 חודשים לכרטיס ${pick}${onlyMissingAsk?' — חסרים בלבד, ולכן ייקרא רק מה שאינו שמור':', רענון מלא של כל 12 החודשים'}. אם אינך מחובר — האתר ייפתח ותצטרך ללחוץ שוב. להמשיך?`
           :'טעינת שנה אחורה לכל הכרטיסים: 12 חודשים × כל כרטיס, מספר דקות ארוכות, והסשן של ישראכרט עלול להיסגר באמצע. עדיף לבחור כרטיס אחד בבורר. להמשיך בכל זאת?'))return;
         y.disabled=true;const yt=y.textContent;y.textContent='טוען…';
-        const r=await chrome.runtime.sendMessage({type:'LOAD_CARD_YEAR',months:12,suffixes:pick?[pick]:[]});
+        const onlyMissing=!!document.querySelector('#cardYearOnlyMissing')?.checked;
+        const r=await chrome.runtime.sendMessage({type:'LOAD_CARD_YEAR',months:12,suffixes:pick?[pick]:[],onlyMissing});
         y.disabled=false;y.textContent=yt;
         if(!r?.ok)return toast(r?.error||'טעינת השנה נכשלה');
-        toast(r.disconnected?`ישראכרט ניתק את הסשן — נשמרו ${r.loaded} חודשים. התחבר ולחץ שוב.`:r.loaded?`נטענו ${r.loaded} חודשים`:'כל החודשים כבר היו שמורים');
+        toast(r.disconnected?`ישראכרט ניתק את הסשן — נשמרו ${r.loaded} חודשים. התחבר ולחץ שוב.`:r.skipped?`כל ${r.skipped} החודשים כבר שמורים — לא נדרשה קריאה`:r.loaded?`נטענו ${r.loaded} חודשים`:'כל החודשים כבר היו שמורים');
         return renderAllCards()}
       const b=e.target.closest('#loadCardMonth');if(!b)return;
       b.disabled=true;const t=b.textContent;b.textContent='טוען מהאתר…';
@@ -148,6 +150,7 @@ async function renderCardMonthPicker(){
       +`<option value="">כל הכרטיסים — ארוך, והסשן עלול להיסגר</option>`
       +yearCards.map(c=>`<option value="${esc(c.suffix)}">כרטיס ${esc(c.suffix)}${c.name?` — ${esc(c.name)}`:''}</option>`).join('')
       +`</select></label>`
+    +`<label class="auto-sync"><input type="checkbox" id="cardYearOnlyMissing" checked> <span>השלם חסרים בלבד<small>מדלג על חודשים ששמורים כבר. הסר סימון לרענון מלא של 12 החודשים</small></span></label>`
     +`<button type="button" class="button secondary" id="loadCardYear">טען שנה אחורה — ישראכרט</button>`
     +`<small class="sync-detail">${saved.length?`שמורים ${saved.length} חודשים`:'טרם נשמרה היסטוריה'}${cardMonth?` · מוצג ${monthLabel(cardMonth)}`:''}</small>`;
 }

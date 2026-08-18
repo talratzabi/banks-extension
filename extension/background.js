@@ -190,7 +190,7 @@ await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsr
   if(m?.type==='CAL_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingCal:false,pendingCalSuffix:''}).then(x=>{if(x.pendingCal)runCal(t,x.pendingCalSuffix).catch(()=>{});else maybeAutoRun('cal','כאל',runCal,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='MAX_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingMax:false,pendingMaxSuffix:''}).then(x=>{if(x.pendingMax)runMax(t,x.pendingMaxSuffix).catch(()=>{});else maybeAutoRun('max','MAX',runMax,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='LOAD_CARD_MONTH'){loadIsracardMonth(String(m.month||'')).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
-  if(m?.type==='LOAD_CARD_YEAR'){const suffixes=Array.isArray(m.suffixes)?m.suffixes:[];loadIsracardYear(Number(m.months)||12,suffixes).then(reply).catch(async e=>{const card=suffixes.length?` לכרטיס ${suffixes.join(', ')}`:'';await chrome.storage.local.set({syncStatus:`ישראכרט${card}: הסנכרון לא התחיל — ${e.message}`});reply({ok:false,error:e.message})});return true}
+  if(m?.type==='LOAD_CARD_YEAR'){const suffixes=Array.isArray(m.suffixes)?m.suffixes:[];loadIsracardYear(Number(m.months)||12,suffixes,!!m.onlyMissing).then(reply).catch(async e=>{const card=suffixes.length?` לכרטיס ${suffixes.join(', ')}`:'';await chrome.storage.local.set({syncStatus:`ישראכרט${card}: הסנכרון לא התחיל — ${e.message}`});reply({ok:false,error:e.message})});return true}
   if(m?.type==='CARD_MONTHS'){cardHistMonths().then(months=>reply({ok:true,months})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='CARD_HISTORY_DELETE_CARD'){deleteCardEverywhere(m.suffix).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='CARD_HISTORY_STATS'){cardHistStats().then(stats=>reply({ok:true,stats})).catch(e=>reply({ok:false,error:e.message}));return true}
@@ -468,7 +468,7 @@ async function loadIsracardMonth(month){
 // טעינת שנה אחורה. רשימת הכרטיסים נקראת פעם אחת בלבד — לא 12 פעמים — ומדלגים על כל
 // חודש ששמור כבר. כישלון בחודש בודד אינו עוצר את השאר, וכל חודש נשמר מיד עם סיומו,
 // כך שגם אם התהליך נקטע באמצע, לחיצה חוזרת ממשיכה מהנקודה שנעצרה.
-async function loadIsracardYear(months=12,suffixes=[]){
+async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   // ⚠ אם אין לשונית מחוברת — פותחים את האתר במקום לזרוק שגיאה. isracardTab מתעלם
   // מדפי התחברות, ולכן גם כשהמשתמש עומד על מסך הכניסה נראה כאילו "אין לשונית".
   let tab=await isracardTab();
@@ -499,7 +499,17 @@ async function loadIsracardYear(months=12,suffixes=[]){
   // טעינת שנה היא רענון מלא. אין לדלג לפי קיום חודש במסד: ריצה ישנה עלולה הייתה
   // לשמור את אותו דף תחת חודשים שונים. מוחקים רק את 12 חודשי המטמון המבוקשים;
   // כל חודש חוזר לתצוגה רק לאחר שהקריאה החדשה שלו הסתיימה ואומתה.
-  const todo=wanted;
+  // ⚠ ברירת המחדל נשארה רענון מלא, מהסיבה המתועדת למעלה. „השלם חסרים בלבד" הוא
+  // בחירה מפורשת של המשתמש בדשבורד, ונוסף 18.08.2026 כי גם כרטיס בודד לוקח דקה
+  // ארוכה כשאין מה לקרוא מחדש. הדילוג נשען על cardHistStats, שמחזיק months לכל סיומת.
+  let todo=wanted;
+  if(onlyMissing){
+    const stats=await cardHistStats().catch(()=>({}));
+    todo=wanted.filter(month=>!active.every(c=>(stats[String(c.suffix)]?.months||[]).includes(month)));
+    if(!todo.length){await endProgress();await chrome.storage.local.set({syncStatus:`ישראכרט: כל ${wanted.length} החודשים כבר שמורים ל${active.length>1?`-${active.length} הכרטיסים`:`כרטיס ${active[0].suffix}`} — אין מה להשלים`});
+      return{ok:true,loaded:0,failed:[],skipped:wanted.length}}
+    await chrome.storage.local.set({syncStatus:`ישראכרט: ${wanted.length-todo.length} חודשים כבר שמורים — קורא ${todo.length} חסרים בלבד`});
+  }
   await chrome.storage.local.set({syncStatus:`ישראכרט: כרטיס ${active.map(c=>c.suffix).join(', ')} זוהה — מכין 12 חודשים`});
   // ⚠ 18.08.2026 — כאן עמדה מחיקה גורפת של 12 החודשים **לפני** הקריאה, ולכן ריצה
   // שנכשלה בקריאת הרשימה מחקה את ההיסטוריה הקיימת ולא העמידה דבר במקומה.
@@ -520,10 +530,10 @@ async function loadIsracardYear(months=12,suffixes=[]){
       // כרטיס חדש אינו קיים בחודשים שקדמו להנפקתו. לאחר שבורר החודשים של
       // ישראכרט מודיע שהחודש אינו זמין, מפסיקים לבקש חודשים ישנים יותר עבורו.
       if(inactiveBefore.has(String(card.suffix)))continue;
-      const pageStarted=Date.now();
+      const pageStarted=Date.now();let pageOk=false;
       await syncStep(`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`,`כרטיס ${card.suffix} · ${String(month).slice(0,2)}/${String(month).slice(2)}`);
       try{
-        out.push(await readIsracardCardMonth(tab.id,card,month));oldestLoaded[String(card.suffix)]=month;streak=0;
+        out.push(await readIsracardCardMonth(tab.id,card,month));oldestLoaded[String(card.suffix)]=month;streak=0;pageOk=true;
       }catch(e){
         if(/אינו זמין בבורר/.test(String(e?.message||''))&&oldestLoaded[String(card.suffix)]){
           inactiveBefore.add(String(card.suffix));
@@ -533,7 +543,9 @@ async function loadIsracardYear(months=12,suffixes=[]){
       finally{
         // זמן שהייה מינימלי מחייב לכל דף, גם אם בחירת החודש או הקריאה נכשלו.
         // בלי finally כשל עבר מיד לדף הבא ונראה כאילו המנגנון מדלג על הכול.
-        const remaining=4000-(Date.now()-pageStarted);if(remaining>0)await delay(remaining);
+        // ⚠ הרצפה הזו נכתבה כדי שכישלון לא יזנק מיד לדף הבא ויראה כאילו מדלגים על הכול.
+        // בקריאה שהצליחה כבר המתנו לטעינה אמיתית, ולכן שם היא רק מאריכה את הריצה.
+        const remaining=(pageOk?1500:4000)-(Date.now()-pageStarted);if(remaining>0)await delay(remaining);
       }
       if(streak>=DISCONNECT_STREAK){disconnected=true;break}
     }
