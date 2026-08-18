@@ -451,6 +451,8 @@ async function loadIsracardYear(months=12,suffixes=[]){
   await chrome.storage.local.set({syncStatus:`ישראכרט: כרטיס ${active.map(c=>c.suffix).join(', ')} זוהה — מכין 12 חודשים`});
   const removed=await cardHistDeleteMonths(todo,[...requested]);
   await chrome.storage.local.set({syncStatus:`היסטוריית כרטיסים: נוקו ${removed} רשומות ישנות עבור ${active.length} כרטיסים — מתחיל קריאה מחדש`});
+    // הגלגל גם בטעינת השנה, לא רק בסנכרון הרגיל. כל צעד = כרטיס בחודש.
+  await beginProgress(todo.length*Math.max(1,active.length));
   let done=0,failed=[],oldestLoaded={},inactiveBefore=new Set();
   for(const month of todo){
     const out=[];
@@ -460,7 +462,7 @@ async function loadIsracardYear(months=12,suffixes=[]){
       // ישראכרט מודיע שהחודש אינו זמין, מפסיקים לבקש חודשים ישנים יותר עבורו.
       if(inactiveBefore.has(String(card.suffix)))continue;
       const pageStarted=Date.now();
-      await chrome.storage.local.set({syncStatus:`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`});
+      await syncStep(`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`,`כרטיס ${card.suffix}`);
       try{
         out.push(await readIsracardCardMonth(tab.id,card,month));oldestLoaded[String(card.suffix)]=month;
       }catch(e){
@@ -478,6 +480,7 @@ async function loadIsracardYear(months=12,suffixes=[]){
     if(out.length){await storeCardMonth(month,out);done++}
     else failed.push(month);
   }
+  await endProgress();
   const state=await chrome.storage.local.get({isracardActiveSince:{}}),activeSince={...(state.isracardActiveSince||{})};
   for(const card of active){const suffix=String(card.suffix);if(inactiveBefore.has(suffix))activeSince[suffix]=oldestLoaded[suffix];else delete activeSince[suffix]}
   await chrome.storage.local.set({isracardActiveSince:activeSince});
