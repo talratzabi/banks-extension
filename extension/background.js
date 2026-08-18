@@ -122,6 +122,14 @@ let progressState=null;
 // לפני הצעד הבא, ולכן מה שנשמר עד העצירה נשאר שמור.
 let abortFlag=false;
 function abortIfRequested(){if(abortFlag)throw Error(ABORT_MESSAGE)}
+// ⚠ „עצור" לא שיחרר המתנות ארוכות (DISCOUNT_DISCOVER עד 120 שנ'), ולכן הדגל
+// discountBusy נשאר דלוק וכל לחיצה נוספת נבלעה. raceAbort הופך כל המתנה לניתנת
+// לעצירה: בודק את הדגל כל 400ms ודוחה מיד כשהוא נדלק.
+function raceAbort(promise){
+  let timer=null;
+  const watch=new Promise((_,reject)=>{timer=setInterval(()=>{if(abortFlag){clearInterval(timer);reject(Error(ABORT_MESSAGE))}},400)});
+  return Promise.race([promise,watch]).finally(()=>{if(timer)clearInterval(timer)});
+}
 const ABORT_MESSAGE='הסנכרון נעצר לבקשתך';
 async function clearAbort(){abortFlag=false;await chrome.storage.local.set({syncAbort:false})}
 async function requestAbort(){abortFlag=true;await chrome.storage.local.set({syncAbort:true,syncStatus:'עוצר את הסנכרון…'});return{ok:true}}
@@ -643,7 +651,11 @@ async function syncSelected(selectionKeys){
     if(syncedSources.includes('discount-business'))await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0});
     if(syncedSources.includes('discount-private'))await chrome.storage.local.set({pendingDiscountPrivate:false});
     const marked=await applyCollectSince(markNewTransactions(saved.accounts,all,syncedSources)),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
-    const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: ${marked.length} חשבונות`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
+    const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;// ⚠ 18.08.2026 — טל: „מאיפה מצא 10 חשבונות? יש רק 4 וביקשתי לסנכרן אחד."
+// marked.length הוא **כל** מה ששמור בכל הבנקים (10 רשומות), ולא מה שסונכרן בריצה.
+// המסר אמר „הסתיים בהצלחה: 10 חשבונות" והשתמע שסונכרנו עשרה. עכשיו שני המספרים
+// נפרדים ומסומנים.
+const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: סונכרנו ${selectionKeys.length} ${selectionKeys.length===1?'חשבון':'חשבונות'} · סך הכל שמורים ${marked.length}`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
   }catch(e){await chrome.storage.local.set({syncStatus:e.message===ABORT_MESSAGE?`${ABORT_MESSAGE} — מה שנקרא עד כאן נשמר`:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress();await clearAbort();await restoreSyncTabs()}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
@@ -1081,14 +1093,18 @@ const DISCOUNT_MAX_ATTEMPTS=3,DISCOUNT_COOLDOWN_MS=30000;
 const DISCOUNT_LOGIN_PRIVATE='https://start.telebank.co.il/login/?multilang=he&bank=d&t=p';
 const DISCOUNT_LOGIN_BUSINESS='https://start.telebank.co.il/login/?multilang=he&bank=d&t=s';
 async function discoverDiscountBusiness(tabId){const state=await chrome.storage.local.get({pendingDiscountBusiness:false,discoveredAccounts:[],discountAttempts:0});if(!state.pendingDiscountBusiness)return;
-if(discountBusy)return;
+// ⚠ 18.08.2026 — „לא עושה כלום דיסקונט עסקים". נמדד: discountEntityReport אפס
+// כתיבות, כלומר הזיהוי לא הגיע ללולאת הישויות בכלל. שתי היציאות האלה היו **שקטות**,
+// ולחיצה בזמן שהזיהוי הקודם עוד תלוי (DISCOUNT_DISCOVER ממתין עד 2 דקות) נבלעה
+// בלי שום סימן על המסך. יציאה שקטה היא באג בפני עצמו — עכשיו היא מדווחת.
+if(discountBusy){await chrome.storage.local.set({syncStatus:'דיסקונט עסקי: זיהוי כבר מתבצע — המתן לסיומו, או לחץ „עצור סנכרון" ואז נסה שוב'});return}
 if(running){await chrome.storage.local.set({syncStatus:'דיסקונט: סנכרון כבר רץ — הזיהוי ימתין לסיומו'});return}
-if(Date.now()-discountLastRun<DISCOUNT_COOLDOWN_MS)return;
+if(Date.now()-discountLastRun<DISCOUNT_COOLDOWN_MS){const wait=Math.ceil((DISCOUNT_COOLDOWN_MS-(Date.now()-discountLastRun))/1000);await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: זיהוי רץ לפני רגע — נסה שוב בעוד ${wait} שניות`});return}
 if(state.discountAttempts>=DISCOUNT_MAX_ATTEMPTS){await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0,syncStatus:`דיסקונט עסקי: ${DISCOUNT_MAX_ATTEMPTS} ניסיונות נכשלו — נעצר כדי לא להיכנס ללולאה. התחבר ידנית והפעל שוב.`});await chrome.runtime.openOptionsPage();return}
 discountBusy=true;discountLastRun=Date.now();
 await chrome.storage.local.set({discountAttempts:state.discountAttempts+1});
 try{return await runDiscoverDiscount(tabId,state)}finally{discountBusy=false;await restoreSyncTabs()}}
-async function runDiscoverDiscount(tabId,state){abortIfRequested();await prepareDiscountContent(tabId);const r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),120000,'זיהוי הישויות');
+async function runDiscoverDiscount(tabId,state){abortIfRequested();await prepareDiscountContent(tabId);const r=await raceAbort(withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),120000,'זיהוי הישויות'));
 // שומרים את צילום המצב לפני שזורקים, כדי שהתיקון הבא ייכתב ממדידה ולא מהשערה.
 if(r?.probe)await chrome.storage.local.set({discountProbe:r.probe});
 if(!r?.ok)throw Error(r?.error||'זיהוי החשבונות נכשל');const raw=r.accounts||[];
