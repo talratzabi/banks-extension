@@ -156,6 +156,10 @@ async function deleteCardEverywhere(suffix){
   return{ok:true,removed,cards};
 }
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
+  // ⚠ 18.08.2026 — דגל העצירה נוקה רק ב-beginProgress ובסיום syncSelected, ולכן
+  // אחרי לחיצה על „עצור" מסלולים שאין להם גלגל (זיהוי דיסקונט, למשל) נעצרו מיד
+  // בפעם הבאה. **כל בקשה חדשה של המשתמש מנקה את הדגל.**
+  if(/^START_/.test(m?.type||'')||['SYNC_SELECTED','LOAD_CARD_YEAR','LOAD_CARD_MONTH'].includes(m?.type||''))clearAbort();
   if(/^[A-Z_]*AUTHENTICATED$/.test(m?.type||'')&&sender.tab?.id)returnToDashboard(sender.tab.id);
   if(m?.type==='START_AUTO_SYNC'){start(m.scope||'business',Boolean(m.force)).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='AUTHENTICATED'&&sender.tab?.id){const source=sourceFromUrl(sender.tab.url);if(source){queueDiscover(sender.tab.id,source);chrome.storage.local.get({pendingSources:[]}).then(x=>{if(!x.pendingSources.includes(source))maybeAutoSync(source,SOURCES[source].label,sender.tab.id).catch(()=>{})})}reply({ok:true});return}
@@ -1084,7 +1088,7 @@ if(state.discountAttempts>=DISCOUNT_MAX_ATTEMPTS){await chrome.storage.local.set
 discountBusy=true;discountLastRun=Date.now();
 await chrome.storage.local.set({discountAttempts:state.discountAttempts+1});
 try{return await runDiscoverDiscount(tabId,state)}finally{discountBusy=false;await restoreSyncTabs()}}
-async function runDiscoverDiscount(tabId,state){await prepareDiscountContent(tabId);const r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),120000,'זיהוי הישויות');
+async function runDiscoverDiscount(tabId,state){abortIfRequested();await prepareDiscountContent(tabId);const r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),120000,'זיהוי הישויות');
 // שומרים את צילום המצב לפני שזורקים, כדי שהתיקון הבא ייכתב ממדידה ולא מהשערה.
 if(r?.probe)await chrome.storage.local.set({discountProbe:r.probe});
 if(!r?.ok)throw Error(r?.error||'זיהוי החשבונות נכשל');const raw=r.accounts||[];
@@ -1094,6 +1098,7 @@ const otherBanks=state.discoveredAccounts.filter(a=>a.source!=='discount-busines
 const asChoice=a=>({...a,balance:null,source:'discount-business',sourceLabel:'דיסקונט עסקי',key:`discount-business|${a.key}`,identifying:!(a.branch&&a.accountNumber)});
 await chrome.storage.local.set({discoveredAccounts:[...otherBanks,...raw.map(asChoice)],syncStatus:`דיסקונט עסקי: נמצאו ${raw.length} ישויות — מזהה מספרי חשבון בלבד`});
 await chrome.runtime.openOptionsPage();
+const entityReport=[];
 for(let i=0;i<raw.length;i++){const a=raw[i],want=a.entityId||a.key;
 // ⚠ יציאה באמצע: אם הדגל נסגר (סנכרון שהמשתמש סיים, או עצירה), אין להמשיך לנווט.
 if(abortFlag)break;
@@ -1101,8 +1106,18 @@ if(!(await chrome.storage.local.get({pendingDiscountBusiness:false})).pendingDis
 await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: מזהה מספר חשבון ${i+1} מתוך ${raw.length}`});if(a.branch&&a.accountNumber)continue;
 // מעבר ישות הוא SPA ולעיתים ההודעה הראשונה חוזרת לפני שהכותרת ומספר החשבון
 // התחלפו. מנסים פעמיים ומאמתים גם את הישות וגם מספר חשבון בן 10 ספרות.
-for(let pass=1;pass<=2&&!a.accountNumber;pass++){await prepareDiscountContent(tabId);try{await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_SELECT_ENTITY',entity:want}),20000,`מעבר ישות ${pass}`)}catch(e){}
-for(let w=0;w<12;w++){await delay(1000);await prepareDiscountContent(tabId);let st=null;try{st=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_STATE'}),6000,'קריאת מספר חשבון')}catch(e){}if(st?.entity===want&&st?.branch&&st?.accountNumber){a.branch=st.branch;a.accountNumber=st.accountNumber;a.owner=st.owner||a.owner;a.nickname=st.owner||a.nickname;break}}}
+// ⚠ 18.08.2026 — „דיסקונט עסקים לא עובד": הסנכרון עצמו מסתיים, אבל נמדד ש**רק
+// ישות אחת מארבע** מקבלת מספר חשבון, ולכן רק היא מסונכרנת. השורש לא היה ידוע כי
+// שני הכשלים כאן שקטים: `catch(e){}` על מעבר הישות, ולולאה שמסתיימת בלי לספר מה ראתה.
+// לכן נאסף דוח פר-ישות ל-discountEntityReport — הריצה הבאה תגיד בעצמה מה נשבר.
+const attempt={entity:want,owner:a.owner||'',selectError:'',passes:0,lastState:null,seenEntities:[]};
+for(let pass=1;pass<=2&&!a.accountNumber;pass++){attempt.passes=pass;await prepareDiscountContent(tabId);
+try{await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_SELECT_ENTITY',entity:want}),20000,`מעבר ישות ${pass}`)}catch(e){attempt.selectError=String(e?.message||e).slice(0,120)}
+for(let w=0;w<12;w++){await delay(1000);await prepareDiscountContent(tabId);let st=null;try{st=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_STATE'}),6000,'קריאת מספר חשבון')}catch(e){attempt.lastState={error:String(e?.message||e).slice(0,120)}}
+if(st){attempt.lastState={entity:st.entity||'',branch:st.branch||'',accountNumber:st.accountNumber||'',owner:st.owner||''};if(st.entity&&!attempt.seenEntities.includes(st.entity))attempt.seenEntities.push(st.entity)}
+if(st?.entity===want&&st?.branch&&st?.accountNumber){a.branch=st.branch;a.accountNumber=st.accountNumber;a.owner=st.owner||a.owner;a.nickname=st.owner||a.nickname;break}}}
+attempt.resolved=Boolean(a.branch&&a.accountNumber);entityReport.push(attempt);
+await chrome.storage.local.set({discountEntityReport:entityReport});
 // מעדכנים את השורה מיד, בלי להמתין לשאר הישויות.
 const live=await chrome.storage.local.get({discoveredAccounts:[]});await chrome.storage.local.set({discoveredAccounts:live.discoveredAccounts.map(x=>x.key===`discount-business|${a.key}`?asChoice(a):x)});}
 const missing=raw.filter(a=>!a.branch||!a.accountNumber),resolved=raw.length-missing.length;
