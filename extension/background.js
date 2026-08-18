@@ -621,6 +621,12 @@ async function syncSelected(selectionKeys){
   try{
     const grouped={business:[],private:[],leumi:[],'discount-business':[],'discount-private':[],mizrahi:[]};for(const selectionKey of selectionKeys){const parts=String(selectionKey).split('|');if(parts.length===2&&grouped[parts[0]])grouped[parts[0]].push(parts[1]);else grouped.business.push(selectionKey)}
     const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);const all=saved.accounts.filter(a=>!syncedSources.includes(a.source||'business'));for(const source of syncedSources)all.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
+    // ⚠ 18.08.2026 — „דיסקונט לא מסיים את הסנכרון": הסנכרון דווקא הסתיים („הסתיים
+    // בהצלחה: 10 חשבונות · 6 תנועות חדשות"), אבל discoverDiscountBusiness המשיך
+    // אחריו וכתב „מזהה מספר חשבון 3 מתוך 4". הזיהוי מיותר ברגע שהמשתמש כבר סנכרן
+    // את החשבונות — ולכן דגל הזיהוי נסגר כאן, והלולאה שלו יוצאת באמצע.
+    if(syncedSources.includes('discount-business'))await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0});
+    if(syncedSources.includes('discount-private'))await chrome.storage.local.set({pendingDiscountPrivate:false});
     const marked=await applyCollectSince(markNewTransactions(saved.accounts,all,syncedSources)),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
     const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?leumiStatus:`הסתיים בהצלחה: ${marked.length} חשבונות`;await chrome.storage.local.set({accounts:marked,discoveredAccounts:[],selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress();await restoreSyncTabs()}
@@ -1062,15 +1068,24 @@ const otherBanks=state.discoveredAccounts.filter(a=>a.source!=='discount-busines
 const asChoice=a=>({...a,balance:null,source:'discount-business',sourceLabel:'דיסקונט עסקי',key:`discount-business|${a.key}`,identifying:!(a.branch&&a.accountNumber)});
 await chrome.storage.local.set({discoveredAccounts:[...otherBanks,...raw.map(asChoice)],syncStatus:`דיסקונט עסקי: נמצאו ${raw.length} ישויות — מזהה מספרי חשבון בלבד`});
 await chrome.runtime.openOptionsPage();
-for(let i=0;i<raw.length;i++){const a=raw[i],want=a.entityId||a.key;await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: מזהה מספר חשבון ${i+1} מתוך ${raw.length}`});if(a.branch&&a.accountNumber)continue;
+for(let i=0;i<raw.length;i++){const a=raw[i],want=a.entityId||a.key;
+// ⚠ יציאה באמצע: אם הדגל נסגר (סנכרון שהמשתמש סיים, או עצירה), אין להמשיך לנווט.
+if(!(await chrome.storage.local.get({pendingDiscountBusiness:false})).pendingDiscountBusiness)break;
+await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: מזהה מספר חשבון ${i+1} מתוך ${raw.length}`});if(a.branch&&a.accountNumber)continue;
 // מעבר ישות הוא SPA ולעיתים ההודעה הראשונה חוזרת לפני שהכותרת ומספר החשבון
 // התחלפו. מנסים פעמיים ומאמתים גם את הישות וגם מספר חשבון בן 10 ספרות.
 for(let pass=1;pass<=2&&!a.accountNumber;pass++){await prepareDiscountContent(tabId);try{await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_SELECT_ENTITY',entity:want}),20000,`מעבר ישות ${pass}`)}catch(e){}
-for(let w=0;w<20;w++){await delay(1000);await prepareDiscountContent(tabId);let st=null;try{st=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_STATE'}),10000,'קריאת מספר חשבון')}catch(e){}if(st?.entity===want&&st?.branch&&st?.accountNumber){a.branch=st.branch;a.accountNumber=st.accountNumber;a.owner=st.owner||a.owner;a.nickname=st.owner||a.nickname;break}}}
+for(let w=0;w<12;w++){await delay(1000);await prepareDiscountContent(tabId);let st=null;try{st=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_STATE'}),6000,'קריאת מספר חשבון')}catch(e){}if(st?.entity===want&&st?.branch&&st?.accountNumber){a.branch=st.branch;a.accountNumber=st.accountNumber;a.owner=st.owner||a.owner;a.nickname=st.owner||a.nickname;break}}}
 // מעדכנים את השורה מיד, בלי להמתין לשאר הישויות.
 const live=await chrome.storage.local.get({discoveredAccounts:[]});await chrome.storage.local.set({discoveredAccounts:live.discoveredAccounts.map(x=>x.key===`discount-business|${a.key}`?asChoice(a):x)});}
-const missing=raw.filter(a=>!a.branch||!a.accountNumber);if(missing.length)throw Error(`זוהו ${raw.length} ישויות, אך מספר החשבון טרם נטען עבור ${missing.map(a=>a.owner||a.entityId).join(', ')} — הרשימה החלקית לא הוצגה`);
-const found=raw.map(asChoice);await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0,discoveredAccounts:[...otherBanks,...found],syncStatus:`דיסקונט עסקי: נמצאו ואומתו ${found.length} חשבונות — בחר לפי מספר חשבון`})}
+const missing=raw.filter(a=>!a.branch||!a.accountNumber),resolved=raw.length-missing.length;
+// ⚠ עד 18.08.2026 ישות אחת שלא נטענה זרקה את כל הריצה, הדגל נשאר דלוק, וכל כניסה
+// הבאה לדיסקונט הפעילה זיהוי מחדש — כך „הסנכרון לא נגמר" הפך למצב קבוע.
+// עכשיו: מה שזוהה מוצג ונשמר, הדגל נסגר, והחסר נאמר במפורש. רק אפס זיהויים הוא כישלון.
+if(!resolved)throw Error(`אף ישות לא נטענה מתוך ${raw.length} — הרשימה החלקית לא הוצגה`);
+const found=raw.map(asChoice);await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0,discoveredAccounts:[...otherBanks,...found],syncStatus:missing.length
+  ?`דיסקונט עסקי: ${resolved} מתוך ${raw.length} חשבונות זוהו — ${missing.map(a=>a.owner||a.entityId).join(', ')} טרם נטענו. בחר מה שיש, או לחץ שוב להשלמה`
+  :`דיסקונט עסקי: נמצאו ואומתו ${found.length} חשבונות — בחר לפי מספר חשבון`})}
 const DISCOUNT_TX_URL='https://start.telebank.co.il/apollo/business2/#/OSH_LENTRIES_ALTAMIRA';
 const DISCOUNT_LOANS_URL='https://start.telebank.co.il/apollo/business2/#/LOANS_WORLD';
 async function syncDiscountBusiness(keys){const tab=await discountTab();if(!tab)throw Error('החיבור לדיסקונט עסקי אינו פעיל');await returnToDashboard(tab.id,true);const all=await chrome.tabs.query({url:['https://start.telebank.co.il/*']});await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: עובד בלשונית ${tab.id}${all.length>1?` (מתוך ${all.length} פתוחות)`:''}`});
