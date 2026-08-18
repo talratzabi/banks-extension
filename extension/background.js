@@ -479,7 +479,19 @@ async function loadIsracardYear(months=12,suffixes=[]){
   try{
   const requested=new Set(suffixes.map(v=>String(v).replace(/\D/g,'').slice(-4)).filter(Boolean));
   await chrome.storage.local.set({syncStatus:requested.size?`ישראכרט: מאתר את כרטיס ${[...requested].join(', ')}`:'ישראכרט: קורא את רשימת הכרטיסים'});
-  const summary=await isracardSummaryFromHome(tab.id),active=summary.cards.filter(c=>!c.cancelled&&(!requested.size||requested.has(String(c.suffix))));
+  // ⚠ כשהסנכרון הרגיל כבר קרא את הרשימה, אין סיבה שכשל בקריאה חוזרת של
+  // הקרוסלה יחסום טעינת שנה לכרטיס שכבר מוכר. isracardLastCards נכתב בסוף
+  // כל סנכרון מוצלח, ומשמש כאן כרשת ביטחון.
+  let summary=null;
+  try{summary=await isracardSummaryFromHome(tab.id)}
+  catch(e){
+    const fallback=(await chrome.storage.local.get({isracardLastCards:[]})).isracardLastCards||[];
+    const usable=fallback.filter(c=>c?.suffix&&(!requested.size||requested.has(String(c.suffix))));
+    if(!usable.length)throw e;
+    summary={ok:true,cards:usable};
+    await chrome.storage.local.set({syncStatus:`ישראכרט: רשימת הכרטיסים לא נקראה מהדף — ממשיך לפי הרשימה מהסנכרון האחרון`});
+  }
+  const active=summary.cards.filter(c=>!c.cancelled&&(!requested.size||requested.has(String(c.suffix))));
   if(!active.length)throw Error(requested.size?'הכרטיס שנבחר לא נמצא בחיבור ישראכרט הפעיל':'לא נמצאו כרטיסים פעילים');
   const wanted=[];const d=new Date();
   for(let i=0;i<months;i++){wanted.push(mmYYYY(d));d.setMonth(d.getMonth()-1)}
@@ -488,8 +500,11 @@ async function loadIsracardYear(months=12,suffixes=[]){
   // כל חודש חוזר לתצוגה רק לאחר שהקריאה החדשה שלו הסתיימה ואומתה.
   const todo=wanted;
   await chrome.storage.local.set({syncStatus:`ישראכרט: כרטיס ${active.map(c=>c.suffix).join(', ')} זוהה — מכין 12 חודשים`});
-  const removed=await cardHistDeleteMonths(todo,[...requested]);
-  await chrome.storage.local.set({syncStatus:`היסטוריית כרטיסים: נוקו ${removed} רשומות ישנות עבור ${active.length} כרטיסים — מתחיל קריאה מחדש`});
+  // ⚠ 18.08.2026 — כאן עמדה מחיקה גורפת של 12 החודשים **לפני** הקריאה, ולכן ריצה
+  // שנכשלה בקריאת הרשימה מחקה את ההיסטוריה הקיימת ולא העמידה דבר במקומה.
+  // cardHistPut משתמש ב-id של `suffix|month` ודורס ממילא, לכן המחיקה עברה לתוך הלולאה:
+  // חודש נמחק רק ברגע שיש לו מחליף טרי. כישלון לא מוחק עוד שום דבר.
+  await chrome.storage.local.set({syncStatus:`ישראכרט: מתחיל קריאה של ${todo.length} חודשים עבור ${active.length} כרטיסים`});
     // הגלגל גם בטעינת השנה, לא רק בסנכרון הרגיל. כל צעד = כרטיס בחודש.
   await beginProgress(todo.length*Math.max(1,active.length));
   let done=0,failed=[],oldestLoaded={},inactiveBefore=new Set();
@@ -501,7 +516,7 @@ async function loadIsracardYear(months=12,suffixes=[]){
       // ישראכרט מודיע שהחודש אינו זמין, מפסיקים לבקש חודשים ישנים יותר עבורו.
       if(inactiveBefore.has(String(card.suffix)))continue;
       const pageStarted=Date.now();
-      await syncStep(`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`,`כרטיס ${card.suffix}`);
+      await syncStep(`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`,`כרטיס ${card.suffix} · ${String(month).slice(0,2)}/${String(month).slice(2)}`);
       try{
         out.push(await readIsracardCardMonth(tab.id,card,month));oldestLoaded[String(card.suffix)]=month;
       }catch(e){
@@ -516,7 +531,7 @@ async function loadIsracardYear(months=12,suffixes=[]){
         const remaining=4000-(Date.now()-pageStarted);if(remaining>0)await delay(remaining);
       }
     }
-    if(out.length){await storeCardMonth(month,out);done++}
+    if(out.length){await cardHistDeleteMonths([month],[...requested]);await storeCardMonth(month,out);done++}
     else failed.push(month);
   }
   await endProgress();
@@ -870,8 +885,9 @@ async function startIsracard(){await chrome.storage.local.set({pendingIsracard:t
   try{const result=await runIsracard(tab.id);return{ok:true,status:'done',...result}}catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();throw e}}
 async function runIsracard(tabId,attempts=40){await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<attempts;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length){await saveIsracardMiss(tabId);throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');}const active=summary.cards.filter(c=>!c.cancelled),details=[];
   // הגלגל מציג את ארבע הספרות של הכרטיס הנקרא כרגע, לבקשת טל.
+const chargeMonthRaw=mmYYYY(new Date()),chargeMonthLabel=`${chargeMonthRaw.slice(0,2)}/${chargeMonthRaw.slice(2)}`;
 await beginProgress(active.length);
-for(let i=0;i<active.length;i++){const card=active[i];await syncStep(`ישראכרט: קורא כרטיס ${i+1} מתוך ${active.length} · ${card.suffix}`,`כרטיס ${card.suffix}`);await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?cardSuffix=${encodeURIComponent(card.suffix)}`});await waitIsracardReady(tabId,card.suffix);let read={ok:true,transactions:[]};try{read=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_TRANSACTIONS_V3'})}catch{}
+for(let i=0;i<active.length;i++){const card=active[i];await syncStep(`ישראכרט: קורא כרטיס ${i+1} מתוך ${active.length} · ${card.suffix}`,`כרטיס ${card.suffix} · ${chargeMonthLabel}`);await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?cardSuffix=${encodeURIComponent(card.suffix)}`});await waitIsracardReady(tabId,card.suffix);let read={ok:true,transactions:[]};try{read=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_TRANSACTIONS_V3'})}catch{}
 const nowDate=new Date(),previous=new Date(nowDate.getFullYear(),nowDate.getMonth(),1),monthAndYear=`${String(previous.getMonth()+1).padStart(2,'0')}.${previous.getFullYear()}`;await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?monthAndYear=${monthAndYear}&cardSuffix=${encodeURIComponent(card.suffix)}`});await delay(1400);await prepareIsracard(tabId);await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SELECT_MONTH_V3',month:monthAndYear});await waitIsracardReady(tabId,card.suffix,monthAndYear);let previousRead={total:0};try{previousRead=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_TRANSACTIONS_V3'})}catch{}details.push({...card,transactions:read?.transactions||[],previousCharge:Number(previousRead?.total)||0,previousChargeMonth:monthAndYear})}
 await endProgress();
 const state=await chrome.storage.local.get({accounts:[],isracardAssignments:{}}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),assigned=[],unassigned=[];
