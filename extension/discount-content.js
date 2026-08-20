@@ -192,9 +192,18 @@ const earliestRow=()=>{const d=rowDates();return d.length?Math.min(...d):0};
 async function applyCollectSince(){
   try{
     const st=await chrome.storage.local.get({collectSince:''}),want=ilDate(st.collectSince);
-    if(!want)return;
+    // ⚠ 20.08.2026 — הדיווח חייב להיכתב **בכל מסלול**, כולל יציאה מוקדמת. בלי זה
+    // רשומה חסרה נראית כמו „הקוד לא רץ", ובזבזנו על זה סבב: לא ידענו אם היציאה
+    // הייתה מפני שאין תאריך, שאין פקדים, או שהערך כבר היה נכון.
+    const report=async(reason,extra)=>{try{await chrome.storage.local.set({discountRangeApplied:{reason,from:want,at:new Date().toISOString(),url:location.hash,...extra}})}catch{}};
+    if(!want)return report('אין תאריך התחלה');
     const from=document.querySelector('input#fromDate'),btn=[...document.querySelectorAll('button')].find(b=>/advanced-search-btn/.test(String(b.className||'')));
-    if(!from||!btn||from.value===want)return;
+    if(!from||!btn)return report('פקדים חסרים',{hasFrom:!!from,hasBtn:!!btn});
+    // ⚠ הערך בשדה אינו הוכחה שהטבלה מציגה את הטווח: האתר זוכר את החיפוש הקודם,
+    // אבל אחרי ניווט הטבלה חוזרת לברירת המחדל. לכן לוחצים גם כשהערך כבר נכון,
+    // אלא אם התנועה המוקדמת כבר קודמת לתאריך המבוקש.
+    const wantMs=Date.parse(String(st.collectSince)),cur=earliestRow();
+    if(from.value===want&&cur&&cur<=wantMs)return report('כבר בטווח',{earliest:new Date(cur).toISOString().slice(0,10),rows:document.querySelectorAll('.rc-table-row').length});
     const rowCount=()=>document.querySelectorAll('.rc-table-row').length;
     const before=earliestRow(),beforeRows=rowCount();
     from.focus();nativeSet(from,want);await wait(600);btn.click();
@@ -208,7 +217,7 @@ async function applyCollectSince(){
       last=n;
       if(!retried&&n===0&&i===16){retried=true;btn.click()}
     }
-    try{await chrome.storage.local.set({discountRangeApplied:{from:want,at:new Date().toISOString(),rows:rowCount(),beforeRows,earliest:earliestRow()?new Date(earliestRow()).toISOString().slice(0,10):'',earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried}})}catch{}
+    await report('הופעל',{rows:rowCount(),beforeRows,earliest:earliestRow()?new Date(earliestRow()).toISOString().slice(0,10):'',earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried,value:from.value})
     note(`דיסקונט: טווח מ-${want}`);
   }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
 }
