@@ -195,10 +195,20 @@ async function applyCollectSince(){
     if(!want)return;
     const from=document.querySelector('input#fromDate'),btn=[...document.querySelectorAll('button')].find(b=>/advanced-search-btn/.test(String(b.className||'')));
     if(!from||!btn||from.value===want)return;
-    const before=earliestRow();
+    const rowCount=()=>document.querySelectorAll('.rc-table-row').length;
+    const before=earliestRow(),beforeRows=rowCount();
     from.focus();nativeSet(from,want);await wait(600);btn.click();
-    for(let i=0;i<20;i++){await wait(700);const now=earliestRow();if(now&&now!==before)break}
-    try{await chrome.storage.local.set({discountRangeApplied:{from:want,at:new Date().toISOString(),rows:document.querySelectorAll('.rc-table-row').length}})}catch{}
+    // ⚠ 20.08.2026 — הריצה הראשונה רשמה rows:0: הטבלה מתרוקנת בזמן הבקשה, והקריאה
+    // חזרה לפני שהיא התמלאה. לכן לא מספיק „המוקדמת השתנתה" — ממתינים לטבלה
+    // **לא ריקה ויציבה** בשתי דגימות רצופות, ואם נשארה ריקה — לוחצים שוב פעם אחת.
+    let stable=0,last=-1,retried=false;
+    for(let i=0;i<50;i++){
+      await wait(600);const n=rowCount();
+      if(n>0&&n===last){if(++stable>=2)break}else stable=0;
+      last=n;
+      if(!retried&&n===0&&i===16){retried=true;btn.click()}
+    }
+    try{await chrome.storage.local.set({discountRangeApplied:{from:want,at:new Date().toISOString(),rows:rowCount(),beforeRows,earliest:earliestRow()?new Date(earliestRow()).toISOString().slice(0,10):'',earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried}})}catch{}
     note(`דיסקונט: טווח מ-${want}`);
   }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
 }
