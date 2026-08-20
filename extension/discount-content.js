@@ -176,9 +176,37 @@ function loans(){const tables=[...document.querySelectorAll('table')],detail=tab
 function mortgages(){const out=[];for(const row of document.querySelectorAll('[role="grid"] [role="row"]')){const c=[...row.querySelectorAll('[role="cell"],[role="gridcell"]')].map(text);if(c.length<6||!/הלווא|הלואה/.test(c[0]))continue;const installments=c[2]||'',near=c[5]||'',date=(near.match(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/)||[])[0]||'';out.push({id:`mortgage-${out.length+1}`,type:`משכנתא · ${c[0]}`,originalPrincipal:money(c[1]),installments,balance:money(c[3]),interest:c[4]||'',nextPayment:money(near),nextPaymentDate:date,endDate:finalPaymentDate(date,installments),isMortgage:true})}return out}
 function loanProbe(){return{url:location.href,heading:[...document.querySelectorAll('h1,h2,h3')].map(text).filter(Boolean).slice(0,12),loanCount:loans().length,mortgageCount:mortgages().length,head:text(document.body).slice(0,700)}}
 function gotoLoans(){const top=document.querySelector('#LOANS_MAIN_WORLD-link');if(!top)throw Error('לא נמצא תפריט הלוואות וערבויות');realClick(top.querySelector('img')||top);setTimeout(()=>{const links=[...document.querySelectorAll('a,button,[role="menuitem"],[role="option"],li')];const target=links.find(el=>/^(פירוט הלוואות|הלוואות|ריכוז הלוואות|הלוואות פעילות)$/.test(text(el)))||links.find(el=>/פירוט הלוואות|ריכוז הלוואות|הלוואות פעילות/.test(text(el)));const clickable=target?.closest?.('a,button')||target;if(clickable)realClick(clickable)},700)}
+// ⚠ 20.08.2026 — נמדד חי דרך CDP על הדף עצמו, ולא נוחש:
+//   input#fromDate (רכיב db-datepicker, placeholder dd/mm/yyyy, ערך התחלתי 01/05/2026)
+//   ו-button.advanced-search-btn. הזרקת ערך + input/change/blur + לחיצה הרחיבה את
+//   הטבלה מ-69 שורות (המוקדמת 20.5.26) ל-149 (המוקדמת 31.12.25) תוך 0.7 שניות.
+// ⚠ Angular מתעלם מ-el.value=... ישיר. חייבים את ה-setter המקורי של HTMLInputElement,
+//   אחרת ngModel לא מתעדכן והחיפוש רץ על הערך הישן.
+const nativeSet=(el,v)=>{const d=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),'value');if(d&&d.set)d.set.call(el,v);else el.value=v;for(const t of['input','change','blur'])el.dispatchEvent(new Event(t,{bubbles:true}))};
+const ilDate=iso=>{const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:''};
+const rowDates=()=>{const out=[];for(const r of document.querySelectorAll('tr,[role="row"],.rc-table-row'))for(const m of text(r).matchAll(/\b(\d{2})\/(\d{2})\/(\d{2,4})\b/g)){const y=m[3].length===2?2000+Number(m[3]):Number(m[3]);out.push(new Date(y,Number(m[2])-1,Number(m[1])).getTime())}return out};
+const earliestRow=()=>{const d=rowDates();return d.length?Math.min(...d):0};
+// „תחילת איסוף נתונים" חדלה להיות מסננת בלבד: כאן היא נשלחת לאתר.
+// מבודד לחלוטין — רץ אחרי בחירת החשבון ורק בדף התנועות. דף בלי הפקדים האלה
+// (פרטי, מסך אחר) יוצא בשקט וממשיך בסינון הקיים, בלי רגרסיה.
+async function applyCollectSince(){
+  try{
+    const st=await chrome.storage.local.get({collectSince:''}),want=ilDate(st.collectSince);
+    if(!want)return;
+    const from=document.querySelector('input#fromDate'),btn=[...document.querySelectorAll('button')].find(b=>/advanced-search-btn/.test(String(b.className||'')));
+    if(!from||!btn||from.value===want)return;
+    const before=earliestRow();
+    from.focus();nativeSet(from,want);await wait(600);btn.click();
+    for(let i=0;i<20;i++){await wait(700);const now=earliestRow();if(now&&now!==before)break}
+    try{await chrome.storage.local.set({discountRangeApplied:{from:want,at:new Date().toISOString(),rows:document.querySelectorAll('.rc-table-row').length}})}catch{}
+    note(`דיסקונט: טווח מ-${want}`);
+  }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
+}
 async function extract(id,isPrivate=false){const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();// ⚠ הלקח שחזר שלוש פעמים: להמתין לטעינה לפני קריאה. אחרי הניווט וההזרקה מחדש הדף
 // עדיין מתרנדר, וקריאה מיידית מחזירה null ומפילה את הסנכרון.
 for(let i=0;i<120;i++){if(txCandidates().length||valueAfter('יתרת עו"ש')!=null)break;await wait(250)}
+// הטווח נשלח לאתר לפני קריאת השורות — אחרת נקרא את חלון ברירת המחדל (3 חודשים).
+if(!isPrivate)await applyCollectSince();
 // ⚠ נמדד חי: בדף התנועות התווית היא "עובר ושב", ו-"יתרת עו\"ש" קיימת רק בדף הבית.
 // מרגע שהתחלנו לנווט לתנועות לפני הקריאה, החיפוש אחר התווית הישנה החזיר null תמיד.
 const account=activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:labelMoney(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
