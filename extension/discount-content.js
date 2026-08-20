@@ -44,7 +44,9 @@ const menuEntitiesLoose=()=>{
 async function entityOptions(){const trigger=entityButton();if(!trigger)throw Error('לא נמצא בורר הישויות בדיסקונט עסקי');
 const already=menuEntities();if(already.length)return already;
 realClick(trigger);
-for(let i=0;i<40;i++){await wait(250);const opts=menuEntities();if(opts.length)return opts}
+// ⚠ menus/listboxes נמדדו 0 בכל ריצה מאז 18.08 — 10 שניות המתנה כאן היו 40 שניות
+// מבוזבזות על ארבע ישויות. שתי שניות מספיקות למסלול התקין, והנפילה לאחור מיד אחריו.
+for(let i=0;i<8;i++){await wait(250);const opts=menuEntities();if(opts.length)return opts}
 const loose=menuEntitiesLoose();if(loose.length)return loose;
 return menuEntities()}
 // ⚠ מעבר בין ישויות טוען מחדש את הדף והורג את ה-content script — הערוץ נסגר באמצע
@@ -56,7 +58,28 @@ async function privateAccountOptions(){const trigger=document.querySelector('but
 const privateAccountFromRow=row=>{const parts=[...row.querySelectorAll('p')].map(text).filter(Boolean),raw=(parts[0]?.match(/\b\d{9,10}\b/)||[])[0]||'',full=raw.padStart(10,'0'),owner=parts[1]||'דיסקונט פרטי';return full?{key:`${full.slice(0,3)}-${full.slice(3)}`,nickname:owner,owner,branch:full.slice(0,3),accountNumber:full.slice(3),balance:null}:null};
 async function discoverPrivate(){for(let i=0;i<120;i++){try{const rows=await privateAccountOptions(),accounts=rows.map(privateAccountFromRow).filter(Boolean);if(accounts.length)return accounts}catch{}await wait(250)}throw Error('רשימת החשבונות הפרטיים לא נמצאה לאחר ההתחברות')}
 async function selectPrivateAccount(key){const wanted=String(key).replace(/\D/g,'').padStart(10,'0'),current=activeAccount();if(`${current.branch}${current.accountNumber}`===wanted)return;const rows=await privateAccountOptions(),row=rows.find(r=>{const a=privateAccountFromRow(r);return a&&`${a.branch}${a.accountNumber}`===wanted});if(!row)throw Error(`החשבון ${key} לא נמצא בבורר דיסקונט פרטי`);realClick(row);for(let i=0;i<50;i++){await wait(300);const a=activeAccount();if(`${a.branch}${a.accountNumber}`===wanted)return}throw Error(`דיסקונט לא עבר לחשבון ${key}`)}
-async function selectEntity(id){const current=entityId(text(entityButton()));if(current===id)return;const previous=activeAccount().accountNumber,options=await entityOptions(),option=options.find(b=>entityId(text(b))===id);if(!option)throw Error(`הישות ${id} לא נמצאה בדיסקונט עסקי`);realClick(option);for(let i=0;i<40;i++){await wait(250);const account=activeAccount().accountNumber;if(entityId(text(entityButton()))===id&&account&&(account!==previous||i>8))return}throw Error(`דיסקונט לא עבר לישות ${id}`)}
+// ⚠ 20.08.2026 — נמדד מ-discountEntityReport ולא שוחזר בהשערה: לשלוש הישויות
+//   passes=2 · resolved=false · seenEntities=["024844714"] · selectError ריק.
+//   כלומר הלחיצה על מועמד „הנפילה לאחור" מדווחת הצלחה, והאתר פשוט לא מחליף ישות:
+//   האלמנט הפנימי ביותר שמכיל את המזהה הוא טקסט, לא הפקד הלחיץ.
+//   לכן **לא מנחשים סלקטור** — מטפסים בשרשרת ההורים ומאמתים אחרי כל רמה,
+//   ורושמים לאחסון איזו רמה עבדה, כדי שהסבב הבא ילך ישר לשם.
+const clickChain=el=>{const out=[];let n=el;for(let i=0;i<5&&n&&n!==document.body;i++){out.push(n);n=n.parentElement}return out};
+const entityNow=()=>entityId(text(entityButton()));
+const idsIn=el=>new Set([...text(el).matchAll(/\b\d{9}\b/g)].map(m=>m[0])).size;
+const brief=el=>`${el.tagName.toLowerCase()}${el.id?'#'+el.id:''}${(String(el.className||'').trim().split(/\s+/)[0]||'')?'.'+String(el.className).trim().split(/\s+/)[0]:''}`;
+// המתנה אחרי לחיצה: הישות בבורר **וגם** מספר חשבון אחר. אם הבורר התחלף אבל
+// המספר לא — נותנים לדף עוד חלון, ורק בסופו מקבלים החלפה בלי שינוי מספר.
+async function switched(id,previous,ms){const until=Date.now()+ms;while(Date.now()<until){await wait(250);const account=activeAccount().accountNumber;if(entityNow()===id&&account&&account!==previous)return true}const account=activeAccount().accountNumber;return entityNow()===id&&!!account}
+async function selectEntity(id){if(entityNow()===id)return;const previous=activeAccount().accountNumber,options=await entityOptions(),option=options.find(b=>entityId(text(b))===id);if(!option)throw Error(`הישות ${id} לא נמצאה בדיסקונט עסקי`);
+const chain=clickChain(option),tried=[];
+for(let level=0;level<chain.length;level++){const el=chain[level];
+  // הורה שמכיל יותר ממזהה אחד הוא הרשימה כולה, לא האפשרות — לחיצה עליו תפגע במקום אחר.
+  if(level&&idsIn(el)>1)break;
+  tried.push(`${level}:${brief(el)}`);realClick(el);
+  if(await switched(id,previous,3000)){try{chrome.storage.local.set({discountSelectWorked:{entity:id,level,path:brief(el),chain:tried,at:new Date().toISOString()}})}catch{}return}}
+try{chrome.storage.local.set({discountSelectFailed:{entity:id,tried,seen:entityNow(),account:activeAccount().accountNumber,at:new Date().toISOString()}})}catch{}
+throw Error(`דיסקונט לא עבר לישות ${id} — נוסו ${tried.length} רמות לחיצה (${tried.join(' | ')})`)}
 function valueAfter(label){const nodes=[...document.querySelectorAll('button,p,div,span')].filter(el=>text(el).includes(label)).sort((a,b)=>text(a).length-text(b).length);for(const el of nodes){const own=money(text(el).slice(text(el).indexOf(label)+label.length));if(own!=null)return own;for(const near of [el.nextElementSibling,el.previousElementSibling,...(el.parentElement?.children||[])]){const n=money(text(near));if(n!=null)return n}}return null}
 function activeAccount(){const body=text(document.body);const candidates=[...body.matchAll(/\b(\d{10})\b/g)].map(m=>m[1]);const visible=(body.match(/\b(\d{10})\s+[^\d\n]{2,60}/)||[])[1]||'';const full=visible||candidates[0]||entityId(text(entityButton()));return{branch:full.length>=10?full.slice(0,3):'',accountNumber:full.length>=10?full.slice(3):full}}
 // לקח מלאומי: לא להניח <table>. קוראים גם רשת ARIA וגם טבלה אמיתית, ובוחרים את מה שיש.
@@ -161,7 +184,7 @@ for(let i=0;i<120;i++){if(txCandidates().length||valueAfter('יתרת עו"ש')!
 const account=activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:labelMoney(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
 async function sync(keys,isPrivate=false){const out=[];for(const key of keys)out.push(await extract(key,isPrivate));return out}
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txCandidates().length,balance:currentBalance()});return}if(m?.type==='DISCOUNT_SELECT_ENTITY'){const want=String(m.entity||'');// עונים לפני הבחירה: המעבר טוען מחדש את הדף והורג את הסקריפט
-reply({ok:true,already:entityId(text(entityButton()))===want});if(entityId(text(entityButton()))!==want)selectEntity(want).catch(()=>{});return}if(m?.type==='DISCOUNT_GOTO_TX'){const has=txCandidates().length>0;// עונים לפני הלחיצה: הניווט הורג את הסקריפט, ותשובה שנשלחת אחריו לא תגיע לעולם
+reply({ok:true,already:entityId(text(entityButton()))===want});if(entityId(text(entityButton()))!==want)selectEntity(want).catch(e=>note(`דיסקונט עסקי: ${e.message}`));return}if(m?.type==='DISCOUNT_GOTO_TX'){const has=txCandidates().length>0;// עונים לפני הלחיצה: הניווט הורג את הסקריפט, ותשובה שנשלחת אחריו לא תגיע לעולם
 reply({ok:true,already:has});if(!has){const link=[...document.querySelectorAll('a,button,[role="button"],[role="link"]')].find(el=>/לצפייה בתנועות|תנועות עו"ש/.test(text(el)));if(link)realClick(link)}return}if(m?.type==='DISCOUNT_GOTO_LOANS'){reply({ok:true});try{gotoLoans()}catch(e){note(`דיסקונט: ${e.message}`)}return}if(m?.type==='DISCOUNT_LOAN_STATE'){reply({ok:true,...loanProbe()});return}if(m?.type==='DISCOUNT_READ_LOANS'){reply({ok:true,loans:loans(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SYNC_SELECTED'){sync(m.keys||[],Boolean(m.private)).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:lastTxProbe}));return true}});
 let reported=false;const reportAuthenticated=()=>{if(!reported&&location.hash.includes('MY_ACCOUNT_HOMEPAGE')){reported=true;chrome.runtime.sendMessage({type:'DISCOUNT_AUTHENTICATED'}).catch(()=>{})}};setInterval(reportAuthenticated,800);reportAuthenticated();
 })();
