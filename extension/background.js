@@ -640,16 +640,7 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   }finally{isracardHistoryBusy=false;await restoreSyncTabs()}
 }
 async function syncSelected(selectionKeys){
-  if(!selectionKeys.length)throw Error('לא נבחרו חשבונות');if(running)throw Error('תהליך אחר כבר מתבצע');
-  // זיהוי דיסקונט מציג את הישויות מיד, ואז משלים להן מספרי חשבון אחת-אחת. בעבר
-  // לחיצה על סנכרון באמצע כיבתה pendingDiscountBusiness וקטעה את הלולאה; הישות
-  // הרביעית נשארה לנצח ב„מזהה מספר חשבון…”. אין להריץ במקביל — שתי הזרימות
-  // מנווטות את אותה לשונית — ולכן מחכים לסיום הזיהוי ומבקשים מהמשתמש לאשר שוב.
-  if(selectionKeys.some(k=>String(k).startsWith('discount-business|'))){
-    const pending=await chrome.storage.local.get({pendingDiscountBusiness:false});
-    if(pending.pendingDiscountBusiness)throw Error('דיסקונט עדיין מזהה את כל החשבונות — המתן לסיום הזיהוי ואז אשר את הבחירה');
-  }
-  running=true;
+  if(!selectionKeys.length)throw Error('לא נבחרו חשבונות');if(running)throw Error('תהליך אחר כבר מתבצע');running=true;
   try{
     const grouped={business:[],private:[],leumi:[],'discount-business':[],'discount-private':[],mizrahi:[]};for(const selectionKey of selectionKeys){const parts=String(selectionKey).split('|');if(parts.length===2&&grouped[parts[0]])grouped[parts[0]].push(parts[1]);else grouped.business.push(selectionKey)}
     const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);const all=saved.accounts.filter(a=>!syncedSources.includes(a.source||'business'));for(const source of syncedSources)all.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
