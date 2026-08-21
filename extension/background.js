@@ -643,15 +643,34 @@ async function syncSelected(selectionKeys){
   if(!selectionKeys.length)throw Error('לא נבחרו חשבונות');if(running)throw Error('תהליך אחר כבר מתבצע');running=true;
   try{
     const grouped={business:[],private:[],leumi:[],'discount-business':[],'discount-private':[],mizrahi:[]};for(const selectionKey of selectionKeys){const parts=String(selectionKey).split('|');if(parts.length===2&&grouped[parts[0]])grouped[parts[0]].push(parts[1]);else grouped.business.push(selectionKey)}
-    const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);const all=saved.accounts.filter(a=>!syncedSources.includes(a.source||'business'));for(const source of syncedSources)all.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
+    const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);
+    // ⚠ 21.08.2026 — סנכרון ישות אחת מחק את כל השאר. הסינון כאן היה לפי **מקור**
+    // (`!syncedSources.includes(a.source)`), ולכן סנכרון ישות אחת בדיסקונט עסקי סילק מן
+    // האחסון את **כל** חשבונות discount-business השמורים — ובהם ישויות שלא
+    // נגענו בהן — ודחף בחזרה רק את מה שנקרא עכשיו. זה „מחק את הסנכרון של
+    // טל" מ-1.0.17. עכשיו מוסרים רק את מה ש**נתבקש** בריצה הזאת, לפי selectionKey.
+    // לחשבונות שנשמרו לפני שהיה selectionKey יש שתי נפילות לאחור: entityId
+    // (דיסקונט עסקי, שבו מפתח אחד נושא כמה חשבונות) וסניף-חשבון (פועלים, לאומי, מזרחי).
+    // מפתח בלי `|` הולך ל-grouped.business למעלה, ולכן גם כאן הוא צריך לקבל את אותה
+    // קידומת. בלעדיו החשבון הישן לא היה מזוהה כמוחלף, והנקרא היה נוסף לצידו ככפילות.
+    const requested=new Set(selectionKeys.map(k=>{const key=String(k);return key.includes('|')?key:`business|${key}`}));
+    const wasRequested=a=>{const source=a?.source||'business';return requested.has(String(a?.selectionKey||''))||(a?.entityId!=null&&requested.has(`${source}|${a.entityId}`))||requested.has(`${source}|${a?.branch||''}-${a?.accountNumber||''}`)};
+    const untouched=saved.accounts.filter(a=>!wasRequested(a)),fresh=[];
+    for(const source of syncedSources)fresh.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
     // ⚠ 18.08.2026 — „דיסקונט לא מסיים את הסנכרון": הסנכרון דווקא הסתיים („הסתיים
     // בהצלחה: 10 חשבונות · 6 תנועות חדשות"), אבל discoverDiscountBusiness המשיך
     // אחריו וכתב „מזהה מספר חשבון 3 מתוך 4". הזיהוי מיותר ברגע שהמשתמש כבר סנכרן
     // את החשבונות — ולכן דגל הזיהוי נסגר כאן, והלולאה שלו יוצאת באמצע.
     if(syncedSources.includes('discount-business'))await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0});
     if(syncedSources.includes('discount-private'))await chrome.storage.local.set({pendingDiscountPrivate:false});
-    const marked=await applyCollectSince(markNewTransactions(saved.accounts,all,syncedSources)),newCount=marked.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);
-    const preservedKeys=saved.selectedAccountKeys.filter(key=>!syncedSources.includes(String(key).includes('|')?String(key).split('|')[0]:'business'));const finalKeys=[...new Set([...preservedKeys,...selectionKeys])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;// ⚠ 18.08.2026 — טל: „מאיפה מצא 10 חשבונות? יש רק 4 וביקשתי לסנכרן אחד."
+    // ⚠ סימון „תנועה חדשה" חל רק על מה שנקרא עכשיו. מרגע שהחשבונות שלא נגענו
+    // בהם שורדים את הסנכרון, הרצה של הסימון גם עליהם היתה מוצאת כל תנועה
+    // זהה לעצמה ומכבה לה את סימן החדשות. גם newCount נספר על הריצה בלבד, כפי שהמסר מעיד.
+    const markedFresh=markNewTransactions(saved.accounts,fresh,syncedSources),newCount=markedFresh.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);const marked=await applyCollectSince([...untouched,...markedFresh]);
+    // ⚠ אותה תקלה בבחירה עצמה: הסינון לפי מקור מחק מ-selectedAccountKeys את
+// מפתחות הישויות שלא סונכרנו בריצה הזאת, וכך הן נשרו גם מן הסנכרון
+// האוטומטי. ביטול בחירה נעשה בדשבורד ונכתב לאחסון ישירות, ולכן כאן איחוד פשוט.
+const finalKeys=[...new Set([...saved.selectedAccountKeys.map(String),...selectionKeys.map(String)])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;// ⚠ 18.08.2026 — טל: „מאיפה מצא 10 חשבונות? יש רק 4 וביקשתי לסנכרן אחד."
 // marked.length הוא **כל** מה ששמור בכל הבנקים (10 רשומות), ולא מה שסונכרן בריצה.
 // המסר אמר „הסתיים בהצלחה: 10 חשבונות" והשתמע שסונכרנו עשרה. עכשיו שני המספרים
 // נפרדים ומסומנים.
