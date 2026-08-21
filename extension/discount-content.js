@@ -39,7 +39,13 @@ const menuEntitiesLoose=()=>{
   const raw=[...document.querySelectorAll('button,[role="button"],[role="option"],[role="menuitem"],li,a,div[tabindex]')]
     .filter(el=>ENTITY.test(text(el))&&text(el).length<90&&el!==trigger&&!(trigger&&el.contains(trigger)));
   // הפנימי ביותר: אלמנט שמכיל מועמד אחר הוא מכולה, לא אפשרות.
-  return raw.filter(el=>!raw.some(other=>other!==el&&el.contains(other)));
+  const inner=raw.filter(el=>!raw.some(other=>other!==el&&el.contains(other)));
+  // ⚠ 20.08.2026 — נמדד מ-discountSelectWorked/Failed ולא נוחש:
+  //   `a.dropdown-item` → הבחירה הצליחה ברמה 0.
+  //   `li.accountComboLinks` → נכשלה; זו עטיפה שאינה לחיצה.
+  // לכן עוגנים וכפתורים נבחרים ראשונים, ורק אם אין כאלה נופלים לשאר.
+  const clickableFirst=inner.filter(el=>/^(a|button)$/.test(el.tagName.toLowerCase())||['menuitem','option','button'].includes(el.getAttribute('role')||''));
+  return clickableFirst.length?clickableFirst:inner;
 };
 async function entityOptions(){const trigger=entityButton();if(!trigger)throw Error('לא נמצא בורר הישויות בדיסקונט עסקי');
 const already=menuEntities();if(already.length)return already;
