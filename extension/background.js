@@ -1125,10 +1125,12 @@ let beat=0;const heartbeat=setInterval(()=>{beat+=5;chrome.storage.local.set({sy
 const sessionWatch=tab=>{let timer=null;const promise=new Promise((_,reject)=>{timer=setInterval(async()=>{let url='';try{url=(await chrome.tabs.get(tab))?.url||''}catch{}
   if(!url)return;
   const off=!/^https:\/\/start\.telebank\.co\.il\//.test(url),login=/\/login\//.test(url);
+  // ⚠⚠ 21.08.2026 — טל: „לא מצליח להתחבר לדיסקונט, האם אתה משבש את הכניסה?"
+  // **כן, ובצדק.** הגרסה הקודמת ניווטה את הלשונית לדף הכניסה ברגע שראתה `/login/` —
+  // כלומר **בזמן שטל הקליד בדף הכניסה עצמו**, הדף נטען מחדש והמלל נמחק. זו בדיוק
+  // לולאת הניווט שהכללים אוסרים. **השומר מדווח בלבד, ולעולם אינו מנווט.**
   if(off||login){clearInterval(timer);
-    // הלשונית כבר אינה בסשן — ולכן החזרתה לדף הכניסה אינה חטיפה של דף שהמשתמש פתח.
-    try{await chrome.tabs.update(tab,{url:DISCOUNT_LOGIN_BUSINESS,active:true})}catch{}
-    reject(Error('ההתחברות לדיסקונט פגה — דף הכניסה נפתח מחדש, התחבר ונסה שוב'))}},2000)});
+    reject(Error(login?'ההתחברות לדיסקונט פגה — התחבר בלשונית ולחץ שוב':'ההתחברות לדיסקונט פגה — הדפדפן יצא מהסשן, התחבר ונסה שוב'))}},2000)});
   return{promise,stop:()=>clearInterval(timer)}};
 const watch=sessionWatch(tabId);
 let r=null;
