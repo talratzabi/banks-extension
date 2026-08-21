@@ -232,9 +232,33 @@ async function applyCollectSince(){
     note(`דיסקונט: טווח מ-${want}`);
   }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
 }
+// שומר הזהות: מוודא שהדף באמת מציג את הישות שביקשנו, לפי מספרי החשבון שהזיהוי כבר קרא.
+async function assertEntityMatches(id){
+  let known={};
+  try{const st=await chrome.storage.local.get({discoveredAccounts:[]});
+    for(const a of st.discoveredAccounts||[])if(a.source==='discount-business'&&a.accountNumber)known[String(a.entityId||a.key).replace(/^.*\|/,'')]=String(a.accountNumber)}catch{}
+  const mine=known[String(id)]||'';
+  const others=Object.entries(known).filter(([k])=>k!==String(id)).map(([,v])=>v);
+  let seen='',label='';
+  for(let i=0;i<15;i++){
+    seen=String(activeAccount().accountNumber||'');label=entityId(text(entityButton()));
+    const okLabel=!label||label===String(id);
+    const okNumber=mine?seen===mine:(seen&&!others.includes(seen));
+    if(okLabel&&okNumber&&seen)return;
+    await wait(1000)}
+  try{await chrome.storage.local.set({discountIdentityBlock:{want:String(id),expected:mine,seen,label,at:new Date().toISOString()}})}catch{}
+  throw Error(`הדף לא עבר לישות ${id}: מוצג חשבון ${seen||'לא ידוע'}${mine?` במקום ${mine}`:''}${label&&label!==String(id)?` (הבורר מציג ${label})`:''} — הסנכרון נעצר כדי לא לשמור נתונים של חשבון אחר`);
+}
 async function extract(id,isPrivate=false){const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();// ⚠ הלקח שחזר שלוש פעמים: להמתין לטעינה לפני קריאה. אחרי הניווט וההזרקה מחדש הדף
 // עדיין מתרנדר, וקריאה מיידית מחזירה null ומפילה את הסנכרון.
 for(let i=0;i<120;i++){if(txCandidates().length||valueAfter('יתרת עו"ש')!=null)break;await wait(250)}
+// ⚠⚠ 21.08.2026 — **הבאג החמור ביותר עד כה.** טל: „הוא סנכרן את החשבון של יובל,
+// נתן לו שם של ינון, ומחק את הסנכרון של טל." נמדד מהמסך: בעלים „ינון" עם
+// סניף 008 חשבון 3920651 — **המספר של אביסידריס יובל.** הסיבה: `owner` נקרא
+// מתווית הבורר ו-`activeAccount()` מהטקסט בדף, ושניהם נקראו כשהדף עוד הציג את
+// הישות הקודמת. תווית שהתחלפה **אינה** הוכחה שהנתונים התחלפו.
+// לכן: לא קוראים ישות שלא אומתה מול מספר חשבון ידוע. עדיף להיכשל מלשמור שקר.
+if(!isPrivate)await assertEntityMatches(id);
 // הטווח נשלח לאתר לפני קריאת השורות — אחרת נקרא את חלון ברירת המחדל (3 חודשים).
 if(!isPrivate)await applyCollectSince();
 // ⚠ נמדד חי: בדף התנועות התווית היא "עובר ושב", ו-"יתרת עו\"ש" קיימת רק בדף הבית.
