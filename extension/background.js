@@ -1158,6 +1158,37 @@ finally{clearInterval(heartbeat);watch.stop()}
 // שומרים את צילום המצב לפני שזורקים, כדי שהתיקון הבא ייכתב ממדידה ולא מהשערה.
 if(r?.probe)await chrome.storage.local.set({discountProbe:r.probe});
 if(!r?.ok)throw Error(r?.error||'זיהוי החשבונות נכשל');const raw=r.accounts||[];
+// ⚠ 22.08.2026 — טל: „אין עדיין זיהוי לינון". נמדד מ-discountEntityReport:
+// ישות 570012930 — passes:2, seenEntities:["514649565"], resolved:false. כלומר
+// בשני המעברים ובכל 12 הדגימות הדף עדיין הציג את הישות הקודמת. אבל
+// discountSelectWorked מאותה ריצה אומר {entity:"570012930", path:"a.dropdown-item"}
+// — **המעבר כן הצליח, רק אחרי שהלולאה כבר ויתרה.** מעבר ישות טוען מחדש את הדף
+// והורג את ה-content script, ולכן חלון הדגימה לא מספיק והמצב לא נקרא שוב.
+// המספר עצמו כבר ידוע: הסנכרון של ינון הצליח ושמר 015-9832685, אחרי
+// assertEntityMatches שאימת אותו מול הדף. אין שום סיבה לרוץ אחרי הדף כדי
+// לגלות מחדש מה שכבר אומת ונשמר — מזריעים, בדיוק כפי ש-isracardActiveSince
+// מזריע את סריקת החודשים. ישות שהוזרעה מדלגת על הניווט כולו בלולאה שלמטה.
+// ⚠ מוזרעים **מספרים בלבד**. השמות נקראים מתוויות הבורר בקריאה אחת ולכן
+// אמינים, בעוד שם שמור עלול להיות הישן והשגוי (ראה תקלת השם ב-1.0.23).
+// ⚠ שני מקורות: הזיכרון הנפרד (שורד מחיקת חשבונות) ו-`accounts` (טרי יותר).
+// הסדר מכוון — accounts נטען שני ולכן דורס רשומה ישנה בזיכרון.
+const seedState=await chrome.storage.local.get({accounts:[],discountKnownNumbers:{}});
+const knownNumbers=new Map();
+for(const [id,v] of Object.entries(seedState.discountKnownNumbers||{}))
+  if(v&&v.branch&&v.accountNumber)knownNumbers.set(String(id),{branch:String(v.branch),accountNumber:String(v.accountNumber)});
+for(const acc of seedState.accounts||[]){
+  if((acc.source||'')!=='discount-business'||!acc.branch||!acc.accountNumber)continue;
+  const id=String(acc.entityId||String(acc.selectionKey||'').replace(/^.*\|/,''));
+  if(id)knownNumbers.set(id,{branch:String(acc.branch),accountNumber:String(acc.accountNumber)});
+}
+let seededCount=0;
+for(const a of raw){
+  if(a.branch&&a.accountNumber)continue;
+  const hit=knownNumbers.get(String(a.entityId||a.key||''));
+  if(!hit)continue;
+  a.branch=hit.branch;a.accountNumber=hit.accountNumber;seededCount++;
+}
+
 // מציגים את כל הישויות מיד. בשלב הזה אין קריאת יתרות/תנועות/הלוואות — רק שמות
 // הישויות, ובהמשך מספרי החשבון מתמלאים שורה-שורה.
 const otherBanks=state.discoveredAccounts.filter(a=>a.source!=='discount-business');
@@ -1193,7 +1224,7 @@ const missing=raw.filter(a=>!a.branch||!a.accountNumber),resolved=raw.length-mis
 if(!resolved)throw Error(`אף ישות לא נטענה מתוך ${raw.length} — הרשימה החלקית לא הוצגה`);
 const found=raw.map(asChoice);await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0,discoveredAccounts:[...otherBanks,...found],syncStatus:missing.length
   ?`דיסקונט עסקי: ${resolved} מתוך ${raw.length} חשבונות זוהו — ${missing.map(a=>a.owner||a.entityId).join(', ')} טרם נטענו. בחר מה שיש, או לחץ שוב להשלמה`
-  :`דיסקונט עסקי: נמצאו ואומתו ${found.length} חשבונות — בחר לפי מספר חשבון`})}
+  :`דיסקונט עסקי: נמצאו ואומתו ${found.length} חשבונות${seededCount?` (${seededCount} ממספרי חשבון שנשמרו בסנכרון קודם)`:''} — בחר לפי מספר חשבון`})}
 const DISCOUNT_TX_URL='https://start.telebank.co.il/apollo/business2/#/OSH_LENTRIES_ALTAMIRA';
 const DISCOUNT_LOANS_URL='https://start.telebank.co.il/apollo/business2/#/LOANS_WORLD';
 async function syncDiscountBusiness(keys){const tab=await discountTab();if(!tab)throw Error('החיבור לדיסקונט עסקי אינו פעיל');await returnToDashboard(tab.id,true);const all=await chrome.tabs.query({url:['https://start.telebank.co.il/*']});await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: עובד בלשונית ${tab.id}${all.length>1?` (מתוך ${all.length} פתוחות)`:''}`});
@@ -1236,5 +1267,18 @@ let loanState=null;for(let w=0;w<20;w++){await delay(1500);await prepareDiscount
 let loanResult={ok:true,loans:[]};try{loanResult=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_READ_LOANS'}),30000,'קריאת הלוואות')}catch(e){loanResult={ok:false,loans:[],error:e.message}}
 await chrome.storage.local.set({discountLoanProbe:loanResult?.probe||loanState,discountLoanError:loanResult?.ok?'':loanResult?.error||''});
 for(const a of r.accounts||[])out.push({...a,loans:loanResult?.ok?(loanResult.loans||[]):[],source:'discount-business',sourceLabel:'דיסקונט עסקי',selectionKey:`discount-business|${a.entityId}`,id:`discount-business-${a.entityId}`,lastSync:now,status:loanResult?.ok?'מסונכרן':'מסונכרן ללא פירוט הלוואות'})}
+// ⚠ 22.08.2026 — טל: „מה יקרה אם אמחק את החשבונות ואסנכרן מחודש פברואר?"
+// נמדד: ההזרעה של 1.0.24 קוראת את `accounts`, ומחיקת חשבון בדשבורד מסלקת
+// אותו משם — כלומר **המחיקה משמידה את מספר החשבון היחיד שממנו אפשר לזהות
+// את ינון**, והתיבה שלו חוזרת להיות disabled. כלומר ההזרעה נשענה על נתונים
+// שהמשתמש רשאי למחוק. זיכרון נפרד, שהמחיקה אינה נוגעת בו, סוגר את הפער.
+// נכתב **רק אחרי סנכרון שעבר assertEntityMatches** — כלומר מספר שאומת מול
+// הדף, לא ניחוש. נכתב לפני בדיקת השלמות שלמטה בכוונה: ריצה חלקית עדיין
+// מפקידה את מה שהספיקה לאמת.
+// רשומה מתיישנת מתקנת את עצמה: כל סנכרון מוצלח דורס אותה, ואם מספר בבנק
+// באמת השתנה, assertEntityMatches יעצור את הסנכרון במקום לשמור חשבון אחר.
+{const prev=(await chrome.storage.local.get({discountKnownNumbers:{}})).discountKnownNumbers||{},next={...prev};
+ for(const a of out)if(a.entityId&&a.branch&&a.accountNumber)next[String(a.entityId)]={branch:String(a.branch),accountNumber:String(a.accountNumber),at:now};
+ await chrome.storage.local.set({discountKnownNumbers:next});}
 if(out.length!==keys.length)throw Error(`נקראו ${out.length} ישויות מתוך ${keys.length}`);
 return out}
