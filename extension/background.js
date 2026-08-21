@@ -1116,9 +1116,24 @@ finally{discountBusy=false;await restoreSyncTabs()}}
 async function runDiscoverDiscount(tabId,state){abortIfRequested();await prepareDiscountContent(tabId);// ⚠ ההמתנה הזו הייתה אילמת: עד 120 שניות בלי אף כתיבת סטטוס, ולכן „תקוע" ו„נכשל"
 // נראו זהים. פעימה כל 5 שניות, ותקרה של 60 שניות — די והותר לדף שכבר טעון.
 let beat=0;const heartbeat=setInterval(()=>{beat+=5;chrome.storage.local.set({syncStatus:`דיסקונט עסקי: ממתין לתשובת הדף (${beat} שנ' מתוך 60)`})},5000);
+// ⚠ 21.08.2026 — „אם הסשן התנתק למה הוא לא מקפיץ את דף ההתחברות, ככה הוא סתם ממתין".
+// נמדד: כשהסשן פג דיסקונט מעביר ל-www.discountbank.co.il/messages/exit-page — **מארח
+// אחר**, ו-content_scripts מוגדר רק ל-start.telebank.co.il. הסקריפט לא רץ שם, אף אחד
+// לא עונה, והרקע ממתין 60 שניות ואז אומר „לא השיב". ההודעה „ההתחברות פגה" קיימת
+// בסקריפט — ולכן לא יכולה להיאמר בדיוק כשצריך אותה.
+// לכן: שומר סשן שמסתכל על כתובת הלשונית במקביל להמתנה, ועוצר ברגע שהיא עוזבת.
+const sessionWatch=tab=>{let timer=null;const promise=new Promise((_,reject)=>{timer=setInterval(async()=>{let url='';try{url=(await chrome.tabs.get(tab))?.url||''}catch{}
+  if(!url)return;
+  const off=!/^https:\/\/start\.telebank\.co\.il\//.test(url),login=/\/login\//.test(url);
+  if(off||login){clearInterval(timer);
+    // הלשונית כבר אינה בסשן — ולכן החזרתה לדף הכניסה אינה חטיפה של דף שהמשתמש פתח.
+    try{await chrome.tabs.update(tab,{url:DISCOUNT_LOGIN_BUSINESS,active:true})}catch{}
+    reject(Error('ההתחברות לדיסקונט פגה — דף הכניסה נפתח מחדש, התחבר ונסה שוב'))}},2000)});
+  return{promise,stop:()=>clearInterval(timer)}};
+const watch=sessionWatch(tabId);
 let r=null;
-try{r=await raceAbort(withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),60000,'זיהוי הישויות'))}
-finally{clearInterval(heartbeat)}
+try{r=await raceAbort(Promise.race([withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_DISCOVER'}),60000,'זיהוי הישויות'),watch.promise]))}
+finally{clearInterval(heartbeat);watch.stop()}
 // שומרים את צילום המצב לפני שזורקים, כדי שהתיקון הבא ייכתב ממדידה ולא מהשערה.
 if(r?.probe)await chrome.storage.local.set({discountProbe:r.probe});
 if(!r?.ok)throw Error(r?.error||'זיהוי החשבונות נכשל');const raw=r.accounts||[];
