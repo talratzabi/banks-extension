@@ -70,19 +70,43 @@ async function selectPrivateAccount(key){const wanted=String(key).replace(/\D/g,
 const clickChain=el=>{const out=[];let n=el;for(let i=0;i<5&&n&&n!==document.body;i++){out.push(n);n=n.parentElement}return out};
 const entityNow=()=>entityId(text(entityButton()));
 const idsIn=el=>new Set([...text(el).matchAll(/\b\d{9}\b/g)].map(m=>m[0])).size;
+// מועמד שנמדד כמצליח (a.dropdown-item) קודם, li אחרון. אין כאן סינון — רק סדר.
+const rankOption=el=>{const tag=el.tagName.toLowerCase();if(tag==='a'||tag==='button')return 0;if(el.getAttribute('role')==='option'||el.getAttribute('role')==='menuitem')return 1;return 2};
 const brief=el=>`${el.tagName.toLowerCase()}${el.id?'#'+el.id:''}${(String(el.className||'').trim().split(/\s+/)[0]||'')?'.'+String(el.className).trim().split(/\s+/)[0]:''}`;
 // המתנה אחרי לחיצה: הישות בבורר **וגם** מספר חשבון אחר. אם הבורר התחלף אבל
 // המספר לא — נותנים לדף עוד חלון, ורק בסופו מקבלים החלפה בלי שינוי מספר.
 async function switched(id,previous,ms){const until=Date.now()+ms;while(Date.now()<until){await wait(250);const account=activeAccount().accountNumber;if(entityNow()===id&&account&&account!==previous)return true}const account=activeAccount().accountNumber;return entityNow()===id&&!!account}
-async function selectEntity(id){if(entityNow()===id)return;const previous=activeAccount().accountNumber,options=await entityOptions(),option=options.find(b=>entityId(text(b))===id);if(!option)throw Error(`הישות ${id} לא נמצאה בדיסקונט עסקי`);
-const chain=clickChain(option),tried=[];
+// ⚠⚠ 22.08.2026 — טל: „עשיתי סנכרון ממרץ ליובל" → „דיסקונט לא עבר לישות
+// 514220276 — נוסו 1 רמות לחיצה (0:li.commonDropdown__menuItem)".
+// **נמדד משלוש רשומות שהקוד כתב לעצמו, ולא משוער:**
+//   discountSelectWorked = {entity:"570012930", path:"a.dropdown-item"}   ✔
+//   discountSelectFailed = {entity:"514220276", tried:["0:li.commonDropdown__menuItem"]}
+//   וכשל קודם          = {entity:"514220276", tried:["0:li.accountComboLinks"]}
+// כלומר בדף יש **כמה** אלמנטים שונים הנושאים את אותו מזהה ישות, ורק
+// `a.dropdown-item` באמת מחליף ישות. `options.find(...)` לקח את **הראשון
+// בסדר ה-DOM**, וסדר זה משתנה בין ריצות — לכן אותה ישות פעם עוברת ופעם לא.
+// אחרי מועמד כושל השרשרת נשברת מיד (`idsIn(el)>1` על ההורה), ולכן נוסתה
+// רמה אחת בלבד ושאר המועמדים מעולם לא נבדקו.
+// **מה שהשתנה: עוברים על כל המועמדים התואמים, לא על הראשון בלבד.**
+// ⚠ הערה למי שיבוא: זה **אינו** הדירוג שהוחזר ב-21.08. שם `entityOptions`
+// **סינן** li והפיל את הזיהוי כולו (discoveredAccounts=0), כי discover()
+// נשען על אותה רשימה. כאן לא מסננים דבר — הרשימה נשארת שלמה, רק סדר
+// הניסיון משתנה, והשינוי מקומי ל-selectEntity ואינו נוגע ב-discover().
+async function selectEntity(id){if(entityNow()===id)return;const previous=activeAccount().accountNumber,options=await entityOptions();
+const matches=options.filter(b=>entityId(text(b))===id);
+if(!matches.length)throw Error(`הישות ${id} לא נמצאה בדיסקונט עסקי`);
+// a/button לפני li — `a.dropdown-item` הוא היחיד שנמדד כמצליח. זו העדפת
+// סדר בלבד: מועמד li עדיין ינוסה, רק אחרי שהמבטיחים מיצו את עצמם.
+const ranked=[...matches].sort((x,y)=>rankOption(x)-rankOption(y));
+const tried=[];
+for(const option of ranked){const chain=clickChain(option);
 for(let level=0;level<chain.length;level++){const el=chain[level];
   // הורה שמכיל יותר ממזהה אחד הוא הרשימה כולה, לא האפשרות — לחיצה עליו תפגע במקום אחר.
   if(level&&idsIn(el)>1)break;
   tried.push(`${level}:${brief(el)}`);realClick(el);
-  if(await switched(id,previous,3000)){try{chrome.storage.local.set({discountSelectWorked:{entity:id,level,path:brief(el),chain:tried,at:new Date().toISOString()}})}catch{}return}}
-try{chrome.storage.local.set({discountSelectFailed:{entity:id,tried,seen:entityNow(),account:activeAccount().accountNumber,at:new Date().toISOString()}})}catch{}
-throw Error(`דיסקונט לא עבר לישות ${id} — נוסו ${tried.length} רמות לחיצה (${tried.join(' | ')})`)}
+  if(await switched(id,previous,3000)){try{chrome.storage.local.set({discountSelectWorked:{entity:id,level,path:brief(el),chain:tried,at:new Date().toISOString()}})}catch{}return}}}
+try{chrome.storage.local.set({discountSelectFailed:{entity:id,tried,candidates:ranked.map(brief),seen:entityNow(),account:activeAccount().accountNumber,at:new Date().toISOString()}})}catch{}
+throw Error(`דיסקונט לא עבר לישות ${id} — נוסו ${tried.length} לחיצות על ${ranked.length} מועמדים (${tried.join(' | ')})`)}
 function valueAfter(label){const nodes=[...document.querySelectorAll('button,p,div,span')].filter(el=>text(el).includes(label)).sort((a,b)=>text(a).length-text(b).length);for(const el of nodes){const own=money(text(el).slice(text(el).indexOf(label)+label.length));if(own!=null)return own;for(const near of [el.nextElementSibling,el.previousElementSibling,...(el.parentElement?.children||[])]){const n=money(text(near));if(n!=null)return n}}return null}
 function activeAccount(){const body=text(document.body);const candidates=[...body.matchAll(/\b(\d{10})\b/g)].map(m=>m[1]);const visible=(body.match(/\b(\d{10})\s+[^\d\n]{2,60}/)||[])[1]||'';const full=visible||candidates[0]||entityId(text(entityButton()));return{branch:full.length>=10?full.slice(0,3):'',accountNumber:full.length>=10?full.slice(3):full}}
 // לקח מלאומי: לא להניח <table>. קוראים גם רשת ARIA וגם טבלה אמיתית, ובוחרים את מה שיש.
