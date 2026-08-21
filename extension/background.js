@@ -1202,7 +1202,7 @@ if(st?.rows>0)break}
 let r=null,lastErr='',lastProbe=null;
 for(let attempt=1;attempt<=3;attempt++){
 // ⚠ שומרים את הצילום לפני איפוס r, אחרת האבחון של הניסיון הכושל נמחק ואי אפשר לדעת למה נכשל.
-try{r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_SYNC_SELECTED',keys:[key]}),90000,'קריאת התנועות');if(r?.probe)lastProbe=r.probe;if(r?.ok)break;lastErr=r?.error||'קריאה ריקה'}
+try{r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_SYNC_SELECTED',keys:[key]}),150000,'קריאת התנועות');if(r?.probe)lastProbe=r.probe;if(r?.ok)break;lastErr=r?.error||'קריאה ריקה'}
 catch(e){lastErr=e.message;await prepareDiscountContent(tab.id)}
 r=null}
 if(lastProbe)await chrome.storage.local.set({discountTxProbe:lastProbe});

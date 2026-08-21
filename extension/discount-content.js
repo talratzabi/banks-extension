@@ -222,11 +222,12 @@ async function applyCollectSince(){
     // חזרה לפני שהיא התמלאה. לכן לא מספיק „המוקדמת השתנתה" — ממתינים לטבלה
     // **לא ריקה ויציבה** בשתי דגימות רצופות, ואם נשארה ריקה — לוחצים שוב פעם אחת.
     let stable=0,last=-1,retried=false;
-    for(let i=0;i<50;i++){
+    // ⚠ 15 שניות ולא 30 — אותו תקציב. הטבלה נמדדה חיה כמתמלאת תוך פחות משנייה.
+    for(let i=0;i<25;i++){
       await wait(600);const n=rowCount();
       if(n>0&&n===last){if(++stable>=2)break}else stable=0;
       last=n;
-      if(!retried&&n===0&&i===16){retried=true;btn.click()}
+      if(!retried&&n===0&&i===10){retried=true;btn.click()}
     }
     await report('הופעל',{to:today,toValue:to.value,rows:rowCount(),beforeRows,earliest:earliestRow()?new Date(earliestRow()).toISOString().slice(0,10):'',earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried,value:from.value})
     note(`דיסקונט: טווח מ-${want}`);
@@ -240,7 +241,8 @@ async function assertEntityMatches(id){
   const mine=known[String(id)]||'';
   const others=Object.entries(known).filter(([k])=>k!==String(id)).map(([,v])=>v);
   let seen='',label='';
-  for(let i=0;i<15;i++){
+  // ⚠ 8 שניות ולא 15: יחד עם הרחבת הטווח זה חרג מתקציב 90 השניות של הרקע.
+  for(let i=0;i<8;i++){
     seen=String(activeAccount().accountNumber||'');label=entityId(text(entityButton()));
     const okLabel=!label||label===String(id);
     const okNumber=mine?seen===mine:(seen&&!others.includes(seen));
