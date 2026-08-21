@@ -197,16 +197,24 @@ async function applyCollectSince(){
     // הייתה מפני שאין תאריך, שאין פקדים, או שהערך כבר היה נכון.
     const report=async(reason,extra)=>{try{await chrome.storage.local.set({discountRangeApplied:{reason,from:want,at:new Date().toISOString(),url:location.hash,...extra}})}catch{}};
     if(!want)return report('אין תאריך התחלה');
-    const from=document.querySelector('input#fromDate'),btn=[...document.querySelectorAll('button')].find(b=>/advanced-search-btn/.test(String(b.className||'')));
-    if(!from||!btn)return report('פקדים חסרים',{hasFrom:!!from,hasBtn:!!btn});
+    const from=document.querySelector('input#fromDate'),to=document.querySelector('input#toDate'),btn=[...document.querySelectorAll('button')].find(b=>/advanced-search-btn/.test(String(b.className||'')));
+    if(!from||!to||!btn)return report('פקדים חסרים',{hasFrom:!!from,hasTo:!!to,hasBtn:!!btn});
+    // ⚠⚠ 20.08.2026 — **השורש האמיתי, ומה שהופרך.** נמדד חי: בקשה 01/01/2026 עד
+    // 20/08/2026 מחזירה 73 שורות **בכל שמונת החודשים** (1:7, 2:7, 3:10, 4:7, 5:14,
+    // 6:10, 7:11, 8:6). כלומר **אין תקרת 3 חודשים** — ההשערה הזו שגויה, אל תחזור אליה.
+    // הכשל היה ש-toDate **לא נכתב כלל**: האתר זוכר את הטווח הקודם בסשן, ולכן
+    // „מ-01/01" נחתך ב-31/03 שנשאר משם, וזו בדיוק השורה „ד.נ לתקופה 31/03/26-01/01/26".
+    const now=new Date(),pad=n=>String(n).padStart(2,'0'),today=`${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()}`;
     // ⚠ הערך בשדה אינו הוכחה שהטבלה מציגה את הטווח: האתר זוכר את החיפוש הקודם,
     // אבל אחרי ניווט הטבלה חוזרת לברירת המחדל. לכן לוחצים גם כשהערך כבר נכון,
     // אלא אם התנועה המוקדמת כבר קודמת לתאריך המבוקש.
     const wantMs=Date.parse(String(st.collectSince)),cur=earliestRow();
-    if(from.value===want&&cur&&cur<=wantMs)return report('כבר בטווח',{earliest:new Date(cur).toISOString().slice(0,10),rows:document.querySelectorAll('.rc-table-row').length});
+    if(from.value===want&&to.value===today&&cur&&cur<=wantMs)return report('כבר בטווח',{earliest:new Date(cur).toISOString().slice(0,10),rows:document.querySelectorAll('.rc-table-row').length});
     const rowCount=()=>document.querySelectorAll('.rc-table-row').length;
     const before=earliestRow(),beforeRows=rowCount();
-    from.focus();nativeSet(from,want);await wait(600);btn.click();
+    from.focus();nativeSet(from,want);await wait(300);
+    to.focus();nativeSet(to,today);await wait(300);
+    btn.click();
     // ⚠ 20.08.2026 — הריצה הראשונה רשמה rows:0: הטבלה מתרוקנת בזמן הבקשה, והקריאה
     // חזרה לפני שהיא התמלאה. לכן לא מספיק „המוקדמת השתנתה" — ממתינים לטבלה
     // **לא ריקה ויציבה** בשתי דגימות רצופות, ואם נשארה ריקה — לוחצים שוב פעם אחת.
@@ -217,7 +225,7 @@ async function applyCollectSince(){
       last=n;
       if(!retried&&n===0&&i===16){retried=true;btn.click()}
     }
-    await report('הופעל',{rows:rowCount(),beforeRows,earliest:earliestRow()?new Date(earliestRow()).toISOString().slice(0,10):'',earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried,value:from.value})
+    await report('הופעל',{to:today,toValue:to.value,rows:rowCount(),beforeRows,earliest:earliestRow()?new Date(earliestRow()).toISOString().slice(0,10):'',earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried,value:from.value})
     note(`דיסקונט: טווח מ-${want}`);
   }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
 }

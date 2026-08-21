@@ -11,6 +11,10 @@
   python tools/cdp.py dom <חלק-מכתובת> [selector] [--out קובץ]
 """
 import json, sys, time, urllib.request
+try:
+    sys.stdout.reconfigure(encoding='utf-8');sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 from websocket import create_connection
 
 PORT = 9222
