@@ -234,7 +234,7 @@ async function applyCollectSince(){
   }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
 }
 // שומר הזהות: מוודא שהדף באמת מציג את הישות שביקשנו, לפי מספרי החשבון שהזיהוי כבר קרא.
-async function assertEntityMatches(id){
+async function assertEntityMatches(id,repaired=false){
   let known={};
   try{const st=await chrome.storage.local.get({discoveredAccounts:[]});
     for(const a of st.discoveredAccounts||[])if(a.source==='discount-business'&&a.accountNumber)known[String(a.entityId||a.key).replace(/^.*\|/,'')]=String(a.accountNumber)}catch{}
@@ -248,6 +248,16 @@ async function assertEntityMatches(id){
     const okNumber=mine?seen===mine:(seen&&!others.includes(seen));
     if(okLabel&&okNumber&&seen)return;
     await wait(1000)}
+  // ⚠ 21.08.2026 — נמדד: {want:"024844714", expected:"2556371", seen:"9832685",
+  //   label:"570012930"} — הדף היה על ינון והסנכרון ביקש את טל. כלומר הסנכרון
+  //   מתחיל על הישות שבה הדף במקרה נמצא. במקום להיכשל, מבצעים כאן את המעבר עצמו:
+  //   selectEntity הוא המנגנון שכבר אומת (a.dropdown-item, discountSelectWorked).
+  if(!repaired){
+    repaired=true;
+    note(`דיסקונט: מעביר לישות ${id} לפני הקריאה`);
+    try{await selectEntity(String(id))}catch(e){note(`דיסקונט: המעבר נכשל — ${e.message}`)}
+    return assertEntityMatches(id,true);
+  }
   try{await chrome.storage.local.set({discountIdentityBlock:{want:String(id),expected:mine,seen,label,at:new Date().toISOString()}})}catch{}
   throw Error(`הדף לא עבר לישות ${id}: מוצג חשבון ${seen||'לא ידוע'}${mine?` במקום ${mine}`:''}${label&&label!==String(id)?` (הבורר מציג ${label})`:''} — הסנכרון נעצר כדי לא לשמור נתונים של חשבון אחר`);
 }
