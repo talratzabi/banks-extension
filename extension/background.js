@@ -797,7 +797,26 @@ await chrome.storage.local.set({pendingLeumi:true,leumiAttempts:0,leumiOptionPro
   const tabNow=await chrome.tabs.get(tab.id).catch(()=>null);
   await chrome.storage.local.set({pendingLeumi:false,
     leumiDiscoverError:{message:String(e?.message||e).slice(0,240),url:String(tabNow?.url||'').slice(0,200),at:new Date().toISOString()},
-    syncStatus:`זיהוי החשבונות בלאומי נכשל: ${e.message}`})});return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות ללאומי'});await chrome.windows.create({url:LEUMI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
+    syncStatus:`זיהוי החשבונות בלאומי נכשל: ${e.message}`});
+  // ⚠⚠ 22.08.2026 — נמדד: `הניווט בתפריט נכשל: A listener indicated an
+  // asynchronous response... message channel closed`, כשהלשונית כבר על
+  // /nis-transactions/. כלומר ניווט הרג את ה-content script באמצע הודעה.
+  // זה חולף ותלוי-תזמון, **אבל הוא חסם פעולה שכלל אינה זקוקה לזיהוי**:
+  // `selectedAccountKeys` כבר החזיק `leumi|921-348300` והחשבון כבר שמור.
+  // הזיהוי נועד למצוא חשבונות **חדשים**; מי שכבר נבחר ונשמר אינו צריך
+  // אותו. לכן כשל בזיהוי נופל עכשיו לאחור לסנכרון של מה שכבר אושר,
+  // במקום להשאיר את המשתמש בלי כלום.
+  // ⚠ נופלים לאחור **רק על מפתחות שהמשתמש כבר אישר** — לא בוחרים
+  // חשבונות בשמו, ולא נוגעים בבורר. אם אין מפתחות שמורים, הכשל נשאר כשל.
+  try{
+    const saved=await chrome.storage.local.get({selectedAccountKeys:[],accounts:[]});
+    const keys=(saved.selectedAccountKeys||[]).filter(k=>String(k).startsWith('leumi|'));
+    const known=(saved.accounts||[]).some(a=>(a.source||'')==='leumi');
+    if(keys.length&&known&&!running){
+      await chrome.storage.local.set({syncStatus:`הזיהוי נכשל — מסנכרן את ${keys.length} החשבונות שכבר אושרו`});
+      await syncSelected(keys);
+    }
+  }catch(err){await chrome.storage.local.set({syncStatus:`זיהוי נכשל, וגם הסנכרון החלופי נכשל: ${err.message}`})}});return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות ללאומי'});await chrome.windows.create({url:LEUMI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
 // ⚠⚠ שלושת השומרים כאן מונעים לולאת ניווט, ואין להסיר אף אחד מהם.
 // prepareLeumiRoute מנווט את הלשונית; הניווט טוען מחדש את הדף; הדף שולח LEUMI_AUTHENTICATED;
 // וזה קורא שוב ל-discoverLeumi. בלי תקרת ניסיונות, נעילה וצינון — זו לולאה אינסופית
