@@ -220,6 +220,72 @@ if(!rows.length)throw Error(`רשת התנועות בחשבון ${a.key} נקר�
 // מוסתרים (`peer sr-only` של Tailwind — קלט מוסתר עם label נראה לצדו),
 // ו-textContent קריא גם כשהם מוסתרים. לכן כאן **קריאה בלבד**: מה כל ערך
 // רדיו אומר, ואיזה שדה הוא „מתאריך" ואיזה „עד תאריך".
+// ⚠⚠ 22.08.2026 — הרחבת טווח בלאומי, **בנויה כולה על מדידה**. `leumiRadios`
+// החזיר את המיפוי המלא של `input[name="filterRadioList"]`:
+//   40   → „40 תנועות אחרונות"      ← ברירת המחדל, ואין לה שום משמעות תאריכית
+//   7    → „7 ימים אחרונים"
+//   30.2 → „מתחילת החודש"
+//   3    → „מתחילת הרבעון"
+//   365  → „שנה קלנדרית אחרונה"
+// והשרשרת הראתה שהפקד הלחיץ הוא ה-`label` שעוטף את הרדיו (`cursor-pointer`),
+// בתוך `div[role="radiogroup"]`. **אין לוח שנה**, ולכן אין צורך לנווט בתאים.
+// ⚠ למה זה לא מנחש: הבחירה נעשית לפי `value` של רדיו אמיתי ולפי `name` שנמדד,
+// והלחיצה על ה-`label` שלו — לא על סלקטור מומצא, ולא על מכולה שבמקרה מכילה
+// את המלל (זו הייתה השגיאה ב-1.1.5, ולפניה בדיסקונט ב-20.08).
+// ⚠ גבולות: נוגעים **רק** בתוך ה-radiogroup של המסננים. **לא בבורר החשבונות.**
+// כל הפונקציה בתוך try, וכשל בה אינו מפיל סנכרון — הוא רק משאיר את חלון
+// ברירת המחדל, בדיוק כפי שהיה עד היום. וכל מסלול, כולל יציאה מוקדמת, נרשם
+// ל-`leumiRangeApplied` — כי רשומה חסרה נראית כמו „הקוד לא רץ", וכבר בזבזנו
+// על זה סבב שלם בדיסקונט.
+function leumiRangeOption(sinceMs,now){
+  // כמה אחורה כל אפשרות מגיעה, נכון להיום. „40" אינה תאריכית ולכן לעולם לא נבחרת.
+  const y=now.getFullYear(),m=now.getMonth();
+  const cover={
+    '7':  new Date(y,m,now.getDate()-7).getTime(),
+    '30.2':new Date(y,m,1).getTime(),
+    '3':  new Date(y,Math.floor(m/3)*3,1).getTime(),
+    '365':new Date(y-1,m,now.getDate()).getTime()};
+  // הקטנה ביותר שמכסה את המבוקש — כדי לא למשוך יותר ממה שביקשו
+  const covering=Object.entries(cover).filter(([,from])=>from<=sinceMs)
+    .sort((a,b)=>b[1]-a[1]);
+  if(covering.length)return{value:covering[0][0],capped:false};
+  // אף אפשרות אינה מגיעה אחורה מספיק — לוקחים את הרחבה ומודיעים שנחתך
+  const widest=Object.entries(cover).sort((a,b)=>a[1]-b[1])[0];
+  return{value:widest[0],capped:true,reach:widest[1]};
+}
+async function applyLeumiRange(){
+  const report=async(reason,extra)=>{try{await chrome.storage.local.set(
+    {leumiRangeApplied:{reason,at:new Date().toISOString(),...extra}})}catch{}};
+  try{
+    const st=await chrome.storage.local.get({collectSince:''});
+    const sinceMs=Date.parse(String(st.collectSince||''));
+    if(!Number.isFinite(sinceMs))return report('אין גבול איסוף — נשאר חלון ברירת המחדל');
+    const radios=[...document.querySelectorAll('input[name="filterRadioList"]')];
+    if(!radios.length)return report('בורר התקופה לא נמצא בדף');
+    const pick=leumiRangeOption(sinceMs,new Date());
+    const target=radios.find(r=>String(r.value)===pick.value);
+    if(!target)return report('האפשרות לא קיימת',{want:pick.value,have:radios.map(r=>r.value)});
+    if(target.checked)return report('כבר בטווח המבוקש',{value:pick.value,capped:pick.capped});
+    const before=datedRows().length;
+    // הפקד הלחיץ הוא ה-label שעוטף את הרדיו — כך נמדד בשרשרת ההורים
+    const label=target.closest('label')||target.parentElement;
+    realClick(label);
+    await wait(500);
+    // אם הלחיצה לא נקלטה, ייתכן שהפאנל סגור: פותחים אותו דרך הפקד שלפני
+    // ה-radiogroup, ומנסים שוב — פעם אחת בלבד.
+    if(!target.checked){
+      const group=target.closest('[role="radiogroup"]');
+      const opener=group&&(group.closest('div')?.previousElementSibling||group.parentElement?.previousElementSibling);
+      if(opener){realClick(opener);await wait(600);realClick(label);await wait(500)}
+    }
+    if(!target.checked)return report('הרדיו לא נבחר',{value:pick.value,rows:datedRows().length});
+    // ממתינים לרשת להתמלא מחדש: לא ריקה ויציבה בשתי דגימות
+    let last=-1,stable=0;
+    for(let i=0;i<25;i++){await wait(600);const n=datedRows().length;
+      if(n>0&&n===last){if(++stable>=2)break}else stable=0;last=n}
+    await report('הופעל',{value:pick.value,capped:pick.capped,rowsBefore:before,rowsAfter:datedRows().length});
+  }catch(e){await report('נכשל',{error:String(e&&e.message||e)})}
+}
 function radioProbe(){
   const f=t=>String(t||'').replace(/\s+/g,' ').trim();
   // textContent ולא innerText — אלמנט מוסתר מחזיר innerText ריק
@@ -316,7 +382,10 @@ function rangeProbe(){try{
       value:f(el.value).slice(0,30),opts:[...el.options].map(o=>f(o.text).slice(0,24)).slice(0,10)})).slice(0,6),
     at:new Date().toISOString()};
 }catch(e){return{probeError:String(e&&e.message||e)}}}
-async function syncSelected(keys,balances={}){const out=[];for(const key of keys){if(accountTabs().length)await selectAccount(key);out.push(await extract(key,Number(balances[key])))}return out}
+async function syncSelected(keys,balances={}){const out=[];// ⚠ הטווח נשלח **לפני** קריאת השורות. הפוך מזה — והקריאה תקדים את הבקשה,
+// בדיוק הכשל שנרשם בדיסקונט ב-20.08 („ניווט שקדם לבחירה נמחק על ידה").
+await applyLeumiRange();
+for(const key of keys){if(accountTabs().length)await selectAccount(key);out.push(await extract(key,Number(balances[key])))}return out}
 async function syncLoans(keys){const out=[];for(const key of keys){if(accountTabs().length)await selectAccount(key);let rows=[];for(let i=0;i<180;i++){rows=gridRows().map(row=>({row,cells:cellsOf(row)})).filter(x=>x.cells.some(v=>/%/.test(v))&&x.cells.filter(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)).length>=2);if(rows.length)break;await wait(250)}const page=txt(document.body),declaredTotal=money((page.match(/סך יתרת הלוואות[\s\S]{0,200}?₪\s*([\d,]+\.\d{2})/)||[])[1]);if(declaredTotal>0&&!rows.length)throw Error(`לא נטען פירוט ההלוואות בחשבון ${key}`);const loans=[];let prevStamp='';for(const {row,cells:c} of rows){const end=c.findIndex(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)),interest=c.findIndex(v=>/%/.test(v));if(end<1||interest<0)continue;row.querySelector('button,[role="button"]')?.click();await wait(800);const panel=txt(document.querySelector('[aria-label="הרחבת הלוואה"]')||document.querySelector('[role="complementary"]')||document.body);const nextPayment=money((panel.match(/התשלום הבא\s*₪?\s*([\d,]+\.\d{2})/)||[])[1]),nextPaymentDate=(panel.match(/תאריך התשלום הבא\s*(\d{2}\.\d{2}\.\d{4})/)||[])[1]||'';if(nextPayment==null||!nextPaymentDate)throw Error(`חסר תשלום קרוב בהלוואה בחשבון ${key}`);
 // ההרחבה יושבת מחוץ לשורה, ולחיצה שנייה אינה מקפלת אותה. אם שתי שורות מחזירות את אותו תשלום — עוצרים במקום לשכפל.
 const stamp=`${nextPayment}|${nextPaymentDate}`;if(rows.length>1&&stamp===prevStamp)throw Error(`הרחבת ההלוואה בחשבון ${key} לא התחלפה בין שורות (אותו תשלום קרוב ${nextPaymentDate}) — נעצר כדי לא לשכפל נתון`);prevStamp=stamp;
