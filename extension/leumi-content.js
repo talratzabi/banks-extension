@@ -29,7 +29,7 @@ if(!child)return{ok:false,error:`הפריט ${route.child} לא נמצא בתפ�
 realClick(child);
 for(let i=0;i<50;i++){await wait(300);if(location.pathname.includes(route.path))return{ok:true}}
 return{ok:false,error:`הניווט ל-${route.child} לא הגיע ל-${route.path}`}}
-chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),radios:radioProbe(),grid:gridProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
+chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),radios:radioProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
 // הרחבת שורת התנועה מזריקה את צילום השיק כ-data:image ישירות ל-DOM — קדמי ואחורי.
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
@@ -192,16 +192,7 @@ async function discover(){if(!await ready())throw Error(`דף לאומי לא נ
 const name=accountName(o)||`חשבון ${a.accountNumber}`;const values=value.match(/-?[\d,]+\.\d{2}/g);return{...a,nickname:name,balance:values?.length?money(values.at(-1)):null}}).filter(Boolean);document.querySelector('[role="dialog"] button[aria-label="סגירה"]')?.click();return accounts}
 async function selectAccount(key){const current=parseAccount(txt(chooser()));if(current?.key===key)return;let option=accountTabs().find(o=>parseAccount(txt(o))?.key===key);if(!option){const opts=await options();option=opts.find(o=>parseAccount(txt(o))?.key===key)}if(!option)throw Error(`החשבון ${key} לא נמצא בחיבור לאומי`);realClick(option);for(let i=0;i<60;i++){await wait(250);const active=parseAccount(txt(chooser()));if(active?.key===key)return;
 if(!chooser()&&normalized(txt(document.body)).includes(key))return}throw Error(`לאומי לא עבר לחשבון ${key}`)}
-async function extract(expectedKey='',fallbackBalance=null){await openCurrentAccount();
-// ⚠⚠ 22.08.2026 — **מיקום.** הקריאה הזו ישבה בתחילת `syncSelected` — כלומר
-// **לפני `selectAccount` ולפני שהרשת נטענה בכלל**. נמדד:
-//   leumiRangeApplied = {reason:"טווח מדויק ללא שינוי מספיק", rows:2}
-//   ואז: "החשבון 921-348300 לא נמצא בחיבור לאומי" — הסנכרון נפל.
-// שתי תקלות באחת: הסינון הוחל על דף שבו שתי שורות בלבד, והרנדור
-// מחדש שגרר הרס את לשוניות החשבון ש-`selectAccount` חיפש אחריהן.
-// המקום הנכון: אחרי שהחשבון נבחר והרשת קיימת, ולפני קריאת השורות.
-// אחרי החלת הסינון ממתינים לרשת שוב — היא נטענת מחדש.
-await applyLeumiRange();await openCurrentAccount();await loadAllRows();const raw=datedRows().map(x=>x.cells);const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');if(!raw.length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
+async function extract(expectedKey='',fallbackBalance=null){await openCurrentAccount();await loadAllRows();const raw=datedRows().map(x=>x.cells);const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');if(!raw.length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
 if(balance==null&&Number.isFinite(fallbackBalance))balance=fallbackBalance;if(balance==null)throw Error(`לא זוהתה יתרת עו״ש בחשבון ${a.key} — לא בכרטיס היתרה ולא בבורר`);const limitMatch=cardText.match(/מסגרת אשראי\s*₪?\s*(-?[\d,]+\.\d{2})/);const creditLimit=limitMatch?money(limitMatch[1]):null;// העמודות נקראות לפי כותרת ולא לפי היסט קבוע. נמדד מול הדף החי: תאריך|תנועות|אסמכתא|חובה|זכות|יתרה מצטברת.
 const idx=columnIndex(),col=(label,fallback)=>Number.isInteger(idx[label])?idx[label]:fallback;
 const iDate=col('תאריך',1),iAction=col('תנועות',2),iRef=col('אסמכתא',3),iDebit=col('חובה',4),iCredit=col('זכות',5),iBalance=col('יתרה מצטברת',6);
@@ -487,62 +478,6 @@ async function dateMenuProbe(){
   }catch(e){out.closeError=String(e&&e.message||e)}
   return out;
 }
-// ⚠⚠ 22.08.2026 — גשש מבנה הרשת. **קריאה בלבד: אפס לחיצות, אפס גלילה.**
-// הרקע: הקריאה נעצרת על ~29 שורות גם כשהטווח רחב, ו**שני ניסיונות תיקון
-// עיוורים נכשלו** — האחרון אף החמיר (13 שורות ו-70 שניות, ראה 1.2.5).
-// לכן לפני ניסיון שלישי מודדים **מה בכלל מפעיל טעינת עמוד נוסף**:
-//   · האם הרשת מווירטואלית (aria-rowcount מול שורות ב-DOM, transform/top
-//     על השורות, data-index) — אם כן, שורות מתחלפות ואין „לגלול עד הסוף";
-//   · האם יש „זקיף" של IntersectionObserver בתחתית (אלמנט זעיר/ריק,
-//     או שם מחלקה עם sentinel/loader/spinner/observer);
-//   · האם יש פקדי עימוד או ספירה מוצהרת („מוצגות X מתוך Y");
-//   · מי האב הנגלל בפועל, ומה היחס scrollHeight/clientHeight.
-// כל אלה **תצפית**. שום מסקנה לא תיכתב לקוד לפני שהמספרים יגיעו.
-// ⚠ רץ **אחרי** שהקריאה הסתיימה, ולכן אינו יכול לשבש אותה.
-function gridProbe(){
-  const f=t=>String(t||'').replace(/\s+/g,' ').trim();
-  try{
-    const rows=datedRows();
-    const tail=rows.at(-1)?.row,head=rows[0]?.row;
-    // האבות הנגללים בפועל, עם המידות — בלי לגעת בהם
-    const chain=[];let n=tail;
-    for(let i=0;i<10&&n&&n!==document.body;i++,n=n.parentElement){
-      const st=getComputedStyle(n);
-      chain.push({tag:n.tagName.toLowerCase(),cls:f(n.className).slice(0,38),
-        role:n.getAttribute&&n.getAttribute('role')||'',
-        sh:n.scrollHeight,ch:n.clientHeight,top:n.scrollTop,
-        ov:`${st.overflowY}`,scrollable:n.scrollHeight>n.clientHeight+8});
-    }
-    // סימני וירטואליזציה
-    const grid=tail&&tail.closest('[role="grid"],[role="table"],table');
-    const rowStyle=tail?getComputedStyle(tail):null;
-    const declared=(()=>{for(const el of document.querySelectorAll('[aria-rowcount],[data-total],[data-count]')){
-      const v=el.getAttribute('aria-rowcount')||el.getAttribute('data-total')||el.getAttribute('data-count');
-      if(v)return {attr:v,on:f(el.className).slice(0,30)}}return null})();
-    const totalText=(f(document.body.innerText).match(/(מוצג\w*|מתוך)[^.]{0,40}\d+[^.]{0,25}/)||[''])[0].slice(0,90);
-    // מועמדים ל„זקיף" בתחתית הרשימה: אלמנט אחרון, זעיר או בעל שם מרמז
-    const sentinels=[...document.querySelectorAll('div,span,li')]
-      .filter(el=>/sentinel|observer|loader|spinner|infinite|load-more|end-of/i.test(String(el.className||'')))
-      .map(el=>({cls:f(el.className).slice(0,40),h:el.getBoundingClientRect().height})).slice(0,8);
-    const afterTail=tail&&tail.nextElementSibling;
-    return{
-      rowsInDom:rows.length,
-      firstDate:head?f(rows[0].cells.join(' ')).match(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/)?.[0]||'':'',
-      lastDate:tail?f(rows.at(-1).cells.join(' ')).match(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/)?.[0]||'':'',
-      declared,totalText,
-      gridRole:grid?`${grid.tagName.toLowerCase()}[${grid.getAttribute('role')||''}]`:'',
-      gridAriaRowCount:grid?grid.getAttribute('aria-rowcount')||'':'',
-      rowPosition:rowStyle?rowStyle.position:'',
-      rowTransform:rowStyle?String(rowStyle.transform).slice(0,30):'',
-      rowHasIndex:tail?!!(tail.getAttribute('data-index')||tail.getAttribute('aria-rowindex')):false,
-      siblingAfterTail:afterTail?{tag:afterTail.tagName.toLowerCase(),
-        cls:f(afterTail.className).slice(0,40),h:afterTail.getBoundingClientRect().height,
-        text:f(afterTail.textContent).slice(0,40)}:null,
-      sentinels,
-      chain,
-      at:new Date().toISOString()};
-  }catch(e){return{probeError:String(e&&e.message||e)}}
-}
 function rangeProbe(){try{
   const f=s=>String(s||'').replace(/\s+/g,' ').trim();
   const DATE=/\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/;
@@ -567,7 +502,9 @@ function rangeProbe(){try{
       value:f(el.value).slice(0,30),opts:[...el.options].map(o=>f(o.text).slice(0,24)).slice(0,10)})).slice(0,6),
     at:new Date().toISOString()};
 }catch(e){return{probeError:String(e&&e.message||e)}}}
-async function syncSelected(keys,balances={}){const out=[];
+async function syncSelected(keys,balances={}){const out=[];// ⚠ הטווח נשלח **לפני** קריאת השורות. הפוך מזה — והקריאה תקדים את הבקשה,
+// בדיוק הכשל שנרשם בדיסקונט ב-20.08 („ניווט שקדם לבחירה נמחק על ידה").
+await applyLeumiRange();
 for(const key of keys){if(accountTabs().length)await selectAccount(key);out.push(await extract(key,Number(balances[key])))}return out}
 async function syncLoans(keys){const out=[];for(const key of keys){if(accountTabs().length)await selectAccount(key);let rows=[];for(let i=0;i<180;i++){rows=gridRows().map(row=>({row,cells:cellsOf(row)})).filter(x=>x.cells.some(v=>/%/.test(v))&&x.cells.filter(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)).length>=2);if(rows.length)break;await wait(250)}const page=txt(document.body),declaredTotal=money((page.match(/סך יתרת הלוואות[\s\S]{0,200}?₪\s*([\d,]+\.\d{2})/)||[])[1]);if(declaredTotal>0&&!rows.length)throw Error(`לא נטען פירוט ההלוואות בחשבון ${key}`);const loans=[];let prevStamp='';for(const {row,cells:c} of rows){const end=c.findIndex(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)),interest=c.findIndex(v=>/%/.test(v));if(end<1||interest<0)continue;row.querySelector('button,[role="button"]')?.click();await wait(800);const panel=txt(document.querySelector('[aria-label="הרחבת הלוואה"]')||document.querySelector('[role="complementary"]')||document.body);const nextPayment=money((panel.match(/התשלום הבא\s*₪?\s*([\d,]+\.\d{2})/)||[])[1]),nextPaymentDate=(panel.match(/תאריך התשלום הבא\s*(\d{2}\.\d{2}\.\d{4})/)||[])[1]||'';if(nextPayment==null||!nextPaymentDate)throw Error(`חסר תשלום קרוב בהלוואה בחשבון ${key}`);
 // ההרחבה יושבת מחוץ לשורה, ולחיצה שנייה אינה מקפלת אותה. אם שתי שורות מחזירות את אותו תשלום — עוצרים במקום לשכפל.
