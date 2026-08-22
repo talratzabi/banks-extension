@@ -319,7 +319,7 @@ async function maybeAutoSync(source,label,tabId){
   if(running)return false;
   const st=await chrome.storage.local.get({autoSyncOnLogin:false,selectedAccountKeys:[],accounts:[],autoSyncLast:{},autoSyncFailed:{}});
   if(autoRetryTooSoon(st,source))return false;   // ניסיון קודם נכשל — שקט, ההודעה שלו עדיין על המסך
-  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;if(/שגיאה|נכשל/.test((await chrome.storage.local.get({syncStatus:''})).syncStatus||''))return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
+  if(!st.autoSyncOnLogin){await noteAutoSyncOff(label);return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;if(/שגיאה|נכשל/.test((await chrome.storage.local.get({syncStatus:''})).syncStatus||''))return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // גרסאות קודמות יכלו להשאיר חשבונות מסונכרנים בלי selectedAccountKeys.
   // במקרה כזה משחזרים את הבחירה רק מן החשבונות שכבר אושרו ונשמרו, בלי לבחור
   // חשבונות חדשים שהמשתמש מעולם לא ביקש לסנכרן.
@@ -375,10 +375,19 @@ async function isracardOnAuth(tabId,fn){
   try{return await fn(tabId)}
   catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();return false}
 }
+// ⚠ 22.08.2026 — ההודעה „הסנכרון האוטומטי כבוי" דרסה כשל זיהוי טרי של לאומי
+// והשאירה את המשתמש בלי שום רמז למה „אין חשבונות לבחירה". היא מופיעה בשני
+// מסלולי כניסה (autoSyncFromLogin ו-maybeAutoRun) ולכן אוחדה לכאן.
+// **הכלל: הודעה שגרתית אינה מוחקת שגיאה.**
+async function noteAutoSyncOff(label){
+  const cur=(await chrome.storage.local.get({syncStatus:''})).syncStatus||'';
+  if(/שגיאה|נכשל/.test(cur))return;
+  await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});
+}
 async function maybeAutoRun(source,label,fn,tabId){
   if(running)return false;
   const st=await chrome.storage.local.get({autoSyncOnLogin:false,accounts:[],autoSyncLast:{}});
-  if(!st.autoSyncOnLogin){await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;if(/שגיאה|נכשל/.test((await chrome.storage.local.get({syncStatus:''})).syncStatus||''))return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
+  if(!st.autoSyncOnLogin){await noteAutoSyncOff(label);return false}const wait_=autoSyncTooSoon(st,source);if(wait_){if(AUTO_SYNC_MIN_GAP_MS-wait_<60000)return false;if(/שגיאה|נכשל/.test((await chrome.storage.local.get({syncStatus:''})).syncStatus||''))return false;await chrome.storage.local.set({syncStatus:`${label}: סונכרן לאחרונה לפני פחות מ-6 שעות — הבא בעוד ${gapText(wait_)}. לעדכון מיידי לחץ על הבנק בדשבורד`});return false}
   // ⚠ ישראכרט אינו יוצר שורת חשבון משלו — הכרטיסים נתלים על חשבונות הבנק. לכן
   // "כבר סונכרן פעם" נמדד אצלו לפי קיום כרטיס שהמנפיק שלו ישראכרט, ולא לפי source.
   const synced=source==='isracard'
@@ -777,7 +786,18 @@ async function startLeumi(){if(running)return{ok:false,error:'סנכרון כב�
 // רשימת החשבונות נמחקת כבר בלחיצה. היא תוצר של התחברות אחת ואין להציג אותה בלעדיה —
 // אחרת נבחרים חשבונות מרשימה ישנה שאין מאחוריה שום סשן פעיל.
 const prev=await chrome.storage.local.get({discoveredAccounts:[]});
-await chrome.storage.local.set({pendingLeumi:true,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:prev.discoveredAccounts.filter(a=>a.source!=='leumi'),syncStatus:'טוען את החיבור הפעיל ללאומי ומזהה חשבונות'});const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(tabs.length){const tab=leumiTab(tabs);await returnToDashboard(tab.id,true);discoverLeumi(tab.id).catch(async e=>{await chrome.storage.local.set({pendingLeumi:false,syncStatus:`זיהוי החשבונות בלאומי נכשל: ${e.message}`})});return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות ללאומי'});await chrome.windows.create({url:LEUMI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
+await chrome.storage.local.set({pendingLeumi:true,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:prev.discoveredAccounts.filter(a=>a.source!=='leumi'),syncStatus:'טוען את החיבור הפעיל ללאומי ומזהה חשבונות'});const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(tabs.length){const tab=leumiTab(tabs);await returnToDashboard(tab.id,true);discoverLeumi(tab.id).catch(async e=>{
+  // ⚠⚠ 22.08.2026 — טל: „אין חשבונות לבחירה". נמדד באחסון: leumiAttempts=1,
+  // pendingLeumi=false, discoveredAccounts=0 — הזיהוי רץ ונכשל — אבל
+  // `syncStatus` הראה „זוהתה כניסה ללאומי, אך הסנכרון האוטומטי כבוי",
+  // ו-`leumiDebug`/`leumiOptionProbe` היו null. **הודעת הכשל נדרסה על ידי
+  // גלאי הכניסה שרץ אחריה, ולא נשארו עקבות לומר למה.** התקדים כבר קיים
+  // בדיסקונט (`discountDiscoverError`): כשל נרשם למפתח ייעודי שאיש אינו
+  // כותב עליו, ולא רק לשורת סטטוס חולפת.
+  const tabNow=await chrome.tabs.get(tab.id).catch(()=>null);
+  await chrome.storage.local.set({pendingLeumi:false,
+    leumiDiscoverError:{message:String(e?.message||e).slice(0,240),url:String(tabNow?.url||'').slice(0,200),at:new Date().toISOString()},
+    syncStatus:`זיהוי החשבונות בלאומי נכשל: ${e.message}`})});return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות ללאומי'});await chrome.windows.create({url:LEUMI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
 // ⚠⚠ שלושת השומרים כאן מונעים לולאת ניווט, ואין להסיר אף אחד מהם.
 // prepareLeumiRoute מנווט את הלשונית; הניווט טוען מחדש את הדף; הדף שולח LEUMI_AUTHENTICATED;
 // וזה קורא שוב ל-discoverLeumi. בלי תקרת ניסיונות, נעילה וצינון — זו לולאה אינסופית
