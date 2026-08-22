@@ -29,7 +29,7 @@ if(!child)return{ok:false,error:`הפריט ${route.child} לא נמצא בתפ�
 realClick(child);
 for(let i=0;i<50;i++){await wait(300);if(location.pathname.includes(route.path))return{ok:true}}
 return{ok:false,error:`הניווט ל-${route.child} לא הגיע ל-${route.path}`}}
-chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
+chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),radios:radioProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
 // הרחבת שורת התנועה מזריקה את צילום השיק כ-data:image ישירות ל-DOM — קדמי ואחורי.
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
@@ -204,6 +204,57 @@ if(!rows.length)throw Error(`רשת התנועות בחשבון ${a.key} נקר�
 // רץ רק אחרי שהתנועות כבר נקראו, ולכן אינו יכול לשבש את הקריאה; והבורר
 // **נסגר בחזרה** ב-Escape ובלחיצה על הרקע, כדי לא להשאיר את הדף פתוח לשלב
 // ההלוואות. כל כולו בתוך try — כשל בגשש לא יפיל סנכרון.
+// ⚠⚠ 22.08.2026 — **התגלית שמשנה את כיוון המימוש.** `leumiDateMenu` החזיר:
+//   inputs: radio name="filterRadioList" values 40, 7, 30.2, 3, 365
+//           + שני input[type=text] עם placeholder "dd.mm.yy"
+//   calendarCells: 0        inputsBefore: 18 == inputsAfter
+// כלומר **אין לוח שנה**, ובורר התקופה הוא **קבוצת רדיו רגילה** עם ערכים
+// מוכנים, לצד שני שדות טקסט לטווח מותאם. זה הרבה יותר קל ממה שחששנו.
+// ⚠ ומה שנכשל: כל השדות חזרו `shown:false` ומספר הקלטים לא השתנה — כלומר
+// **הלחיצה שלי לא פתחה את הפאנל**. הסיבה נמדדת מן המלל של הכפתור שמצאתי:
+// „תאריך40 תנועות אחרונותטווח תאריכיםמתאריךעד תאריך7 ימים אחרונים…" —
+// זהו **מכולה שמכילה את כל הפאנל המוסתר**, לא הפקד שפותח אותו. זה בדיוק
+// הלקח שכבר נרשם בדיסקונט: „האלמנט הפנימי ביותר שמכיל את המזהה הוא טקסט,
+// לא הפקד הלחיץ."
+// **המסקנה המעשית: אין צורך לפתוח כלום כדי למדוד.** האלמנטים כבר ב-DOM,
+// מוסתרים (`peer sr-only` של Tailwind — קלט מוסתר עם label נראה לצדו),
+// ו-textContent קריא גם כשהם מוסתרים. לכן כאן **קריאה בלבד**: מה כל ערך
+// רדיו אומר, ואיזה שדה הוא „מתאריך" ואיזה „עד תאריך".
+function radioProbe(){
+  const f=t=>String(t||'').replace(/\s+/g,' ').trim();
+  // textContent ולא innerText — אלמנט מוסתר מחזיר innerText ריק
+  const deep=el=>f(el&&el.textContent);
+  const labelFor=el=>{
+    if(!el)return'';
+    if(el.id){const l=document.querySelector(`label[for="${CSS.escape(el.id)}"]`);if(l)return deep(l)}
+    const own=el.closest('label');if(own)return deep(own);
+    for(const sib of [el.nextElementSibling,el.previousElementSibling])if(sib&&deep(sib))return deep(sib);
+    let n=el.parentElement;
+    for(let i=0;i<3&&n;i++,n=n.parentElement){const t=deep(n);if(t&&t.length<60)return t}
+    return'';
+  };
+  try{
+    const radios=[...document.querySelectorAll('input[type="radio"]')].map(el=>({
+      name:el.name||'',value:el.value||'',checked:!!el.checked,
+      label:labelFor(el).slice(0,60)}));
+    const dateFields=[...document.querySelectorAll('input[type="text"]')]
+      .filter(el=>/dd[.\/]mm/i.test(el.placeholder||''))
+      .map(el=>({ph:el.placeholder,value:el.value||'',label:labelFor(el).slice(0,60),
+        cls:f(el.className).slice(0,40)}));
+    // מועמדים לפקד שפותח את הפאנל: מטפסים מן הרדיו כלפי מעלה ורושמים מה יש בדרך,
+    // כדי שהסבב הבא ידע במה ללחוץ במקום לנחש — אותה שיטה שעבדה בדיסקונט.
+    const first=document.querySelector('input[name="filterRadioList"]');
+    const chain=[];let n=first;
+    for(let i=0;i<8&&n&&n!==document.body;i++,n=n.parentElement){
+      chain.push({tag:n.tagName.toLowerCase(),cls:f(n.className).slice(0,44),
+        role:n.getAttribute&&n.getAttribute('role')||'',
+        exp:n.getAttribute&&n.getAttribute('aria-expanded')||'',
+        hidden:!(n.offsetParent||n.getClientRects&&n.getClientRects().length),
+        ownText:deep(n).slice(0,40)});
+    }
+    return{radios,dateFields,chain,at:new Date().toISOString()};
+  }catch(e){return{probeError:String(e&&e.message||e)}}
+}
 async function dateMenuProbe(){
   const f=t=>String(t||'').replace(/\s+/g,' ').trim();
   const out={opened:false,closed:false};
