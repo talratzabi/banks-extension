@@ -893,7 +893,7 @@ result=r.accounts.map(a=>{const gap=gapOf(a);if(gap)gaps[a.key]=gap;
   return{...a,...(loansByKey.get(a.key)||{}),owner:a.nickname,source:'leumi',sourceLabel:'לאומי',
   selectionKey:`leumi|${a.key}`,id:`leumi-${a.key}`,lastSync:now,
   status:gap?`מסונכרן חלקית — התנועות עד ${gap.until}, פער ${money(gap.diff)} ₪ עד היתרה`:'מסונכרן ומאומת'}});
-await chrome.storage.local.set({leumiGap:Object.keys(gaps).length?{at:now,accounts:gaps}:null});const txCount=result.reduce((sum,a)=>sum+(a.transactions?.length||0),0),loanCount=result.reduce((sum,a)=>sum+(a.loans?.length||0),0),chequeCount=result.reduce((sum,a)=>sum+(a.chequeCount||0),0);
+await chrome.storage.local.set({leumiGap:Object.keys(gaps).length?{at:now,accounts:gaps}:null,leumiRangeProbe:r.rangeProbe||null});const txCount=result.reduce((sum,a)=>sum+(a.transactions?.length||0),0),loanCount=result.reduce((sum,a)=>sum+(a.loans?.length||0),0),chequeCount=result.reduce((sum,a)=>sum+(a.chequeCount||0),0);
 // שמירת הצילומים לא מסכנת את הסנכרון: אם היא נכשלת, היתרות והתנועות כבר בידינו.
 let saved=0;try{saved=await harvestLeumiCheques(tabId,result,txUrl)}catch(e){await chrome.storage.local.set({chequeError:e.message})}
 await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}`});return result}

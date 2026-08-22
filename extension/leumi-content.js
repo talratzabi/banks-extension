@@ -29,7 +29,7 @@ if(!child)return{ok:false,error:`הפריט ${route.child} לא נמצא בתפ�
 realClick(child);
 for(let i=0;i<50;i++){await wait(300);if(location.pathname.includes(route.path))return{ok:true}}
 return{ok:false,error:`הניווט ל-${route.child} לא הגיע ל-${route.path}`}}
-chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
+chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
 // הרחבת שורת התנועה מזריקה את צילום השיק כ-data:image ישירות ל-DOM — קדמי ואחורי.
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
@@ -186,6 +186,37 @@ const iDate=col('תאריך',1),iAction=col('תנועות',2),iRef=col('אסמכ
 const parsed=raw.map(cells=>{const date=cells[iDate]||'';if(!/^\d{2}\.\d{2}\.\d{4}$/.test(date))return null;const action=cells[iAction]||'',credit=money(cells[iCredit]),rowBalance=money(cells[iBalance]);return{date,action,details:'',reference:cells[iRef]||'',debit:money(cells[iDebit]),credit,balance:rowBalance,future:rowBalance==null,cheque:/שיק/.test(action)&&credit>0,chequeAmount:credit}}).filter(Boolean);
 const rows=parsed.filter(r=>!r.future),future=parsed.filter(r=>r.future);
 if(!rows.length)throw Error(`רשת התנועות בחשבון ${a.key} נקראה ללא שורות שבוצעו (${parsed.length} שורות, מהן ${future.length} עתידיות)`);const nickname=(selected.match(/^(.+?)\s+\d(?:\s+\d){2,}/)||[])[1]?.trim()||(txt(c).match(/^(.+?)\s+\d(?:\s+\d){2,}/)||[])[1]?.trim()||`חשבון ${a.accountNumber}`;return{...a,nickname,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,transactions:rows,transactionCount:rows.length,futureTransactions:future,futureCount:future.length,chequeCount:rows.filter(r=>r.cheque).length}}
+// ⚠ 22.08.2026 — גשש תקופה, **קריאה בלבד**. שתי ריצות לאומי שעות זו מזו החזירו
+// חלון זהה בדיוק — 28 תנועות, 06.07 עד 02.08, פער קבוע של 31,689.07 ש״ח מול
+// היתרה. חזרתיות מדויקת שוללת „loadAllRows עוצר מוקדם" (מרוץ היה משתנה) ומצביעה
+// על כך שהאתר מגיש חלון קבוע. מה שעוד לא ידוע: מהו הפקד שקובע אותו, והאם לאומי
+// זוכר טווח מסשן קודם — בדיוק כפי שנמדד בדיסקונט („האתר זוכר את הטווח הקודם").
+// ⚠ לא נוגע בבורר החשבונות ולא משנה שום מסלול. אחרי ניסיון 20.08 שהפיל את
+// הבורר, כל מה שנכנס לכאן חייב להיות תצפית בלבד — וזה מה שזה.
+function rangeProbe(){try{
+  const f=s=>String(s||'').replace(/\s+/g,' ').trim();
+  const DATE=/\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/;
+  const rows=datedRows(),cellDate=r=>(f(r.cells.join(' ')).match(DATE)||[''])[0];
+  return{
+    url:location.href,
+    rows:rows.length,
+    firstRowDate:rows[0]?cellDate(rows[0]):'',
+    lastRowDate:rows.length?cellDate(rows[rows.length-1]):'',
+    // כל קלט שנראה כשדה תאריך — סוג, ערך, וזיהוי
+    inputs:[...document.querySelectorAll('input')].map(el=>({
+      type:el.type||'',id:el.id||'',name:el.name||'',cls:f(el.className).slice(0,40),
+      value:f(el.value).slice(0,30),ph:f(el.placeholder).slice(0,30)}))
+      .filter(x=>x.type==='date'||DATE.test(x.value)||/date|tarich|from|to|period/i.test(x.id+x.name+x.cls+x.ph)).slice(0,12),
+    // פקדים שנראים כבוררי תקופה, לפי המלל שלהם ולא לפי סלקטור מנוחש
+    controls:[...document.querySelectorAll('button,select,[role="button"],[role="combobox"],a')]
+      .map(el=>({tag:el.tagName.toLowerCase(),cls:f(el.className).slice(0,40),t:f(txt(el)).slice(0,50)}))
+      .filter(x=>x.t&&/תקופה|טווח|מתאריך|עד תאריך|חודש|שנה|חיפוש מתקדם|סינון|תאריכים/.test(x.t)).slice(0,15),
+    // מלל שנראה כהצהרת טווח שהדף מציג
+    rangeText:(f(txt(document.body)).match(new RegExp('[^.]{0,40}'+DATE.source+'[^.]{0,20}'+DATE.source+'[^.]{0,20}'))||[''])[0].slice(0,140),
+    selects:[...document.querySelectorAll('select')].map(el=>({cls:f(el.className).slice(0,30),
+      value:f(el.value).slice(0,30),opts:[...el.options].map(o=>f(o.text).slice(0,24)).slice(0,10)})).slice(0,6),
+    at:new Date().toISOString()};
+}catch(e){return{probeError:String(e&&e.message||e)}}}
 async function syncSelected(keys,balances={}){const out=[];for(const key of keys){if(accountTabs().length)await selectAccount(key);out.push(await extract(key,Number(balances[key])))}return out}
 async function syncLoans(keys){const out=[];for(const key of keys){if(accountTabs().length)await selectAccount(key);let rows=[];for(let i=0;i<180;i++){rows=gridRows().map(row=>({row,cells:cellsOf(row)})).filter(x=>x.cells.some(v=>/%/.test(v))&&x.cells.filter(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)).length>=2);if(rows.length)break;await wait(250)}const page=txt(document.body),declaredTotal=money((page.match(/סך יתרת הלוואות[\s\S]{0,200}?₪\s*([\d,]+\.\d{2})/)||[])[1]);if(declaredTotal>0&&!rows.length)throw Error(`לא נטען פירוט ההלוואות בחשבון ${key}`);const loans=[];let prevStamp='';for(const {row,cells:c} of rows){const end=c.findIndex(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)),interest=c.findIndex(v=>/%/.test(v));if(end<1||interest<0)continue;row.querySelector('button,[role="button"]')?.click();await wait(800);const panel=txt(document.querySelector('[aria-label="הרחבת הלוואה"]')||document.querySelector('[role="complementary"]')||document.body);const nextPayment=money((panel.match(/התשלום הבא\s*₪?\s*([\d,]+\.\d{2})/)||[])[1]),nextPaymentDate=(panel.match(/תאריך התשלום הבא\s*(\d{2}\.\d{2}\.\d{4})/)||[])[1]||'';if(nextPayment==null||!nextPaymentDate)throw Error(`חסר תשלום קרוב בהלוואה בחשבון ${key}`);
 // ההרחבה יושבת מחוץ לשורה, ולחיצה שנייה אינה מקפלת אותה. אם שתי שורות מחזירות את אותו תשלום — עוצרים במקום לשכפל.
