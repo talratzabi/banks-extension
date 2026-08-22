@@ -271,6 +271,35 @@ function earliestShown(){
   }
   return best;
 }
+// ⚠⚠ 22.08.2026 — **„365" אינו „365 ימים אחרונים".** נמדד ב-1.2.1: הבחירה
+// והלחיצה על „סינון" עבדו — `earliestBefore 2026-07-06 → earliestAfter
+// 2025-01-01` — אבל **כל 28 השורות שנקראו הן מינואר 2025**. הגבול
+// 01.01.2025 הוא בדיוק תחילת שנה קלנדרית, ולכן „שנה קלנדרית אחרונה"
+// פירושה **השנה שעברה (2025)** ולא „שנה אחורה מהיום". עבור
+// collectSince=2026-01-01 זו קפיצה לכיוון הלא נכון.
+// **התוצאה אצל טל:** נשמרו 28 תנועות מינואר 2025, וכיוון ש-viewSince הוא
+// 2026-01-01 הדשבורד הסתיר את כולן — „אין תנועות בכלל".
+// **המסקנה: אין preset שמכסה „מתחילת השנה הנוכחית".** 7/30.2/3 קצרים
+// מדי, ו-365 קופץ לשנה הקודמת. לכן ברירת המחדל היא עכשיו **הטווח
+// המדויק** דרך שני שדות ה-dd.mm.yy שנמדדו ב-leumiDateMenu, והפריסטים
+// נשארים רק כשאחד מהם מכסה בדיוק. **„365" לא נבחר יותר לעולם** —
+// הוא נמדד כמוביל לשנה הלא נכונה.
+// ⚠ שדה מבוקר של React אינו מגיב להשמה ישירה ל-value; חייבים את הסטר
+// הנייטיב ואז input+change. זה בדיוק מה שנעשה בדיסקונט (`nativeSet`).
+function nativeSet(el,value){
+  const proto=Object.getPrototypeOf(el);
+  const desc=Object.getOwnPropertyDescriptor(proto,'value');
+  if(desc&&desc.set)desc.set.call(el,value);else el.value=value;
+  el.dispatchEvent(new Event('input',{bubbles:true}));
+  el.dispatchEvent(new Event('change',{bubbles:true}));
+}
+const ilShort=ms=>{const d=new Date(ms),p=n=>String(n).padStart(2,'0');
+  return `${p(d.getDate())}.${p(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)}`};
+function dateRangeFields(){
+  const all=[...document.querySelectorAll('input[type="text"],input:not([type])')]
+    .filter(el=>/dd[.\/]mm/i.test(el.placeholder||''));
+  return all.length>=2?{from:all[0],to:all[1]}:null;
+}
 function leumiRangeOption(sinceMs,now){
   // כמה אחורה כל אפשרות מגיעה, נכון להיום. „40" אינה תאריכית ולכן לעולם לא נבחרת.
   const y=now.getFullYear(),m=now.getMonth();
@@ -278,14 +307,17 @@ function leumiRangeOption(sinceMs,now){
     '7':  new Date(y,m,now.getDate()-7).getTime(),
     '30.2':new Date(y,m,1).getTime(),
     '3':  new Date(y,Math.floor(m/3)*3,1).getTime(),
-    '365':new Date(y-1,m,now.getDate()).getTime()};
+  };
+  // ⚠ „365" הוסר במכוון: נמדד שהוא „שנה קלנדרית אחרונה" = השנה הקודמת,
+  // ולא 365 יום אחורה. בחירתו החזירה את ינואר 2025 במקום את 2026.
   // הקטנה ביותר שמכסה את המבוקש — כדי לא למשוך יותר ממה שביקשו
   const covering=Object.entries(cover).filter(([,from])=>from<=sinceMs)
     .sort((a,b)=>b[1]-a[1]);
   if(covering.length)return{value:covering[0][0],capped:false};
-  // אף אפשרות אינה מגיעה אחורה מספיק — לוקחים את הרחבה ומודיעים שנחתך
-  const widest=Object.entries(cover).sort((a,b)=>a[1]-b[1])[0];
-  return{value:widest[0],capped:true,reach:widest[1]};
+  // אף preset אינו מגיע אחורה מספיק. **לא לוקחים את הרחב ביותר** — הוא
+  // עדיין קצר מהמבוקש, והחלפת חלון טוב בחלון קצר יותר גורעת. מחזירים
+  // null, והקורא מדווח במקום לפעול.
+  return null;
 }
 async function applyLeumiRange(){
   const report=async(reason,extra)=>{try{await chrome.storage.local.set(
@@ -296,7 +328,35 @@ async function applyLeumiRange(){
     if(!Number.isFinite(sinceMs))return report('אין גבול איסוף — נשאר חלון ברירת המחדל');
     const radios=[...document.querySelectorAll('input[name="filterRadioList"]')];
     if(!radios.length)return report('בורר התקופה לא נמצא בדף');
+    // ── קודם כול: טווח מדויק, אם השדות קיימים. זה המסלול היחיד שמכסה
+    // „מתחילת השנה הנוכחית", שאף preset אינו מכסה. ──
+    const fields=dateRangeFields();
+    if(fields){
+      const earlyBefore0=earliestShown();
+      nativeSet(fields.from,ilShort(sinceMs));
+      await wait(250);
+      nativeSet(fields.to,ilShort(Date.now()));
+      await wait(250);
+      const panel0=fields.from.closest('form')||fields.from.closest('[role="radiogroup"]')?.parentElement||document.body;
+      const apply0=applyButtonIn(panel0)||applyButtonIn(panel0.parentElement)||applyButtonIn(document.body);
+      if(apply0){
+        realClick(apply0);
+        let last0=-1,stable0=0;
+        for(let i=0;i<30;i++){await wait(600);const n=datedRows().length,e=earliestShown();
+          if(e!=null&&earlyBefore0!=null&&e<earlyBefore0)break;
+          if(n>0&&n===last0){if(++stable0>=2)break}else stable0=0;last0=n}
+        const eAfter0=earliestShown(),iso0=ms=>ms==null?'':new Date(ms).toISOString().slice(0,10);
+        // ⚠ ההצלחה נמדדת ב**תזוזה אחורה**, לא בהגעה מדויקת ל-collectSince:
+        // לחשבון פשוט אין בהכרח תנועה ב-1 בינואר, ודרישת שוויון סימנה ריצה
+        // מוצלחת ככשל. תופס גם את המקרה שבו כן הגענו לגבול או מעברו.
+        return report(eAfter0!=null&&((earlyBefore0!=null&&eAfter0<earlyBefore0)||eAfter0<=sinceMs)?'טווח מדויק הופעל':'טווח מדויק ללא שינוי מספיק',
+          {from:ilShort(sinceMs),to:ilShort(Date.now()),
+           earliestBefore:iso0(earlyBefore0),earliestAfter:iso0(eAfter0),rows:datedRows().length});
+      }
+      await report('שדות הטווח נמצאו אך אין כפתור החלה',{});
+    }
     const pick=leumiRangeOption(sinceMs,new Date());
+    if(!pick)return report('אין preset שמכסה, ואין שדות טווח',{since:new Date(sinceMs).toISOString().slice(0,10)});
     const target=radios.find(r=>String(r.value)===pick.value);
     if(!target)return report('האפשרות לא קיימת',{want:pick.value,have:radios.map(r=>r.value)});
     if(target.checked)return report('כבר בטווח המבוקש',{value:pick.value,capped:pick.capped});
