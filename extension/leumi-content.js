@@ -97,62 +97,25 @@ function columnIndex(){const idx={};[...document.querySelectorAll('[role="column
 async function openCurrentAccount(){for(let i=0;i<180;i++){if(datedRows().length)return;await wait(250)}throw Error(`רשת התנועות לא נטענה בתוך 45 שניות (שורות ${gridRows().length}, תאים ${document.querySelectorAll(CELL).length})`)}
 // ⚠ הרשת מרנדרת חלק מהשורות וטוענת עוד בגלילה. בלי זה נקראות רק השורות הראשונות
 // והתנועות האחרונות נראות כאילו אינן קיימות — הן פשוט עוד לא נכנסו ל-DOM.
-// ⚠⚠ 22.08.2026 — **נמדד ושוחזר: קורא עמוד אחד בלבד.** אחרי ש-1.2.2 סוף סוף
-// ביקש טווח אמיתי (`טווח מדויק הופעל`, earliestAfter 2026-01-01), נקראו
-// **29 שורות** — 01.01 עד 03.02 — מתוך כמעט שמונה חודשים. שלוש ריצות עצרו
-// על 28/29, כלומר זהו **גודל העמוד** ולא סוף הנתונים.
-// **השחזור שהכריע** (DOM עם מכולה נגללת שטוענת עמוד 1200ms אחרי אירוע
-// scroll): הקוד הישן הביא **29 מתוך 116**. שתי סיבות, ושתיהן מטופלות:
-//  1. **הגלילה לא ירתה אירוע אחרי הסיבוב הראשון.** המכולה כבר בתחתית,
-//     ולכן `scrollTop=scrollHeight` אינו משנה דבר ו**אינו יורה scroll**.
-//     הטוען העצל מאזין ל-scroll — ולכן נורה פעם אחת בלבד. עכשיו מרימים
-//     מעט ואז חוזרים לתחתית, כך שיש תזוזה אמיתית בכל סיבוב.
-//  2. **נגלל האלמנט הלא נכון.** הקוד חיפש `[role="table"|"grid"]`; אם
-//     הגולל הוא אב אחר עם overflow, הגלילה לא נגעה בו. עכשיו נגללים **כל**
-//     האבות שבהם scrollHeight>clientHeight — נמדד, לא מנוחש.
-// ובנוסף: חלון היציבות היה 2 שניות (5×400ms), קצר משליפת עמוד מהשרת.
-// ⚠ תקציב זמן ולא ספירת סיבובים — ל-LEUMI_SYNC_SELECTED יש תקרת 180 שניות,
-// והלוואות ושיקים באים אחרי. 70 שניות משאירות מרווח.
-async function loadAllRows(){
-  const scrollables=el=>{const out=[];let n=el;
-    while(n&&n!==document.body){if(n.scrollHeight>n.clientHeight+8)out.push(n);n=n.parentElement}
-    const doc=document.scrollingElement||document.documentElement;if(doc)out.push(doc);return out};
-  const moreButton=()=>[...document.querySelectorAll('button,[role="button"]')]
-    .map(el=>({el,t:String(el.textContent||'').replace(/\s+/g,' ').trim()}))
-    .filter(x=>x.t&&x.t.length<=16&&/הצג עוד|טען עוד|עוד תנועות|הצגת עוד|load more/i.test(x.t))
-    .map(x=>x.el)[0]||null;
-  const until=Date.now()+70000;
-  let last=0,stable=0,clicks=0,loops=0;
-  while(Date.now()<until){
-    loops++;
-    const rows=datedRows();
-    if(rows.length===last){if(++stable>=10)break}else{stable=0;last=rows.length}
-    const tail=rows.at(-1)?.row;
-    if(tail){try{tail.scrollIntoView({block:'end'})}catch{}
-      // ⚠⚠ נמדד בשחזור: שתי השמות סינכרוניות ל-scrollTop מתמזגות:
-      // הדפדפן רואה רק את הערך הסופי, ואם הוא זהה לקודם
-      // **לא נורה אירוע scroll כלל**. לכן מרימים, **ממתינים
-      // פריים**, ורק אז חוזרים לתחתית — שתי תזוזות נראות, שתי אירועים.
-      const boxes=scrollables(tail);
-      for(const box of boxes)try{box.scrollTop=Math.max(0,box.scrollHeight-box.clientHeight-120)}catch{}
-      await wait(120);
-      for(const box of boxes)try{box.scrollTop=box.scrollHeight;
-        // ⚠ גיבוי למקרה שהדפדפן לא יורה אירוע בעצמו (נמדד: בסביבה
-        // בלי פריסה נורו אפס אירועי scroll). טוען עצל שמאזין
-        // ל-scroll יקבל אותו גם כך. זול, ואינו משנה דבר אם האירוע כן נורה.
-        box.dispatchEvent(new Event('scroll',{bubbles:true}));
-      }catch{}
-      try{window.dispatchEvent(new Event('scroll'))}catch{}}
-    try{window.scrollTo(0,document.documentElement.scrollHeight)}catch{}
-    // רק אחרי שהגלילה מיצתה את עצמה, אחרת נלחץ לחינם בכל סיבוב
-    if(stable>=4){const b=moreButton();if(b){realClick(b);clicks++;stable=0}}
-    await wait(500);
-  }
-  // ⚠ נרשם תמיד: בלי זה „29 שורות" נראה כמו סוף הנתונים ולא כמו עצירה
-  // מוקדמת — וזה בדיוק מה שהחביא את התקלה מאחורי שלוש ריצות.
-  try{await chrome.storage.local.set({leumiLoadRows:{rows:last,loops,moreClicks:clicks,
-    timedOut:Date.now()>=until,at:new Date().toISOString()}})}catch{}
-  return last}
+// ⚠⚠ 22.08.2026 — **הוחזר. הניסיון לתקן כאן החמיר את המצב, נמדד.**
+// הרקע: הקריאה נעצרת על ~29 שורות (גודל עמוד) גם כשהטווח רחב, וזה עדיין
+// פתוח. הניסיון שלי: לגלול את כל האבות הנגללים, להרים-ולהוריד כדי לייצר
+// אירוע, לשלוח `scroll` מסונתז, ולהמתין עד 70 שניות.
+// **התוצאה שנמדדה בשטח (leumiLoadRows):**
+//   {loops:5, rows:15, timedOut:true, moreClicks:0}
+// חמישה סיבובים בלבד בתוך 70 שניות — כלומר **כל סיבוב ארך ~14 שניות**,
+// כנראה בגלל סערת רינדור שהאירועים המסונתזים גררו — והתוצאה הסופית הייתה
+// **13 תנועות במקום 29**. כלומר גם איטי בהרבה וגם גרוע יותר.
+// **הלקח: אל תשלחו אירועי scroll מסונתזים לרשת הזו, ואל תגללו כל אב.**
+// המימוש המקורי חוזר כלשונו. `leumiLoadRows` נשאר — הוא זה שגילה את זה.
+// ⚠ הפריט „נקראות ~29 שורות בלבד" **נשאר פתוח**, וצריך מדידה חיה של
+// המנגנון האמיתי (מה בעצם מפעיל טעינת עמוד נוסף) לפני ניסיון נוסף.
+async function loadAllRows(){let last=0,stable=0;for(let i=0;i<120;i++){const rows=datedRows();if(rows.length===last){if(++stable>=5)break}else{stable=0;last=rows.length}
+const tail=rows.at(-1)?.row;try{tail?.scrollIntoView({block:'end'})}catch{}
+const box=tail?.closest('[role="table"],[role="grid"]')||document.scrollingElement;if(box)box.scrollTop=box.scrollHeight;window.scrollTo(0,document.documentElement.scrollHeight);
+await wait(400)}
+try{await chrome.storage.local.set({leumiLoadRows:{rows:last,at:new Date().toISOString()}})}catch{}
+return last}
 // ⚠ el.click() אינו פותח את בורר החשבונות של לאומי — נמדד בדפדפן חי. הרכיב מאזין
 // לאירועי pointer, ובלי הרצף המלא הזיהוי נופל חזרה לחשבון המסומן בלבד ומחזיר אחד מתוך רבים.
 function realClick(el){const o={bubbles:true,cancelable:true,composed:true,view:window,button:0,buttons:1,pointerId:1,pointerType:'mouse',isPrimary:true};try{el.scrollIntoView({block:'center'})}catch{}
