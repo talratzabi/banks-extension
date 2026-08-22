@@ -411,13 +411,9 @@ function txDateMs(v){const s=String(v||'').trim();
   m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]));
   const t=Date.parse(s);return Number.isFinite(t)?t:NaN}
 function keepSince(value,since){if(!since)return true;const ms=txDateMs(value);return !Number.isFinite(ms)||ms>=since}
-async function applyCollectSince(accounts){
-  const since=await collectSinceMs();if(!since)return accounts;
-  const keep=t=>keepSince(t?.date||t?.valueDate||t?.transactionDate,since);
-  return (accounts||[]).map(a=>({...a,
-    transactions:(a.transactions||[]).filter(keep),
-    cards:(a.cards||[]).map(c=>({...c,transactions:(c.transactions||[]).filter(keep)}))}));
-}
+// ⚠ applyCollectSince הוסרה ב-22.08.2026. היא הייתה הצרכן היחיד שמחק
+// נתונים שכבר נשמרו, והוחלפה בסינון תצוגה בדשבורד (viewSince).
+// keepSince ו-txDateMs נשארות — הן משמשות את גבול הורדת השיקים בלאומי.
 const mmYYYY=d=>`${String(d.getMonth()+1).padStart(2,'0')}${d.getFullYear()}`;
 async function storeCardMonth(month,cards){
   const rawMonth=String(month||''),normalizedMonth=rawMonth.replace(/\D/g,'');
@@ -666,7 +662,17 @@ async function syncSelected(selectionKeys){
     // ⚠ סימון „תנועה חדשה" חל רק על מה שנקרא עכשיו. מרגע שהחשבונות שלא נגענו
     // בהם שורדים את הסנכרון, הרצה של הסימון גם עליהם היתה מוצאת כל תנועה
     // זהה לעצמה ומכבה לה את סימן החדשות. גם newCount נספר על הריצה בלבד, כפי שהמסר מעיד.
-    const markedFresh=markNewTransactions(saved.accounts,fresh,syncedSources),newCount=markedFresh.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);const marked=await applyCollectSince([...untouched,...markedFresh]);
+    const markedFresh=markNewTransactions(saved.accounts,fresh,syncedSources),newCount=markedFresh.reduce((n,a)=>n+(a.transactions||[]).filter(t=>t.isNew).length,0);// ⚠⚠ 22.08.2026 — **סנכרון אינו מוחק נתונים.** עד כאן רץ במקום הזה
+    // applyCollectSince על **כל** הרשימה — כולל חשבונות שלא סונכרנו — ולכן
+    // סנכרון של ישות אחת גזם את החודשים הישנים של כל שאר החשבונות בכל
+    // הבנקים. נמדד אצל טל: סנכרון יובל לבדו עם גבול מרץ מוחק 70 תנועות
+    // משלוש ישויות שלא נגע בהן.
+    // „תחילת איסוף נתונים" מפצלת עכשיו לשתיים: collectSince הוא **טווח
+    // משיכה** בלבד (מאיזה חודש לבקש מהבנק — עדיין בתוקף ב-storeCardMonth,
+    // בשיקים ובטווח שנשלח לאתר דיסקונט), ו-viewSince הוא **סינון תצוגה**
+    // בדשבורד. שיקול המקום שיכול היה להצדיק מחיקה אינו קיים: יש
+    // unlimitedStorage, ו-503 תנועות שוקלות 80KB.
+    const marked=[...untouched,...markedFresh];
     // ⚠ אותה תקלה בבחירה עצמה: הסינון לפי מקור מחק מ-selectedAccountKeys את
 // מפתחות הישויות שלא סונכרנו בריצה הזאת, וכך הן נשרו גם מן הסנכרון
 // האוטומטי. ביטול בחירה נעשה בדשבורד ונכתב לאחסון ישירות, ולכן כאן איחוד פשוט.
