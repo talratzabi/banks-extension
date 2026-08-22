@@ -44,14 +44,28 @@ const menuEntitiesLoose=()=>{
   // הסינון הוצא; הטיפוס בשרשרת ב-selectEntity הוא המנגנון שעובד, והוא נשאר.
   return raw.filter(el=>!raw.some(other=>other!==el&&el.contains(other)));
 };
+// ⚠⚠ 22.08.2026 — נמדד משתי ריצות של אותה ישות באותו יום, ולא שוער:
+//   08:35 discountSelectWorked = {entity:"514220276", path:"a.dropdown-item"}   ✔
+//   16:53 discountSelectFailed = {entity:"514220276", candidates:["li.accountComboLinks"]}  ✘
+// בכשל נמצא **מועמד יחיד**, ולכן „נסה את כל המועמדים" (1.0.26) לא היה מה לנסות.
+// השורש: היציאה המוקדמת. menuEntities מחפש בין השאר `[role="menu"] li`, ותפס את
+// li.accountComboLinks **בזמן שהתפריט סגור** — ומכיוון שהיא יצאה מיד, realClick
+// על הבורר מעולם לא רץ, התפריט לא נפתח, ו-a.dropdown-item לא נוצר כלל.
+// **הכלל החדש, מדיד ובלי ניחוש סלקטורים:** יש כמה ישויות בחשבון, ולכן רשימה
+// שיש בה **מזהה אחד בלבד** אינה רשימת הישויות — היא שריד של תפריט סגור.
+// במקרה כזה לא יוצאים מוקדם אלא לוחצים וממשיכים במסלול המלא.
+// ⚠ אין כאן סינון של li — זה מה שהוחזר ב-21.08 והפיל את הזיהוי. כאן רק
+// **בוחרים בין רשימות שלמות**, ואם אף אחת אינה נראית מלאה מוחזרת העשירה שבהן,
+// כדי שגם חשבון עם ישות אחת בלבד ימשיך לעבוד.
 async function entityOptions(){const trigger=entityButton();if(!trigger)throw Error('לא נמצא בורר הישויות בדיסקונט עסקי');
-const already=menuEntities();if(already.length)return already;
+const distinct=els=>new Set((els||[]).map(el=>entityId(text(el))).filter(Boolean)).size;
+const already=menuEntities();if(distinct(already)>1)return already;
 realClick(trigger);
 // ⚠ menus/listboxes נמדדו 0 בכל ריצה מאז 18.08 — 10 שניות המתנה כאן היו 40 שניות
 // מבוזבזות על ארבע ישויות. שתי שניות מספיקות למסלול התקין, והנפילה לאחור מיד אחריו.
-for(let i=0;i<8;i++){await wait(250);const opts=menuEntities();if(opts.length)return opts}
-const loose=menuEntitiesLoose();if(loose.length)return loose;
-return menuEntities()}
+for(let i=0;i<8;i++){await wait(250);const opts=menuEntities();if(distinct(opts)>1)return opts}
+const loose=menuEntitiesLoose();if(distinct(loose)>1)return loose;
+return [already,menuEntities(),loose].sort((a,b)=>distinct(b)-distinct(a)||b.length-a.length)[0]||[]}
 // ⚠ מעבר בין ישויות טוען מחדש את הדף והורג את ה-content script — הערוץ נסגר באמצע
 // ('message channel closed'). לכן הזיהוי אינו עובר בין ישויות: הוא מונה אותן בלבד.
 // מספר החשבון והיתרה נקראים בסנכרון, ישות אחת בכל קריאה.
