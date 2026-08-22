@@ -237,6 +237,40 @@ if(!rows.length)throw Error(`רשת התנועות בחשבון ${a.key} נקר�
 // ברירת המחדל, בדיוק כפי שהיה עד היום. וכל מסלול, כולל יציאה מוקדמת, נרשם
 // ל-`leumiRangeApplied` — כי רשומה חסרה נראית כמו „הקוד לא רץ", וכבר בזבזנו
 // על זה סבב שלם בדיסקונט.
+// ⚠⚠ 22.08.2026 — **בחירת הרדיו אינה מחילה את הסינון.** נמדד ב-1.2.0:
+//   leumiRangeApplied = {reason:"הופעל", value:"365", rowsBefore:29, rowsAfter:29}
+// כלומר `target.checked` אכן הפך ל-true — הבחירה עבדה — אבל **הרשת לא
+// נטענה מחדש**, ולכן נקרא שוב אותו חלון ישן (06.07–02.08, 28 שורות)
+// ומכאן שתי התלונות של טל: „אין סנכרון מינואר" ו„היתרה לא נכונה" (התנועות
+// נעצרות ב-50,176.99 בעוד היתרה 18,487.92).
+// **החסר: כפתור ההחלה.** `leumiRangeProbe` כבר צילם אותו — ברשימת ה-controls
+// הופיע „סינון" שלוש פעמים. לאומי דורש לחיצה מפורשת אחרי בחירת התקופה.
+// ⚠ ולמה זה לא חוזר על טעות המכולה: מחפשים אלמנט שה-**טקסט העצמי שלו קצר**
+// ושווה למילה עצמה. מכולה מכילה את כל מלל הפאנל ולכן נפסלת על אורך —
+// זה בדיוק מה שהכשיל את 1.1.5, וכאן הוא נמדד ונחסם.
+// ⚠ „נקה"/„איפוס" מוחרגים במפורש: לחיצה עליהם הייתה מבטלת את הבחירה.
+const APPLY_WORDS=/^(סינון|הצג|החל|אישור|חפש|עדכן)$/;
+const REJECT_WORDS=/נקה|איפוס|ביטול|סגור/;
+function applyButtonIn(scope){
+  if(!scope)return null;
+  return [...scope.querySelectorAll('button,[role="button"],input[type="submit"]')]
+    .map(el=>({el,t:String(el.textContent||el.value||'').replace(/\s+/g,' ').trim()}))
+    .filter(x=>x.t.length<=10&&APPLY_WORDS.test(x.t)&&!REJECT_WORDS.test(x.t))
+    .map(x=>x.el)[0]||null;
+}
+// התאריך המוקדם ביותר שמוצג כרגע — הסימן האמין לכך שהרשת באמת התרעננה.
+// מספר השורות אינו סימן: הוא נשאר 29 גם כשהסינון לא הוחל.
+function earliestShown(){
+  let best=null;
+  for(const r of datedRows()){
+    const m=String((r.cells||[]).join(' ')).match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+    if(!m)continue;
+    let y=Number(m[3]);if(y<100)y+=2000;
+    const ms=Date.UTC(y,Number(m[2])-1,Number(m[1]));
+    if(best==null||ms<best)best=ms;
+  }
+  return best;
+}
 function leumiRangeOption(sinceMs,now){
   // כמה אחורה כל אפשרות מגיעה, נכון להיום. „40" אינה תאריכית ולכן לעולם לא נבחרת.
   const y=now.getFullYear(),m=now.getMonth();
@@ -279,11 +313,23 @@ async function applyLeumiRange(){
       if(opener){realClick(opener);await wait(600);realClick(label);await wait(500)}
     }
     if(!target.checked)return report('הרדיו לא נבחר',{value:pick.value,rows:datedRows().length});
-    // ממתינים לרשת להתמלא מחדש: לא ריקה ויציבה בשתי דגימות
+    // ── ההחלה: בלעדיה הבחירה נשארת על המסך והרשת לא נטענת מחדש ──
+    const earlyBefore=earliestShown();
+    const panel=target.closest('[role="radiogroup"]')?.parentElement||target.closest('form')||document.body;
+    let apply=applyButtonIn(panel)||applyButtonIn(panel.parentElement)||applyButtonIn(document.body);
+    if(!apply)return report('כפתור ההחלה לא נמצא',{value:pick.value,
+      seen:[...document.querySelectorAll('button')].map(b=>String(b.textContent||'').replace(/\s+/g,' ').trim())
+        .filter(t=>t&&t.length<=14).slice(0,15)});
+    realClick(apply);
+    // ממתינים לרשת: לא ריקה, יציבה בשתי דגימות, **או** שהמוקדמת זזה אחורה
     let last=-1,stable=0;
-    for(let i=0;i<25;i++){await wait(600);const n=datedRows().length;
+    for(let i=0;i<30;i++){await wait(600);const n=datedRows().length,e=earliestShown();
+      if(e!=null&&earlyBefore!=null&&e<earlyBefore)break;
       if(n>0&&n===last){if(++stable>=2)break}else stable=0;last=n}
-    await report('הופעל',{value:pick.value,capped:pick.capped,rowsBefore:before,rowsAfter:datedRows().length});
+    const earlyAfter=earliestShown(),iso=ms=>ms==null?'':new Date(ms).toISOString().slice(0,10);
+    await report(earlyAfter!=null&&earlyBefore!=null&&earlyAfter<earlyBefore?'הופעל':'הופעל ללא שינוי נראה',
+      {value:pick.value,capped:pick.capped,rowsBefore:before,rowsAfter:datedRows().length,
+       earliestBefore:iso(earlyBefore),earliestAfter:iso(earlyAfter),applyText:String(apply.textContent||'').trim().slice(0,20)});
   }catch(e){await report('נכשל',{error:String(e&&e.message||e)})}
 }
 function radioProbe(){
