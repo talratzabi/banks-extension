@@ -29,7 +29,7 @@ if(!child)return{ok:false,error:`הפריט ${route.child} לא נמצא בתפ�
 realClick(child);
 for(let i=0;i<50;i++){await wait(300);if(location.pathname.includes(route.path))return{ok:true}}
 return{ok:false,error:`הניווט ל-${route.child} לא הגיע ל-${route.path}`}}
-chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
+chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
 // הרחבת שורת התנועה מזריקה את צילום השיק כ-data:image ישירות ל-DOM — קדמי ואחורי.
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
@@ -193,6 +193,54 @@ if(!rows.length)throw Error(`רשת התנועות בחשבון ${a.key} נקר�
 // זוכר טווח מסשן קודם — בדיוק כפי שנמדד בדיסקונט („האתר זוכר את הטווח הקודם").
 // ⚠ לא נוגע בבורר החשבונות ולא משנה שום מסלול. אחרי ניסיון 20.08 שהפיל את
 // הבורר, כל מה שנכנס לכאן חייב להיות תצפית בלבד — וזה מה שזה.
+// ⚠⚠ 22.08.2026 — שלב שני של הגשש, ו**כאן הוא כבר לוחץ**. מה שהשלב הראשון
+// החזיר: כפתור שהמלל שלו „תאריך · 40 תנועות אחרונות · טווח תאריכים · מתאריך ·
+// עד תאריך", ו-`inputs` שמצא **רק** fromAmount/toAmount. כלומר ברירת המחדל של
+// לאומי היא חלון **לפי מספר שורות** („40 תנועות אחרונות") ולא לפי תאריך — וזה
+// מסביר למה החלון חוזר זהה ולמה collectSince אינו משפיע. מה שעדיין לא ידוע:
+// האם „מתאריך"/„עד תאריך" הופכים לשדות אמיתיים כשהבורר נפתח, או שצריך לוח שנה.
+// ⚠ גבולות שנשמרים כאן, אחרי מה שקרה ב-20.08: נוגעים **רק** בכפתור התאריך,
+// שמזוהה לפי המלל שלו ולא לפי סלקטור מנוחש; **לא נוגעים בבורר החשבונות**;
+// רץ רק אחרי שהתנועות כבר נקראו, ולכן אינו יכול לשבש את הקריאה; והבורר
+// **נסגר בחזרה** ב-Escape ובלחיצה על הרקע, כדי לא להשאיר את הדף פתוח לשלב
+// ההלוואות. כל כולו בתוך try — כשל בגשש לא יפיל סנכרון.
+async function dateMenuProbe(){
+  const f=t=>String(t||'').replace(/\s+/g,' ').trim();
+  const out={opened:false,closed:false};
+  try{
+    const btn=[...document.querySelectorAll('button,[role="button"]')]
+      .find(b=>/40 תנועות אחרונות|טווח תאריכים/.test(f(txt(b))));
+    if(!btn)return{...out,why:'כפתור התאריך לא נמצא'};
+    out.button=f(txt(btn)).slice(0,70);
+    const before=document.querySelectorAll('input').length;
+    realClick(btn);
+    await wait(900);
+    out.opened=true;
+    const DATE=/\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/;
+    // כל קלט שנוסף או שנראה כתאריך — כאן מתברר אם „מתאריך" הוא שדה או לוח שנה
+    out.inputsAfter=[...document.querySelectorAll('input')].map(el=>({
+      type:el.type||'',name:el.name||'',id:el.id||'',cls:f(el.className).slice(0,36),
+      value:f(el.value).slice(0,24),ph:f(el.placeholder).slice(0,24),
+      shown:!!(el.offsetParent||el.getClientRects().length)}));
+    out.inputsBefore=before;
+    // האפשרויות שנראות עכשיו — הטקסט בלבד, בלי לנחש מבנה
+    out.options=[...document.querySelectorAll('button,[role="option"],[role="menuitem"],li,label')]
+      .filter(el=>(el.offsetParent||el.getClientRects().length)&&f(txt(el)).length<44)
+      .map(el=>({tag:el.tagName.toLowerCase(),cls:f(el.className).slice(0,30),t:f(txt(el))}))
+      .filter(x=>x.t&&/תנועות אחרונות|טווח|מתאריך|עד תאריך|חודש|שנה|שבוע|ימים|אישור|החל|נקה/.test(x.t))
+      .slice(0,20);
+    out.calendarCells=document.querySelectorAll('[role="gridcell"],[class*="calendar"],[class*="datepicker"]').length;
+  }catch(e){out.error=String(e&&e.message||e)}
+  // סוגרים בחזרה — הדף חייב לחזור למצב שבו מצאנו אותו
+  try{
+    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    await wait(250);
+    document.body.click();
+    await wait(250);
+    out.closed=true;
+  }catch(e){out.closeError=String(e&&e.message||e)}
+  return out;
+}
 function rangeProbe(){try{
   const f=s=>String(s||'').replace(/\s+/g,' ').trim();
   const DATE=/\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/;

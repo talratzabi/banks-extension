@@ -685,7 +685,7 @@ async function syncSelected(selectionKeys){
     // ⚠ אותה תקלה בבחירה עצמה: הסינון לפי מקור מחק מ-selectedAccountKeys את
 // מפתחות הישויות שלא סונכרנו בריצה הזאת, וכך הן נשרו גם מן הסנכרון
 // האוטומטי. ביטול בחירה נעשה בדשבורד ונכתב לאחסון ישירות, ולכן כאן איחוד פשוט.
-const finalKeys=[...new Set([...saved.selectedAccountKeys.map(String),...selectionKeys.map(String)])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiStatus=`הסתיים ואומת: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;// ⚠ 18.08.2026 — טל: „מאיפה מצא 10 חשבונות? יש רק 4 וביקשתי לסנכרן אחד."
+const finalKeys=[...new Set([...saved.selectedAccountKeys.map(String),...selectionKeys.map(String)])],leumiAccounts=marked.filter(a=>a.source==='leumi'),leumiPartial=leumiAccounts.filter(a=>/חלקית/.test(a.status||'')).length,leumiStatus=`${leumiPartial?`הסתיים חלקית (${leumiPartial} מתוך ${leumiAccounts.length} חסרים תנועות)`:'הסתיים ואומת'}: ${leumiAccounts.length} חשבונות, ${leumiAccounts.reduce((s,a)=>s+(a.transactions?.length||0),0)} תנועות, ${leumiAccounts.reduce((s,a)=>s+(a.loans?.length||0),0)} הלוואות, ${leumiAccounts.reduce((s,a)=>s+(a.chequeCount||0),0)} הפקדות שיקים`;// ⚠ 18.08.2026 — טל: „מאיפה מצא 10 חשבונות? יש רק 4 וביקשתי לסנכרן אחד."
 // marked.length הוא **כל** מה ששמור בכל הבנקים (10 רשומות), ולא מה שסונכרן בריצה.
 // המסר אמר „הסתיים בהצלחה: 10 חשבונות" והשתמע שסונכרנו עשרה. עכשיו שני המספרים
 // נפרדים ומסומנים.
@@ -904,6 +904,10 @@ const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)bal
 // **לא זורקים את הנתונים** — 28 התנועות נכונות ושימושיות, בשונה מתקלת הזהות
 // בדיסקונט שבה שמירה הייתה מייחסת כסף לחשבון אחר. כאן רק מפסיקים לשקר:
 // המצב נאמר כפי שהוא, והפער נרשם כדי שהסבב הבא ייבנה ממדידה.
+// ⚠ 22.08.2026 — השלמה לתיקון שלמטה: גם שורת הסטטוס העליונה
+// (leumiStatus) אמרה הסתיים ואומת, בעוד רשומת החשבון עצמה נשמרה
+// כ-מסונכרן חלקית. תיקנתי את הרשומה ושכחתי את הכותרת —
+// והכותרת היא מה שהמשתמש רואה קודם. הבטחה חצאית גרועה מכלום.
 const gapOf=a=>{const rows=a.transactions||[];if(!rows.length||a.balance==null)return null;
   const last=rows[rows.length-1],diff=Math.round(((Number(a.balance)||0)-(Number(last.balance)||0))*100)/100;
   return Math.abs(diff)<0.01?null:{diff,until:last.date||'',rows:rows.length}};
@@ -913,7 +917,7 @@ result=r.accounts.map(a=>{const gap=gapOf(a);if(gap)gaps[a.key]=gap;
   return{...a,...(loansByKey.get(a.key)||{}),owner:a.nickname,source:'leumi',sourceLabel:'לאומי',
   selectionKey:`leumi|${a.key}`,id:`leumi-${a.key}`,lastSync:now,
   status:gap?`מסונכרן חלקית — התנועות עד ${gap.until}, פער ${money(gap.diff)} ₪ עד היתרה`:'מסונכרן ומאומת'}});
-await chrome.storage.local.set({leumiGap:Object.keys(gaps).length?{at:now,accounts:gaps}:null,leumiRangeProbe:r.rangeProbe||null});const txCount=result.reduce((sum,a)=>sum+(a.transactions?.length||0),0),loanCount=result.reduce((sum,a)=>sum+(a.loans?.length||0),0),chequeCount=result.reduce((sum,a)=>sum+(a.chequeCount||0),0);
+await chrome.storage.local.set({leumiGap:Object.keys(gaps).length?{at:now,accounts:gaps}:null,leumiRangeProbe:r.rangeProbe||null,leumiDateMenu:r.dateMenu||null});const txCount=result.reduce((sum,a)=>sum+(a.transactions?.length||0),0),loanCount=result.reduce((sum,a)=>sum+(a.loans?.length||0),0),chequeCount=result.reduce((sum,a)=>sum+(a.chequeCount||0),0);
 // שמירת הצילומים לא מסכנת את הסנכרון: אם היא נכשלת, היתרות והתנועות כבר בידינו.
 let saved=0;try{saved=await harvestLeumiCheques(tabId,result,txUrl)}catch(e){await chrome.storage.local.set({chequeError:e.message})}
 await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}`});return result}
