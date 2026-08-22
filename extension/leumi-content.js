@@ -29,7 +29,7 @@ if(!child)return{ok:false,error:`הפריט ${route.child} לא נמצא בתפ�
 realClick(child);
 for(let i=0;i<50;i++){await wait(300);if(location.pathname.includes(route.path))return{ok:true}}
 return{ok:false,error:`הניווט ל-${route.child} לא הגיע ל-${route.path}`}}
-chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),radios:radioProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
+chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),radios:radioProbe(),grid:gridProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
 // הרחבת שורת התנועה מזריקה את צילום השיק כ-data:image ישירות ל-DOM — קדמי ואחורי.
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
@@ -477,6 +477,62 @@ async function dateMenuProbe(){
     out.closed=true;
   }catch(e){out.closeError=String(e&&e.message||e)}
   return out;
+}
+// ⚠⚠ 22.08.2026 — גשש מבנה הרשת. **קריאה בלבד: אפס לחיצות, אפס גלילה.**
+// הרקע: הקריאה נעצרת על ~29 שורות גם כשהטווח רחב, ו**שני ניסיונות תיקון
+// עיוורים נכשלו** — האחרון אף החמיר (13 שורות ו-70 שניות, ראה 1.2.5).
+// לכן לפני ניסיון שלישי מודדים **מה בכלל מפעיל טעינת עמוד נוסף**:
+//   · האם הרשת מווירטואלית (aria-rowcount מול שורות ב-DOM, transform/top
+//     על השורות, data-index) — אם כן, שורות מתחלפות ואין „לגלול עד הסוף";
+//   · האם יש „זקיף" של IntersectionObserver בתחתית (אלמנט זעיר/ריק,
+//     או שם מחלקה עם sentinel/loader/spinner/observer);
+//   · האם יש פקדי עימוד או ספירה מוצהרת („מוצגות X מתוך Y");
+//   · מי האב הנגלל בפועל, ומה היחס scrollHeight/clientHeight.
+// כל אלה **תצפית**. שום מסקנה לא תיכתב לקוד לפני שהמספרים יגיעו.
+// ⚠ רץ **אחרי** שהקריאה הסתיימה, ולכן אינו יכול לשבש אותה.
+function gridProbe(){
+  const f=t=>String(t||'').replace(/\s+/g,' ').trim();
+  try{
+    const rows=datedRows();
+    const tail=rows.at(-1)?.row,head=rows[0]?.row;
+    // האבות הנגללים בפועל, עם המידות — בלי לגעת בהם
+    const chain=[];let n=tail;
+    for(let i=0;i<10&&n&&n!==document.body;i++,n=n.parentElement){
+      const st=getComputedStyle(n);
+      chain.push({tag:n.tagName.toLowerCase(),cls:f(n.className).slice(0,38),
+        role:n.getAttribute&&n.getAttribute('role')||'',
+        sh:n.scrollHeight,ch:n.clientHeight,top:n.scrollTop,
+        ov:`${st.overflowY}`,scrollable:n.scrollHeight>n.clientHeight+8});
+    }
+    // סימני וירטואליזציה
+    const grid=tail&&tail.closest('[role="grid"],[role="table"],table');
+    const rowStyle=tail?getComputedStyle(tail):null;
+    const declared=(()=>{for(const el of document.querySelectorAll('[aria-rowcount],[data-total],[data-count]')){
+      const v=el.getAttribute('aria-rowcount')||el.getAttribute('data-total')||el.getAttribute('data-count');
+      if(v)return {attr:v,on:f(el.className).slice(0,30)}}return null})();
+    const totalText=(f(document.body.innerText).match(/(מוצג\w*|מתוך)[^.]{0,40}\d+[^.]{0,25}/)||[''])[0].slice(0,90);
+    // מועמדים ל„זקיף" בתחתית הרשימה: אלמנט אחרון, זעיר או בעל שם מרמז
+    const sentinels=[...document.querySelectorAll('div,span,li')]
+      .filter(el=>/sentinel|observer|loader|spinner|infinite|load-more|end-of/i.test(String(el.className||'')))
+      .map(el=>({cls:f(el.className).slice(0,40),h:el.getBoundingClientRect().height})).slice(0,8);
+    const afterTail=tail&&tail.nextElementSibling;
+    return{
+      rowsInDom:rows.length,
+      firstDate:head?f(rows[0].cells.join(' ')).match(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/)?.[0]||'':'',
+      lastDate:tail?f(rows.at(-1).cells.join(' ')).match(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/)?.[0]||'':'',
+      declared,totalText,
+      gridRole:grid?`${grid.tagName.toLowerCase()}[${grid.getAttribute('role')||''}]`:'',
+      gridAriaRowCount:grid?grid.getAttribute('aria-rowcount')||'':'',
+      rowPosition:rowStyle?rowStyle.position:'',
+      rowTransform:rowStyle?String(rowStyle.transform).slice(0,30):'',
+      rowHasIndex:tail?!!(tail.getAttribute('data-index')||tail.getAttribute('aria-rowindex')):false,
+      siblingAfterTail:afterTail?{tag:afterTail.tagName.toLowerCase(),
+        cls:f(afterTail.className).slice(0,40),h:afterTail.getBoundingClientRect().height,
+        text:f(afterTail.textContent).slice(0,40)}:null,
+      sentinels,
+      chain,
+      at:new Date().toISOString()};
+  }catch(e){return{probeError:String(e&&e.message||e)}}
 }
 function rangeProbe(){try{
   const f=s=>String(s||'').replace(/\s+/g,' ').trim();
