@@ -71,7 +71,28 @@ if(/\/H\/Login\.html/i.test(location.pathname)||/\/gate-keeper\//i.test(location
 if(!document.querySelector('main'))return;
 reported=true;chrome.runtime.sendMessage({type:'LEUMI_AUTHENTICATED'}).catch(()=>{})}setInterval(report,800);report();
 function normalized(value){return String(value||'').replace(/(?<=\d)\s+(?=\d)/g,'').replace(/\s*([-\/])\s*/g,'$1')}
-function parseAccount(value){const m=normalized(value).match(/(\d{3})-(\d+)(?:\/(\d+))?/);return m?{branch:m[1],accountNumber:m[2],accountSuffix:m[3]||'',key:`${m[1]}-${m[2]}`}:null}
+// ⚠⚠ 23.08.2026 — טל: „יש התעלמות מהסלש ושתי הספרות" (החשבון הוא 348300/77).
+// **המנגנון אומת בבדיקה**, על ארבע צורות טקסט סבירות:
+//   "921-348300/77"            → key=921-348300 suffix=77   ✔
+//   "921 - 348300 / 77"        → key=921-348300 suffix=77   ✔
+//   "921 348300 77"            → normalized="92134830077"   ✗ null
+//   "עו״ש שקלים 921 348300/77" → normalized="…921348300/77" ✗ null
+// הסיבה: `normalized()` מוחק רווחים **בין ספרות** — הוא נועד לאחות מספר
+// שפוצל בין אלמנטים, אבל הוא גם **מוחק את הגבול בין הסניף לחשבון**. בלי
+// מקף אין התאמה, `parseAccount` מחזיר null, ו-`selectAccount` זורק
+// „החשבון לא נמצא" — בדיוק מה שטל ראה.
+// **הנפילה לאחור שמרנית בכוונה**, כי הרחבה גורפת כאן כבר הפילה את הזיהוי
+// פעם אחת („עשרות חשבונות מדומים", ראה ההערה מעל menuEntitiesLoose):
+//   · רצה **רק** אם הפירוק המחמיר נכשל;
+//   · על הטקסט **הגולמי**, שבו הרווח עוד קיים;
+//   · מחייבת מפריד מפורש (מקף או רווח), חשבון בן 5–9 ספרות, וסיומת של
+//     **בדיוק שתי ספרות** — ולא `\d+` פתוח.
+function parseAccount(value){
+  const m=normalized(value).match(/(\d{3})-(\d+)(?:\/(\d+))?/);
+  if(m)return{branch:m[1],accountNumber:m[2],accountSuffix:m[3]||'',key:`${m[1]}-${m[2]}`};
+  const raw=String(value||'').match(/(?:^|[^\d])(\d{3})[-\s](\d{5,9})(?:\s*\/\s*(\d{2}))?(?!\d)/);
+  return raw?{branch:raw[1],accountNumber:raw[2],accountSuffix:raw[3]||'',key:`${raw[1]}-${raw[2]}`}:null;
+}
 // ⚠ שורות הרשת מכילות את מספרי החשבון של מושכי השיקים (12-645-0000099426), והם תואמים
 // לתבנית של parseAccount. בלי ההחרגה הזו הזיהוי מחזיר את החשבון האמיתי ועוד עשרות מדומים.
 // ⚠ ההחרגה מכוונת לרשת הנתונים בלבד — זו שיש בה כותרות עמודה — כי שורותיה מכילות את
@@ -190,7 +211,27 @@ if(!opts.length)throw Error('לא נמצאה רשימת החשבונות בלא�
 return opts}
 async function discover(){if(!await ready())throw Error(`דף לאומי לא נטען בתוך 45 שניות ונשאר ריק (${normalized(txt(document.body)).length} תווים בדף). ברוב המקרים זה אומר שההתחברות ללאומי פגה — התחבר מחדש באתר והרץ שוב.`);const opts=await discoverAccounts(),accounts=uniqueAccounts(opts).map(o=>{const value=txt(o),a=parseAccount(value);if(!a)return null;
 const name=accountName(o)||`חשבון ${a.accountNumber}`;const values=value.match(/-?[\d,]+\.\d{2}/g);return{...a,nickname:name,balance:values?.length?money(values.at(-1)):null}}).filter(Boolean);document.querySelector('[role="dialog"] button[aria-label="סגירה"]')?.click();return accounts}
-async function selectAccount(key){const current=parseAccount(txt(chooser()));if(current?.key===key)return;let option=accountTabs().find(o=>parseAccount(txt(o))?.key===key);if(!option){const opts=await options();option=opts.find(o=>parseAccount(txt(o))?.key===key)}if(!option)throw Error(`החשבון ${key} לא נמצא בחיבור לאומי`);realClick(option);for(let i=0;i<60;i++){await wait(250);const active=parseAccount(txt(chooser()));if(active?.key===key)return;
+async function selectAccount(key){const current=parseAccount(txt(chooser()));if(current?.key===key)return;let option=accountTabs().find(o=>parseAccount(txt(o))?.key===key);if(!option){const opts=await options();option=opts.find(o=>parseAccount(txt(o))?.key===key)}if(!option){
+  // ⚠⚠ 23.08.2026 — טל: „החשבון לא נכון, בלאומי יש 348300/77, יש התעלמות
+  // מהסלש ושתי הספרות." ההודעה „החשבון X לא נמצא" לא אמרה **מה כן נמצא**,
+  // ולכן אי אפשר היה לדעת אם הבעיה בהתאמה, בפירוק, או בטקסט עצמו.
+  // חשד מוביל, לא מאומת: `normalized()` מוחק רווחים **בין ספרות**
+  // (`(?<=\d)\s+(?=\d)`). אם לאומי מפצל את מספר החשבון לאלמנטים נפרדים,
+  // הטקסט „921 348300 77" הופך ל-„92134830077", וב-`parseAccount` אין מקף
+  // ולכן אין התאמה כלל. **זו השערה — הרישום כאן יכריע אותה.**
+  // ⚠ האבחון נכתב לאחסון בלבד. הודעת המשתמש נשארת משפט אחד (הלקח מ-1.2.8).
+  try{
+    const seen=[...accountTabs(),...(await options().catch(()=>[]))].slice(0,25).map(el=>{
+      const t=String(txt(el)||'').replace(/\s+/g,' ').trim().slice(0,60);
+      const p=parseAccount(t);
+      return{raw:t,norm:normalized(t).slice(0,60),key:p?p.key:null,suffix:p?p.accountSuffix:null};
+    });
+    await chrome.storage.local.set({leumiAccountMatch:{want:key,tabs:accountTabs().length,
+      chooser:String(txt(chooser())||'').replace(/\s+/g,' ').trim().slice(0,80),
+      chooserKey:parseAccount(txt(chooser()))?.key||null,seen,at:new Date().toISOString()}});
+  }catch{}
+  throw Error(`החשבון ${key} לא נמצא בחיבור לאומי`);
+}realClick(option);for(let i=0;i<60;i++){await wait(250);const active=parseAccount(txt(chooser()));if(active?.key===key)return;
 if(!chooser()&&normalized(txt(document.body)).includes(key))return}throw Error(`לאומי לא עבר לחשבון ${key}`)}
 async function extract(expectedKey='',fallbackBalance=null){await openCurrentAccount();await loadAllRows();const raw=datedRows().map(x=>x.cells);const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');if(!raw.length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
 if(balance==null&&Number.isFinite(fallbackBalance))balance=fallbackBalance;if(balance==null)throw Error(`לא זוהתה יתרת עו״ש בחשבון ${a.key} — לא בכרטיס היתרה ולא בבורר`);const limitMatch=cardText.match(/מסגרת אשראי\s*₪?\s*(-?[\d,]+\.\d{2})/);const creditLimit=limitMatch?money(limitMatch[1]):null;// העמודות נקראות לפי כותרת ולא לפי היסט קבוע. נמדד מול הדף החי: תאריך|תנועות|אסמכתא|חובה|זכות|יתרה מצטברת.
