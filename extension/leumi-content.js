@@ -88,7 +88,10 @@ function normalized(value){return String(value||'').replace(/(?<=\d)\s+(?=\d)/g,
 //   · מחייבת מפריד מפורש (מקף או רווח), חשבון בן 5–9 ספרות, וסיומת של
 //     **בדיוק שתי ספרות** — ולא `\d+` פתוח.
 function parseAccount(value){
-  const m=normalized(value).match(/(\d{3})-(\d+)(?:\/(\d+))?/);
+  // ⚠ 23.08.2026 — `(\d{3})-(\d+)` תפס `026-01` בתוך „23.08.2026-01.01.2026"
+  // והמציא חשבון. `(?<!\d)` פוסל התחלה בתוך מספר ארוך, ו-`{4,9}` דורש חשבון
+  // באורך סביר (הקיימים: 88154, 348300). נמדד ב-leumiAccountMatch.
+  const m=normalized(value).match(/(?<!\d)(\d{3})-(\d{4,9})(?:\/(\d{1,3}))?(?!\d)/);
   if(m)return{branch:m[1],accountNumber:m[2],accountSuffix:m[3]||'',key:`${m[1]}-${m[2]}`};
   const raw=String(value||'').match(/(?:^|[^\d])(\d{3})[-\s](\d{5,9})(?:\s*\/\s*(\d{2}))?(?!\d)/);
   return raw?{branch:raw[1],accountNumber:raw[2],accountSuffix:raw[3]||'',key:`${raw[1]}-${raw[2]}`}:null;
@@ -233,7 +236,15 @@ async function selectAccount(key){const current=parseAccount(txt(chooser()));if(
   throw Error(`החשבון ${key} לא נמצא בחיבור לאומי`);
 }realClick(option);for(let i=0;i<60;i++){await wait(250);const active=parseAccount(txt(chooser()));if(active?.key===key)return;
 if(!chooser()&&normalized(txt(document.body)).includes(key))return}throw Error(`לאומי לא עבר לחשבון ${key}`)}
-async function extract(expectedKey='',fallbackBalance=null){await openCurrentAccount();await loadAllRows();const raw=datedRows().map(x=>x.cells);const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');if(!raw.length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
+async function extract(expectedKey='',fallbackBalance=null){await openCurrentAccount();
+// ⚠⚠ 23.08.2026 — **מיקום. הוכח במדידה, לא בהשערה.** `leumiAccountMatch` הראה:
+//   want:"921-348300"  chooser:"…921-88154/39"  tabs:5  — כל הלשוניות אותו חשבון
+// כלומר החשבון המבוקש **לא היה בדף כלל**: הסינון רץ לפני `selectAccount`,
+// רינדר את הדף מחדש, והרס את לשוניות החשבון לפני שחיפשו בהן. ראיה נוספת
+// באותה רשומה: `"תאריך23.08.2026-01.01.2026"` נקרא כחשבון מדומה `026-01` —
+// **זה טווח התאריכים שהקוד הזה עצמו כתב לדף.**
+// התיקון נעשה כבר ב-1.2.7 והוחזר ב„חזרה ל-1.2.5" לבקשת טל; זו החזרתו.
+await applyLeumiRange();await openCurrentAccount();await loadAllRows();const raw=datedRows().map(x=>x.cells);const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');if(!raw.length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
 if(balance==null&&Number.isFinite(fallbackBalance))balance=fallbackBalance;if(balance==null)throw Error(`לא זוהתה יתרת עו״ש בחשבון ${a.key} — לא בכרטיס היתרה ולא בבורר`);const limitMatch=cardText.match(/מסגרת אשראי\s*₪?\s*(-?[\d,]+\.\d{2})/);const creditLimit=limitMatch?money(limitMatch[1]):null;// העמודות נקראות לפי כותרת ולא לפי היסט קבוע. נמדד מול הדף החי: תאריך|תנועות|אסמכתא|חובה|זכות|יתרה מצטברת.
 const idx=columnIndex(),col=(label,fallback)=>Number.isInteger(idx[label])?idx[label]:fallback;
 const iDate=col('תאריך',1),iAction=col('תנועות',2),iRef=col('אסמכתא',3),iDebit=col('חובה',4),iCredit=col('זכות',5),iBalance=col('יתרה מצטברת',6);
@@ -544,8 +555,7 @@ function rangeProbe(){try{
     at:new Date().toISOString()};
 }catch(e){return{probeError:String(e&&e.message||e)}}}
 async function syncSelected(keys,balances={}){const out=[];// ⚠ הטווח נשלח **לפני** קריאת השורות. הפוך מזה — והקריאה תקדים את הבקשה,
-// בדיוק הכשל שנרשם בדיסקונט ב-20.08 („ניווט שקדם לבחירה נמחק על ידה").
-await applyLeumiRange();
+
 for(const key of keys){if(accountTabs().length)await selectAccount(key);out.push(await extract(key,Number(balances[key])))}return out}
 async function syncLoans(keys){const out=[];for(const key of keys){if(accountTabs().length)await selectAccount(key);let rows=[];for(let i=0;i<180;i++){rows=gridRows().map(row=>({row,cells:cellsOf(row)})).filter(x=>x.cells.some(v=>/%/.test(v))&&x.cells.filter(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)).length>=2);if(rows.length)break;await wait(250)}const page=txt(document.body),declaredTotal=money((page.match(/סך יתרת הלוואות[\s\S]{0,200}?₪\s*([\d,]+\.\d{2})/)||[])[1]);if(declaredTotal>0&&!rows.length)throw Error(`לא נטען פירוט ההלוואות בחשבון ${key}`);const loans=[];let prevStamp='';for(const {row,cells:c} of rows){const end=c.findIndex(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)),interest=c.findIndex(v=>/%/.test(v));if(end<1||interest<0)continue;row.querySelector('button,[role="button"]')?.click();await wait(800);const panel=txt(document.querySelector('[aria-label="הרחבת הלוואה"]')||document.querySelector('[role="complementary"]')||document.body);const nextPayment=money((panel.match(/התשלום הבא\s*₪?\s*([\d,]+\.\d{2})/)||[])[1]),nextPaymentDate=(panel.match(/תאריך התשלום הבא\s*(\d{2}\.\d{2}\.\d{4})/)||[])[1]||'';if(nextPayment==null||!nextPaymentDate)throw Error(`חסר תשלום קרוב בהלוואה בחשבון ${key}`);
 // ההרחבה יושבת מחוץ לשורה, ולחיצה שנייה אינה מקפלת אותה. אם שתי שורות מחזירות את אותו תשלום — עוצרים במקום לשכפל.
