@@ -6,3 +6,6 @@
 .popup{box-sizing:border-box;max-width:320px;overflow-x:hidden}
 .popup .hint{display:block;overflow-wrap:anywhere;word-break:break-word;max-height:8em;overflow-y:auto}
 .popup .button{position:relative;z-index:1}
+
+/* ⚠ 23.08.2026 — אריח בנק: הגנה שנייה, בלתי תלויה בקיצור שב-JS. */
+.bank-button small{overflow-wrap:anywhere;word-break:break-word;display:block;max-height:4.5em;overflow:hidden}
