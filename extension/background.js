@@ -948,6 +948,7 @@ await chrome.storage.local.set({leumiGap:Object.keys(gaps).length?{at:now,accoun
 let saved=0;try{saved=await harvestLeumiCheques(tabId,result,txUrl)}catch(e){await chrome.storage.local.set({chequeError:e.message})}
 await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}`});return result}
 let chequeCtx={base:0,total:0,noRef:0,done:0,selectionKey:'',savedRefs:new Set()};
+let notFoundAll=[];
 async function harvestLeumiCheques(tabId,accounts,txUrl){const have=await chequeKeys();let saved=0,routed=false,asked=0,failed=0,why='',stuck=0;
 {let total=0,noRef=0,already=0;
 for(const a of accounts)for(const t of(a.transactions||[]))if(t.cheque){total++;
@@ -971,9 +972,10 @@ if(!r?.ok){
       try{await prepareLeumiRoute(tabId,txUrl)}catch(err){why=why||err.message;break}
       continue}
     stuck=0;
+if(r?.images&&r.images.__notFound){notFoundAll.push(...r.images.__notFound);delete r.images.__notFound}
 for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue;await chequePut({id:chequeId(a.selectionKey,reference),selectionKey:a.selectionKey,reference,front:img.front,back:img.back||'',savedAt:new Date().toISOString()});chequeCtx.savedRefs.add(String(reference));saved++}}}
   saved=Math.max(saved,chequeCtx.savedRefs.size);
-await chrome.storage.local.set({leumiChequeReport:{total:chequeCtx.total,already:chequeCtx.base,noReference:chequeCtx.noRef,asked,saved,failed,why,at:new Date().toISOString()}});
+await chrome.storage.local.set({leumiChequeReport:{total:chequeCtx.total,already:chequeCtx.base,noReference:chequeCtx.noRef,asked,saved,failed,notFound:notFoundAll.length,notFoundRefs:notFoundAll.slice(0,15),why,at:new Date().toISOString()}});
 if(asked&&!saved)await chrome.storage.local.set({syncStatus:`לאומי: לא נשמר אף צילום שיק מתוך ${asked} מבוקשים — ${why||'ללא סיבה'}`});
 return saved}
 async function openLeumiCheque(m){const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(!tabs[0])throw Error('יש להתחבר ללאומי כדי להציג צילום שיק');await chrome.tabs.update(tabs[0].id,{url:'https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/checks/cleared-checks/'});await delay(1600);const r=await chrome.tabs.sendMessage(tabs[0].id,{type:'LEUMI_OPEN_CHEQUE',branch:m.branch,accountNumber:m.accountNumber,date:m.date,amount:m.amount});if(!r?.ok)throw Error(r?.error||'צילום השיק לא נמצא');return{ok:true}}

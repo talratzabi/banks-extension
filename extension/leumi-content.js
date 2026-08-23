@@ -34,12 +34,23 @@ chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){r
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
 // לא נמצאו שורות תואמות ולא נשמר אף צילום.
-async function chequeImages(wanted,key,offset=0,total=0){if(key&&accountTabs().length)await selectAccount(key);await openCurrentAccount();await loadAllRows();const out={};const dataSrc=()=>[...document.querySelectorAll('img')].map(i=>i.src).filter(s=>s.startsWith('data:image'));
+async function chequeImages(wanted,key,offset=0,total=0){const notFound=[];if(key&&accountTabs().length)await selectAccount(key);await openCurrentAccount();
+// ⚠⚠ 23.08.2026 — טל: „אין צילומי שיקים". נמדד:
+//   leumiChequeReport = {asked:15, saved:0, failed:0, already:0, why:""}
+// התבקשו 15 ונשמרו 0, **בלי אף כשל** — כלומר כולם דולגו בשקט בשורת
+// `if(!hit)continue` שלמטה. הסיבה: הפונקציה הזו **טוענת את הרשת מחדש**,
+// ולא החילה את הטווח שוב — לכן היא חיפשה אסמכתאות מינואר בתוך חלון
+// ברירת המחדל („40 התנועות האחרונות"), ולא מצאה אף אחת.
+// **זו תופעת לוואי של תיקון הטווח עצמו:** כל עוד החלון היה ממילא
+// יולי-אוגוסט, האסמכתאות היו שם והשיקים נשמרו (23, ואז 16).
+await applyLeumiRange();await openCurrentAccount();await loadAllRows();const out={};const dataSrc=()=>[...document.querySelectorAll('img')].map(i=>i.src).filter(s=>s.startsWith('data:image'));
 // ⚠ חלון הצילום נשאר פתוח אחרי שיק: הוא מכסה את הטבלה וחוסם את
 // הלחיצה הבאה, וגם מוסיף את תמונותיו ל-before כך שתמונה חדשה
 // אינה מזוהה. זה מייצר "חלק כן וחלק לא". סלקטור הסגירה כבר מדוד, מ-discover().
 const closeViewer=async()=>{const btn=document.querySelector('[role="dialog"] button[aria-label="סגירה"]')||document.querySelector('[role="dialog"] [aria-label*="סגירה"],[role="dialog"] [aria-label*="סגור"]');if(btn){realClick(btn);await wait(450);return}if(document.querySelector('[role="dialog"]')){document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(450)}};
-for(const item of wanted){const reference=String(item.reference||'');const hit=datedRows().find(({cells})=>cells.includes(item.date)&&cells.includes(reference));if(!hit)continue;
+for(const item of wanted){const reference=String(item.reference||'');const hit=datedRows().find(({cells})=>cells.includes(item.date)&&cells.includes(reference));// ⚠ דילוג שקט הוא באג בפני עצמו: הוא הסתיר 15 כשלים מאחורי „asked:15,
+// saved:0, failed:0". עכשיו נספר ומדווח, כדי שלא ייראה שוב כהצלחה.
+if(!hit){notFound.push(reference);continue}
 chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_PROGRESS',done:offset+wanted.indexOf(item)+1,total:total||wanted.length,reference}).catch(()=>{});
 await closeViewer();const before=new Set(dataSrc());hit.row.querySelector('button,[role="button"]')?.click();
 // 4 שניות היו קצרות, אבל 12 הוציאו את האצווה מתקרת ה-120 שניות
@@ -49,7 +60,10 @@ if(fresh.length){out[reference]={front:fresh[0],back:fresh[1]||''};
 // ⚠ שולחים כל צילום מיד ולא רק בסוף האצווה: אצווה שחורגת מהתקרה איבדה עד עכשיו
 // גם את מה שכבר צולם בהצלחה (נמדד 18.08.2026 — 14 מתוך 32 אבדו כך).
 chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_IMAGE',reference,front:fresh[0],back:fresh[1]||''}).catch(()=>{})}}
-await closeViewer();return out}
+await closeViewer();
+// ⚠ הדילוגים נשלחים הלאה, אחרת הרשומה תמשיך לומר „failed:0" על כשל מלא.
+if(notFound.length)out.__notFound=notFound.slice(0,20);
+return out}
 function snapshot(){try{const dated=datedRows(),page=normalized(txt(document.body));return{url:location.href,tables:document.querySelectorAll('table').length,rows:gridRows().length,datedRows:dated.length,cols:dated[0]?dated[0].cells.length:0,firstRow:dated[0]?dated[0].cells.slice(0,10):[],tabs:accountTabs().length,chooser:txt(chooser()).slice(0,140),shekelBefore:/₪\s*-?[\d,]+\.\d{2}/.test(page),shekelAfter:/-?[\d,]+\.\d{2}\s*₪/.test(page),head:page.slice(0,500),...probe()}}catch(e){return{snapshotError:e.message,url:location.href}}}
 function probe(){try{const roleCounts={};for(const role of['table','grid','treegrid','row','rowgroup','gridcell','cell','columnheader','list','listitem']){const n=document.querySelectorAll(`[role="${role}"]`).length;if(n)roleCounts[role]=n}
 const frames=[...document.querySelectorAll('iframe')].map(f=>{let doc=null;try{doc=f.contentDocument}catch{}return{id:f.id||'',name:f.name||'',src:String(f.src||'').slice(0,140),sameOrigin:Boolean(doc),innerTables:doc?doc.querySelectorAll('table').length:-1,innerRows:doc?doc.querySelectorAll('table tr,[role="row"]').length:-1}});
