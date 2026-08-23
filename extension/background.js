@@ -168,9 +168,9 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   // אחרי לחיצה על „עצור" מסלולים שאין להם גלגל (זיהוי דיסקונט, למשל) נעצרו מיד
   // בפעם הבאה. **כל בקשה חדשה של המשתמש מנקה את הדגל.**
   if(/^START_/.test(m?.type||'')||['SYNC_SELECTED','LOAD_CARD_YEAR','LOAD_CARD_MONTH'].includes(m?.type||''))clearAbort();
-  if(/^[A-Z_]*AUTHENTICATED$/.test(m?.type||'')&&sender.tab?.id)returnToDashboard(sender.tab.id);
+  if(/^[A-Z_]*AUTHENTICATED$/.test(m?.type||'')&&sender.tab?.id){const src=sourceFromUrl(sender.tab.url);userAskedFor(src||'').then(ok=>{if(ok)returnToDashboard(sender.tab.id)}).catch(()=>{});}
   if(m?.type==='START_AUTO_SYNC'){start(m.scope||'business',Boolean(m.force)).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
-  if(m?.type==='AUTHENTICATED'&&sender.tab?.id){const source=sourceFromUrl(sender.tab.url);if(source){queueDiscover(sender.tab.id,source);chrome.storage.local.get({pendingSources:[]}).then(x=>{if(!x.pendingSources.includes(source))maybeAutoSync(source,SOURCES[source].label,sender.tab.id).catch(()=>{})})}reply({ok:true});return}
+  if(m?.type==='AUTHENTICATED'&&sender.tab?.id){const source=sourceFromUrl(sender.tab.url);if(source){chrome.storage.local.get({pendingSources:[]}).then(x=>{if(x.pendingSources.includes(source))queueDiscover(sender.tab.id,source);else maybeAutoSync(source,SOURCES[source].label,sender.tab.id).catch(()=>{})});}reply({ok:true});return}
   if(m?.type==='SYNC_SELECTED'){syncSelected(m.keys||[]).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='OPEN_EXTERNAL_BANK'){chrome.tabs.create({url:m.url,active:true}).then(()=>reply({ok:true}));return true}
   if(m?.type==='START_FIBI'){startFibi(m.slot).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
@@ -273,6 +273,30 @@ async function openSource(source){
 // יורה שוב וזה חוזר בלי סוף. עד 0.64.0 גם לא היה דיווח — catch ריק בלע את הסיבה.
 const discoverTries=new Map();
 chrome.tabs.onRemoved.addListener(id=>{for(const k of [...discoverTries.keys()])if(k.endsWith(`|${id}`))discoverTries.delete(k)});
+// ⚠⚠ 23.08.2026 — טל: „אני מנסה לעבוד על בנק הפועלים, לא קשור לתוסף,
+// והתוסף חוטף לי את החשבון." **צודק, וזה היה חמור.**
+// `poalim-content.js` שולח `AUTHENTICATED` בכל שינוי נתיב, **כל 750ms**.
+// שני מטפלים הגיבו לו **בלי שום תנאי**:
+//   1. `returnToDashboard(tab.id)` — **מנווט את הלשונית של המשתמש** בחזרה
+//      לדף הבית של הבנק, בזמן שהוא עובד בה.
+//   2. `queueDiscover(...)` — מריץ זיהוי, שפותח את בורר החשבונות ומחליף
+//      חשבון. **זו „חטיפת החשבון".**
+// המסלול המקביל, `handleAuthenticatedNavigation`, **כן** בודק
+// `pendingSources` לפני `queueDiscover`. מסלול ההודעה פשוט לא — אי-עקביות
+// שאיש לא שם לב אליה.
+// **הכלל: התוסף נוגע בלשונית של המשתמש רק כשהמשתמש ביקש פעולה מול אותו
+// בנק.** נוכחות בדף בנק אינה בקשה.
+async function userAskedFor(source){
+  if(running)return true;                       // סנכרון שהמשתמש יזם
+  const st=await chrome.storage.local.get({pendingSources:[]});
+  if((st.pendingSources||[]).includes(source))return true;
+  const flags={leumi:'pendingLeumi','discount-business':'pendingDiscountBusiness',
+    'discount-private':'pendingDiscountPrivate',mizrahi:'pendingMizrahi',yahav:'pendingYahav',
+    isracard:'pendingIsracard'};
+  const f=flags[source];
+  if(!f)return false;
+  return Boolean((await chrome.storage.local.get({[f]:false}))[f]);
+}
 function queueDiscover(tabId,source){
   const key=`${source}|${tabId}`,tries=discoverTries.get(key)||0;
   if(tries>=3)return discoveryChain;
