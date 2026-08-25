@@ -363,6 +363,20 @@ function applyButtonIn(scope){
 }
 // התאריך המוקדם ביותר שמוצג כרגע — הסימן האמין לכך שהרשת באמת התרעננה.
 // מספר השורות אינו סימן: הוא נשאר 29 גם כשהסינון לא הוחל.
+// ⚠ 25.08.2026 — התאריך המאוחר ביותר, מול המוקדם ביותר. בלעדיו לא ניתן
+// לדעת אם הקצה העליון של הטווח (`to`) בכלל כובד, ו„הטווח נחתך" נראה
+// זהה ל„הטווח הוחל אבל נקראו מעט שורות".
+function latestShown(){
+  let best=null;
+  for(const r of datedRows()){
+    const m=String((r.cells||[]).join(' ')).match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+    if(!m)continue;
+    let y=Number(m[3]);if(y<100)y+=2000;
+    const ms=Date.UTC(y,Number(m[2])-1,Number(m[1]));
+    if(best==null||ms>best)best=ms;
+  }
+  return best;
+}
 function earliestShown(){
   let best=null;
   for(const r of datedRows()){
@@ -492,7 +506,16 @@ function gridProbe(){
 // לכן אין „לטעון עוד שורות": צריך **לבקש את הטווח שוב ושוב**, חלון אחר
 // חלון, ולצבור. 55 יום ולא 60 — מרווח ביטחון, כי לא ידוע אם הגבול נספר
 // בימים או בחודשי לוח.
-const LEUMI_WINDOW_DAYS=55;
+// ⚠⚠ **תיקון 25.08.2026, טל:** „אין מגבלה בבנק לצפיה בנתונים עד שנתיים
+// אחורה וברצף. צריך לברור נכון את תאריכי הצפיה בנתונים."
+// כלומר ההנחה של „חודשיים" **הופרכה** — הגבול האמיתי הוא **שנתיים, ברצף**,
+// ולכן כל בקשה עד שנתיים היא **בקשה אחת**, לא סדרת חלונות.
+// המנגנון נשאר כמות שהוא ופשוט מקבל חלון בגודל הגבול האמיתי: לכל טווח עד
+// שנתיים `leumiWindows` מחזיר **חלון יחיד**, וההתנהגות זהה לקריאה בודדת.
+// הוא נשאר בשביל טווח ארוך משנתיים בלבד — שאותו הבנק ממילא אינו מגיש.
+const LEUMI_WINDOW_DAYS=730;
+// מעבר לשנתיים אין נתונים בבנק. אין טעם לבקש, וזה גם מונע ניסיון חוזר עקר.
+const LEUMI_MAX_BACK_MS=730*864e5;
 // dd.mm.yyyy → ms. חייב פרסור מפורש; Date.parse קורא את זה כאמריקאי.
 function ilToMs(v){const m=String(v||'').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   return m?Date.UTC(+m[3],+m[2]-1,+m[1]):NaN}
@@ -516,8 +539,10 @@ function leumiWindows(sinceMs,untilMs){
 // תנועות זהות באותו יום נבדלות ביתרה, ולכן אינן נבלעות זו בזו.
 async function collectRangeRows(){
   const st=await chrome.storage.local.get({collectSince:''});
-  const sinceMs=Date.parse(String(st.collectSince||''));
   const untilMs=Date.now();
+  const asked=Date.parse(String(st.collectSince||''));
+  // הבנק אינו מגיש מעבר לשנתיים; בקשה רחבה יותר נחתכת לרצפה האמיתית.
+  const sinceMs=Number.isFinite(asked)?Math.max(asked,untilMs-LEUMI_MAX_BACK_MS):asked;
   if(!Number.isFinite(sinceMs)){
     await applyLeumiRange();await openCurrentAccount();await loadAllRows();
     return datedRows().map(x=>x.cells);
@@ -580,7 +605,15 @@ async function applyLeumiRange(winFrom,winTo){
         // מוצלחת ככשל. תופס גם את המקרה שבו כן הגענו לגבול או מעברו.
         return report(eAfter0!=null&&((earlyBefore0!=null&&eAfter0<earlyBefore0)||eAfter0<=sinceMs)?'טווח מדויק הופעל':'טווח מדויק ללא שינוי מספיק',
           {from:ilShort(sinceMs),to:ilShort(untilMs),
-           earliestBefore:iso0(earlyBefore0),earliestAfter:iso0(eAfter0),rows:datedRows().length});
+           // ⚠ **מה שבאמת יושב בשדות אחרי ההחלה, ולא מה שביקשנו לכתוב.**
+           // טל, 25.08: „צריך לברור נכון את תאריכי הצפיה בנתונים." זו
+           // המדידה שתכריע — אם `wrote` שונה מ-`from`/`to`, הדף דחה או
+           // תיקן את מה שהוזן, וזה השורש. `placeholder` יגלה אם השדה
+           // מצפה ל-yyyy בעוד `ilShort` כותב yy.
+           wrote:{from:fields.from.value||'',to:fields.to.value||''},
+           placeholder:fields.from.placeholder||'',
+           earliestBefore:iso0(earlyBefore0),earliestAfter:iso0(eAfter0),
+           latestAfter:iso0(latestShown()),rows:datedRows().length});
       }
       await report('שדות הטווח נמצאו אך אין כפתור החלה',{});
     }

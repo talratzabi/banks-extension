@@ -862,14 +862,24 @@ async function runDiscoverLeumi(tabId,state){
 await prepareLeumiRoute(tabId,LEUMI_TX_URL);await delay(1200);
 // הזרקה חוזרת אחת לא הספיקה: ניווט של ה-SPA הורג את ה-content script בדיוק בין הבדיקה לשליחה.
 let r=null,lastErr='',lastProbe=null;for(let attempt=1;attempt<=5;attempt++){try{r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_DISCOVER'}),90000,'זיהוי חשבונות בלאומי');if(r)break}catch(e){lastErr=e.message;await chrome.storage.local.set({syncStatus:`לאומי: מחבר מחדש לעמוד, ניסיון ${attempt} מתוך 5`});try{await chrome.scripting.executeScript({target:{tabId},files:['leumi-content.js']})}catch(e2){lastErr=e2.message}await delay(1500)}}
-if(!r)throw Error(`אין חיבור לעמוד לאומי אחרי 5 ניסיונות: ${lastErr}`);if(!r?.ok)// ⚠⚠ 23.08.2026 — טל: „למה יש את ההודעות האלה כל פעם". צודק.
+if(!r)throw Error(`אין חיבור לעמוד לאומי אחרי 5 ניסיונות: ${lastErr}`);// ⚠ 23.08.2026 — טל: „למה יש את ההודעות האלה כל פעם". צודק.
 // `dbgText` בונה אבחון עשיר — כתובת מלאה, מספר טבלאות, שורה ראשונה,
 // פתיח הדף — והוא הודבק **להודעת השגיאה עצמה**, שמוצגת למשתמש
 // על אריח הבנק. התוצאה: עמודת מלל של אלף תווים בכרטיס לאומי.
 // והכפילות מיותרת לחלוטין: **אותו אבחון כבר נשמר ב-`leumiDebug`**,
 // ומשם קוראים אותו. **למשתמש — משפט אחד קריא; למפתח — הכל, באחסון.**
-{try{await chrome.storage.local.set({leumiDebug:{stage:'discover',error:r?.error||'',text:dbgText('',r?.debug),...(r?.debug||{})}})}catch{}}
-throw Error(r?.error||'זיהוי חשבונות לאומי נכשל');const others=state.discoveredAccounts.filter(a=>a.source!=='leumi'),found=r.accounts.map(a=>({...a,source:'leumi',sourceLabel:'לאומי',key:`leumi|${a.key}`}));// כשהזיהוי מחזיר חשבון בודד, שומרים את צילום הרשימה הנפתחת — שם התשובה למה השאר חסרים.
+// ⚠⚠ 25.08.2026 — **כאן ה-throw ברח מן ה-if.** לפני f7aed41 השורה הייתה
+// `if(!r?.ok)throw Error(...)` — משפט אחד. הריפקטור שהוציא את האבחון
+// להודעה עטף את כתיבת `leumiDebug` בבלוק, וה-throw נשאר **מחוץ לתנאי**.
+// התוצאה: **כל זיהוי לאומי נכשל, גם כשהצליח** — כולל החשבונות שכבר
+// היו ביד — וכל הקוד שמתחת (בניית `found`, שמירת `discoveredAccounts`,
+// „נמצאו N חשבונות") הפך ל**קוד מת שלא רץ מעולם מאז 23.08**.
+// **החתימה באחסון שהכריעה:** הודעת הכשל הייתה בדיוק מחרוזת ברירת המחדל
+// (`r.error` היה undefined — כלומר לא הייתה שגיאה), ו**לא נכתב `leumiDebug`
+// כלל** — כי הבלוק שכותב אותו הוא היחיד שכן נשאר בתוך התנאי.
+// **הלקח: כשעוטפים גוף של `if` חסר-סוגריים בבלוק — לספור מה נכנס פנימה.**
+if(!r?.ok){try{await chrome.storage.local.set({leumiDebug:{stage:'discover',error:r?.error||'',text:dbgText('',r?.debug),...(r?.debug||{})}})}catch{}
+throw Error(r?.error||'זיהוי חשבונות לאומי נכשל')}const others=state.discoveredAccounts.filter(a=>a.source!=='leumi'),found=r.accounts.map(a=>({...a,source:'leumi',sourceLabel:'לאומי',key:`leumi|${a.key}`}));// כשהזיהוי מחזיר חשבון בודד, שומרים את צילום הרשימה הנפתחת — שם התשובה למה השאר חסרים.
 if(found.length<2&&r.optionProbe)await chrome.storage.local.set({leumiOptionProbe:r.optionProbe});
 await chrome.storage.local.set({pendingLeumi:false,leumiAttempts:0,discoveredAccounts:[...others,...found],syncStatus:`נמצאו ${found.length} חשבונות בלאומי${r.strategy?` (${r.strategy})`:''} — בחר אילו לסנכרן ואשר`});await chrome.runtime.openOptionsPage()}
 const LEUMI_TX_URL='https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/nis-accounts/nis-transactions/',LEUMI_LOAN_URL='https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/credits/loans/';
