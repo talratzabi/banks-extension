@@ -413,10 +413,12 @@ async function assertEntityMatches(id,repaired=false){
   let seen='',label='';
   // ⚠ 8 שניות ולא 15: יחד עם הרחבת הטווח זה חרג מתקציב 90 השניות של הרקע.
   for(let i=0;i<8;i++){
-    const bodyText=bodyText();
+    // ⚠ שם מקומי שונה מן העוזר הגלובלי `bodyText()` — הצללה כאן יצרה
+    // `const bodyText=bodyText()`, הפניה עצמית ו-TDZ בזמן ריצה.
+    const pageText=bodyText();
     seen=String(activeAccount().accountNumber||'');label=entityId(text(entityButton()));
     const okLabel=!label||label===String(id);
-    const othersOnPage=others.filter(v=>onPage(v,bodyText));
+    const othersOnPage=others.filter(v=>onPage(v,pageText));
     // ⚠⚠ **בורר הישות הוא ראיה חיובית, ולא רק בדיקת שלילה.**
     // נמדד: {label:"024844714"=want, minePresent:false, othersPresent:[]}
     // — הבורר על הישות הנכונה, מספר החשבון שלנו פשוט **אינו על המסך**
@@ -428,15 +430,15 @@ async function assertEntityMatches(id,repaired=false){
     // חשבון של ישות אחרת נראה בדף, `othersOnPage` חוסם כמו קודם.
     const labelConfirms=!!label&&label===String(id);
     const okNumber=mine
-      ?(seen===mine||((onPage(mine,bodyText)||labelConfirms)&&!othersOnPage.length))
+      ?(seen===mine||((onPage(mine,pageText)||labelConfirms)&&!othersOnPage.length))
       :(seen&&!others.includes(seen));
-    if(okLabel&&okNumber&&(seen||onPage(mine,bodyText)||labelConfirms)){
+    if(okLabel&&okNumber&&(seen||onPage(mine,pageText)||labelConfirms)){
       // ⚠ נרשם **איך** התקבל האישור. „עבר" דרך הבורר בלבד הוא מצב חלש
       // יותר מ„עבר" דרך התאמת מספר, ואם אי פעם יישמרו נתונים של ישות
       // אחרת — זו הרשומה שתגיד מאיזה מסלול זה הגיע.
       try{await chrome.storage.local.set({discountIdentityPass:{want:String(id),
-        via:seen===mine?'מספר תואם':(onPage(mine,bodyText)?'החשבון בדף':'בורר הישות בלבד'),
-        seen,label,minePresent:onPage(mine,bodyText),at:new Date().toISOString()}})}catch{}
+        via:seen===mine?'מספר תואם':(onPage(mine,pageText)?'החשבון בדף':'בורר הישות בלבד'),
+        seen,label,minePresent:onPage(mine,pageText),at:new Date().toISOString()}})}catch{}
       return}
     await wait(1000)}
   // ⚠ 21.08.2026 — נמדד: {want:"024844714", expected:"2556371", seen:"9832685",
