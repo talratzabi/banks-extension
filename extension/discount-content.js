@@ -461,13 +461,22 @@ const earliestRow=()=>{const d=rowDates();return d.length?Math.min(...d):0};
 // „תחילת איסוף נתונים" חדלה להיות מסננת בלבד: כאן היא נשלחת לאתר.
 // מבודד לחלוטין — רץ אחרי בחירת החשבון ורק בדף התנועות. דף בלי הפקדים האלה
 // (פרטי, מסך אחר) יוצא בשקט וממשיך בסינון הקיים, בלי רגרסיה.
-async function applyCollectSince(){
+// ⚠⚠ 25.08.2026 — טל: „דיסקונט פרטי — חשוב שיזכור את התאריך."
+// נמדד: `if(!isPrivate)await applyCollectSince()` — **בפרטי הטווח לא
+// הוחל מעולם.** ההערה שמעל כבר צפתה שבפרטי אין את הפקדים ותכננה
+// יציאה שקטה, ולכן התנאי היה **חגורה על חגורה** — והוא זה שמנע
+// מהניסיון לקרות בכלל.
+// ⚠ לא ניחשתי סלקטורים חדשים לדף הפרטי. מפעילים את אותה פונקציה
+// המוגנת, והגשש ידווח: אם „פקדים חסרים" — נדע שצריך למדוד את הדף.
+// ⚠ `private` נכנס לרשומה, אחרת רשומת פרטי דורסת את של עסקי ואי אפשר
+// לדעת איזה מסך היא מתארת.
+async function applyCollectSince(isPrivate=false){
   try{
     const st=await chrome.storage.local.get({collectSince:''}),want=ilDate(st.collectSince);
     // ⚠ 20.08.2026 — הדיווח חייב להיכתב **בכל מסלול**, כולל יציאה מוקדמת. בלי זה
     // רשומה חסרה נראית כמו „הקוד לא רץ", ובזבזנו על זה סבב: לא ידענו אם היציאה
     // הייתה מפני שאין תאריך, שאין פקדים, או שהערך כבר היה נכון.
-    const report=async(reason,extra)=>{try{await chrome.storage.local.set({discountRangeApplied:{reason,from:want,at:new Date().toISOString(),url:location.hash,...extra}})}catch{}};
+    const report=async(reason,extra)=>{try{await chrome.storage.local.set({discountRangeApplied:{reason,from:want,private:!!isPrivate,at:new Date().toISOString(),url:location.hash,...extra}})}catch{}};
     if(!want)return report('אין תאריך התחלה');
     const from=document.querySelector('input#fromDate'),to=document.querySelector('input#toDate'),btn=[...document.querySelectorAll('button')].find(b=>/advanced-search-btn/.test(String(b.className||'')));
     if(!from||!to||!btn)return report('פקדים חסרים',{hasFrom:!!from,hasTo:!!to,hasBtn:!!btn});
@@ -653,7 +662,7 @@ phase('המתנה לטעינת הדף');
 // לכן: לא קוראים ישות שלא אומתה מול מספר חשבון ידוע. עדיף להיכשל מלשמור שקר.
 if(!isPrivate)await assertEntityMatches(id);
 // הטווח נשלח לאתר לפני קריאת השורות — אחרת נקרא את חלון ברירת המחדל (3 חודשים).
-if(!isPrivate)await applyCollectSince();phase('אחרי החלת הטווח');
+await applyCollectSince(isPrivate);phase('אחרי החלת הטווח');
 // ⚠ נמדד חי: בדף התנועות התווית היא "עובר ושב", ו-"יתרת עו\"ש" קיימת רק בדף הבית.
 // מרגע שהתחלנו לנווט לתנועות לפני הקריאה, החיפוש אחר התווית הישנה החזיר null תמיד.
 // ⚠ 21.08.2026 — נמדד חי: ישות 514220276 נשמרה בשם „טל רצבי" — השם של
