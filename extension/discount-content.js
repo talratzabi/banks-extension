@@ -209,6 +209,64 @@ function latestRowBalance(rows){
   for(let i=0;i<rows.length;i++){const t=stamp(rows[i].date);if(best===null||t>=best.t)best={t,balance:rows[i].balance}}
   return best?best.balance:null;
 }
+// ⚠⚠ 25.08.2026 — טל: „בדיסקונט, בחשבונות ללא מסגרת אשראי הוא רושם סתם מספרים."
+// **השורש ב-`valueAfter`, והוא מבני:** כשאין סכום באלמנט של התווית הוא סורק
+// `nextElementSibling`, `previousElementSibling` ו**את כל ילדי ההורה**,
+// ומחזיר את **המספר הראשון שנקרה**. `money` בתורו תופס כל ספרה במחרוזת —
+// ולכן מספר חשבון בן עשר ספרות חוזר כ„מסגרת אשראי של 514,220,276 ₪".
+// בחשבון שאין בו מסגרת התווית עדיין על הדף ואין לידה סכום, ולכן זו כמעט ודאות.
+//
+// ⚠ `valueAfter` **לא שונה בכוונה** — היתרה וההתחייבויות עוברות דרכו ועובדות.
+// מסגרת האשראי בלבד יוצאת ממנו למסלול קפדני:
+//   · שלילה מפורשת („לא קיימת", „אין", „ללא") → null מיידי, בלי לחפש מספר.
+//   · הסכום מתקבל רק אם הוא **באותו אלמנט אחרי התווית**, או **באח שכל
+//     הטקסט שלו הוא סכום**. אח עם טקסט חופשי אינו ראיה — הוא בדיוק המקור
+//     למספרי האשפה.
+//   · `discountCreditProbe` רושם מה נמצא ומאיזה מסלול, כדי שאפשר יהיה
+//     להכריע מן האחסון במקום לשאול.
+// ⚠ חגורה שנייה: מסגרת אשראי בשקלים אינה בת תשע ספרות ומעלה ללא אגורות.
+// מספר חשבון בדיסקונט הוא בן עשר ספרות ומזהה ישות בן תשע — בדיוק הצורה
+// שנקראה בטעות. זה **אינו** תחליף לכלל המיקום, אלא רשת ביטחון אחריו.
+const plausibleLimit=n=>Number.isFinite(n)&&Math.abs(n)<1e8;
+function creditLimitValue(labels){
+  const probe={at:new Date().toISOString(),tried:[]},NEG=/(לא\s+קיימ|לא\s+קיים|אין\s|ללא\s)/;
+  const PURE=/^[₪\s]*-?[\d,]+(?:\.\d{1,2})?[₪\s]*$/;
+  let found=null,negated=false;
+  for(const label of labels){
+    const nodes=[...document.querySelectorAll('button,p,div,span')]
+      .filter(el=>text(el).includes(label)).sort((a,b)=>text(a).length-text(b).length);
+    for(const el of nodes){
+      const t=text(el),after=t.slice(t.indexOf(label)+label.length);
+      if(NEG.test(t)){negated=true;probe.tried.push({label,why:'שלילה מפורשת',t:t.slice(0,90)});break}
+      // ⚠⚠ **גם „באותו אלמנט" היה לא בטוח, ונתפס בבדיקה.** רשימת המועמדים
+      // כוללת גם את ה-div ההורה, ושם הטקסט שאחרי התווית הוא חופשי:
+      // „מסגרת אשראי **חשבון 514220276 עו״ש**" החזיר 514,220,276.
+      // הכלל: הסכום חייב לבוא **מיד** אחרי התווית (אחרי רווח/נקודתיים/₪
+      // בלבד), ולא להימצא איפשהו בהמשך המשפט.
+      const im=after.match(/^[\s:₪]*(-?[\d,]+(?:\.\d{1,2})?)/);
+      const own=im?money(im[1]):null;
+      if(own!=null&&!plausibleLimit(own)){probe.tried.push({label,why:'נדחה — לא נראה כמסגרת',v:own});continue}
+      if(own!=null){found=own;probe.tried.push({label,why:'מיד אחרי התווית',t:after.slice(0,40),v:own});break}
+      // ⚠ ילדי ההורה **נשארים בסריקה** — החשבון שכן יש לו מסגרת נקרא נכון
+      // (50,000) ולא ידוע דרך איזה מסלול; הוצאתם הייתה מסכנת אותו.
+      // מה שהשתנה הוא **המבחן**, לא הרוחב: רק אלמנט שכל הטקסט שלו סכום.
+      for(const near of [el.nextElementSibling,el.previousElementSibling,...(el.parentElement?.children||[])]){
+        if(near===el)continue;
+        if(!near)continue;
+        const nt=text(near).trim();
+        if(!PURE.test(nt)){probe.tried.push({label,why:'אח נדחה — לא סכום נקי',t:nt.slice(0,50)});continue}
+        const n=money(nt);
+        if(n!=null&&!plausibleLimit(n)){probe.tried.push({label,why:'אח נדחה — לא נראה כמסגרת',v:n});continue}
+        if(n!=null){found=n;probe.tried.push({label,why:'אח שכולו סכום',t:nt.slice(0,40),v:n});break}
+      }
+      if(found!=null)break;
+    }
+    if(found!=null||negated)break;
+  }
+  probe.value=found;probe.negated=negated;
+  try{chrome.storage.local.set({discountCreditProbe:probe})}catch{}
+  return found;
+}
 function labelMoney(labels){for(const label of labels){const value=valueAfter(label);if(value!=null)return value}return null}
 function loanValue(s,labels){for(const label of labels){const m=s.match(new RegExp(`${label}[^\\d-]{0,35}(-?[\\d,]+(?:\\.\\d{1,2})?)`));if(m)return money(m[1])}return null}
 function loanDate(s,labels){for(const label of labels){const m=s.match(new RegExp(`${label}[^\\d]{0,30}(\\d{1,2}[./]\\d{1,2}[./]\\d{2,4})`));if(m)return m[1]}return''}
@@ -319,7 +377,7 @@ if(!isPrivate)await applyCollectSince();
 // הישנה. שומר הזהות מ-1.0.17 אימת את **מספר החשבון** בלבד, והשם עקף אותו:
 // הכסף היה נכון והתווית שיקרה. עכשיו השם נקרא באותו רגע שבו נקראים היתרה,
 // מספר החשבון והתנועות — אחרי שהמעבר אומת — ולכן כולם מאותו מצב של הדף.
-const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();const account=activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:labelMoney(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
+const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();const account=activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
 async function sync(keys,isPrivate=false){const out=[];for(const key of keys)out.push(await extract(key,isPrivate));return out}
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txCandidates().length,balance:currentBalance()});return}if(m?.type==='DISCOUNT_SELECT_ENTITY'){const want=String(m.entity||'');// עונים לפני הבחירה: המעבר טוען מחדש את הדף והורג את הסקריפט
 reply({ok:true,already:entityId(text(entityButton()))===want});if(entityId(text(entityButton()))!==want)selectEntity(want).catch(e=>note(`דיסקונט עסקי: ${e.message}`));return}if(m?.type==='DISCOUNT_GOTO_TX'){const has=txCandidates().length>0;// עונים לפני הלחיצה: הניווט הורג את הסקריפט, ותשובה שנשלחת אחריו לא תגיע לעולם
