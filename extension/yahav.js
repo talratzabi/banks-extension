@@ -38,7 +38,7 @@ async function yahavOpenLoans(tabId){await yahavRoute(tabId,'/main/home');const 
 async function runYahav(tabId){
   if(yahavBusy)return; yahavBusy=true;
   try{
-    await chrome.storage.local.set({syncStatus:'יהב: מגדיר טווח של 3 חודשים וקורא תנועות'});
+    await chrome.storage.local.set({syncStatus:'יהב: מחיל את טווח האיסוף וקורא תנועות'});
     await yahavRoute(tabId,'/main/accounts/current/');
     // טווח שלא נקבע אינו מוחק סנכרון שלם — קוראים את מה שהדף מציג, ומדווחים
     // שהתקופה מקוצרת כדי שהמשתמש לא יחשוב שקיבל שלושה חודשים. אותו עיקרון
