@@ -220,6 +220,38 @@ const leavesOf=el=>[...el.querySelectorAll('*')].filter(x=>!x.children.length&&t
 // ⚠ לדיסקונט שתי פריסות: מובייל (div.rc-strip-row) ודסקטופ (<tr> בטבלה). מדדתי בחלון צר
 // וראיתי רק את המובייל, ולכן הפרסר הראשון החזיר אפס שורות אצל המשתמש. קוראים את שתיהן.
 // המבחן שמפריד תנועות משורות הודעות הדואר: תאריך dd/MM/yy קצר וגם סכום ב-₪.
+// ⚠⚠ 25.08.2026 — **ספירה זולה, בלי `innerText`.**
+// `leavesOf` קורא `text(x)` על **כל עלה של כל שורה מועמדת**, ופעמיים
+// (גם ב-`filter` וגם ב-`map`), ו-`txCandidates` מריץ זאת על שלוש
+// קבוצות. `text` בנוי על `innerText`, שכופה חישוב פריסה — ובדף עם
+// אלפי עלים זו הפעולה היקרה ביותר בקובץ.
+// **ולולאת ההמתנה ברקע צריכה רק מספר.** נמדד: ישות ללא תנועות בטווח
+// (יתרה 154.92) שרפה 155 שניות — 12 סבבים × ~13 שניות — רק כדי לגלות
+// שוב ושוב ש-`rows` הוא 0.
+// ⚠ **`txCandidates` עצמו לא שונה במכוון:** `transactions()` בונה ממנו
+// את התנועות, וטקסט מוסתר היה נכנס לתיאורים ולסכומים. המסלול המדויק
+// נשאר לקריאה (פעם אחת), והזול משרת את הסקר (12 פעמים).
+function txRowCount(){
+  const groups=[[...document.querySelectorAll('div.rc-strip-row')],
+    [...document.querySelectorAll('table tr')],
+    [...document.querySelectorAll('[role="row"]')]];
+  let best=0;
+  for(const g of groups){
+    let n=0;
+    for(const el of g){
+      const leaves=[];
+      for(const x of el.querySelectorAll('*')){
+        if(x.children.length)continue;
+        const t=(x.textContent||'').replace(/\s+/g,' ').trim();
+        if(t)leaves.push(t);
+      }
+      if(leaves.some(v=>TXDATE.test(v))&&
+         leaves.filter(v=>/^-?[\d,]+\.\d{2}$/.test(v.replace(/₪/g,'').trim())).length>=2)n++;
+    }
+    if(n>best)best=n;
+  }
+  return best;
+}
 function txCandidates(){const groups=[[...document.querySelectorAll('div.rc-strip-row')],[...document.querySelectorAll('table tr')],[...document.querySelectorAll('[role="row"]')]];
 let best=[];for(const g of groups){const rows=g.map(el=>({el,leaves:leavesOf(el)}))
 .filter(x=>x.leaves.some(v=>TXDATE.test(v))&&x.leaves.filter(v=>/^-?[\d,]+\.\d{2}$/.test(v.replace(/₪/g,'').trim())).length>=2);
@@ -503,7 +535,7 @@ const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\
 const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${bodyText().slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}phase('סיום הקריאה');await phaseSave(id);
 return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
 async function sync(keys,isPrivate=false){const out=[];for(const key of keys)out.push(await extract(key,isPrivate));return out}
-chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txCandidates().length,
+chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txRowCount(),
 // ⚠⚠ 25.08.2026 — **`currentBalance()` הוסר מכאן, וזה היה 154 שניות.**
 // לולאת ההמתנה ברקע („פותח תנועות" → קריאה) שולחת `DISCOUNT_STATE`
 // **12 פעמים**, וקוראת מן התשובה **רק את `rows`**. אבל `currentBalance()`

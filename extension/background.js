@@ -1400,9 +1400,17 @@ await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: פותח ת
 try{await chrome.tabs.update(tab.id,{url:DISCOUNT_TX_URL})}catch(e){}
 await delay(2500);
 try{await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_GOTO_TX'}),20000,'מעבר לתנועות')}catch(e){}
+// ⚠⚠ 25.08.2026 — **ישות ללא תנועות בטווח שרפה כאן 155 שניות.**
+// הלולאה ממתינה ל-`rows>0`, ולחשבון ריק זה לעולם לא קורה — ולכן היא
+// מיצתה את כל 12 הסבבים. עכשיו: אם הדף **ענה** שלוש פעמים ברציפות
+// עם 0 שורות, הוא טעון ופשוט ריק, ואין טעם להמשיך להמתין.
+// ⚠ אין כאן סיכון לקיצור מוקדם: `extract` עצמו ממתין לטעינה בשנית
+// (עד 30 שניות), ולכן אם השורות יופיעו מאוחר יותר הן ייקראו.
+let emptyAnswers=0;
 for(let w=0;w<12;w++){await delay(2000);await prepareDiscountContent(tab.id);
 let st=null;try{st=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE'}),15000,'מצב')}catch(e){}
-if(st?.rows>0)break}
+if(st?.rows>0)break;
+if(st&&st.rows===0){if(++emptyAnswers>=3)break}else emptyAnswers=0}
 let r=null,lastErr='',lastProbe=null;
 for(let attempt=1;attempt<=3;attempt++){
 // ⚠ שומרים את הצילום לפני איפוס r, אחרת האבחון של הניסיון הכושל נמחק ואי אפשר לדעת למה נכשל.
