@@ -628,7 +628,22 @@ chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'
 // בין „פותח תנועות" לתחילת `extract`, בעוד `extract` עצמו לוקח 8 מ״ש.
 // ⚠ אומת שאף קורא ברקע אינו נוגע ב-`balance` מן התשובה הזו. הוא נשאר
 // זמין לפי בקשה מפורשת, כדי שלא לשבור קורא עתידי בשקט.
-balance:m.withBalance?currentBalance():null});return}if(m?.type==='DISCOUNT_SELECT_ENTITY'){const want=String(m.entity||'');// עונים לפני הבחירה: המעבר טוען מחדש את הדף והורג את הסקריפט
+balance:m.withBalance?currentBalance():null,
+// ⚠⚠ 25.08.2026, טל: „היתרה לבדה יוצרת בעיה — צריך גם סכום חובה
+// וסכום זכות." צודק: שתי תנועות נגדיות באותו סכום משאירות את היתרה
+// זהה. סכומי החובה והזכות **כן** משתנים, ולכן הם סוגרים את החור.
+// ⚠ הסכומים מלווים ב-`fromMs`/`toMs` **של השורות שבאמת מוצגות**.
+// בלעדיהם ההשוואה חסרת משמעות: הדף מציג חלון ברירת מחדל, והשמור
+// מכסה מ-`collectSince` — שני טווחים שונים, וסכומים שלא ניתן להשוות.
+// הרקע מסכם את השמור **רק בתוך אותו טווח**.
+totals:m.withBalance?(()=>{const rows=transactions();
+  const toMs=v=>{const q=String(v||'').match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}(?:\d{2})?)$/);
+    if(!q)return NaN;let y=Number(q[3]);if(y<100)y+=2000;return Date.UTC(y,Number(q[2])-1,Number(q[1]))};
+  let d=0,c=0,lo=null,hi=null;
+  for(const r of rows){d+=Number(r.debit)||0;c+=Number(r.credit)||0;
+    const t=toMs(r.date);if(Number.isFinite(t)){if(lo==null||t<lo)lo=t;if(hi==null||t>hi)hi=t}}
+  return{debit:Math.round(d*100)/100,credit:Math.round(c*100)/100,fromMs:lo,toMs:hi,n:rows.length};
+})():null});return}if(m?.type==='DISCOUNT_SELECT_ENTITY'){const want=String(m.entity||'');// עונים לפני הבחירה: המעבר טוען מחדש את הדף והורג את הסקריפט
 reply({ok:true,already:entityId(text(entityButton()))===want});if(entityId(text(entityButton()))!==want)selectEntity(want).catch(e=>note(`דיסקונט עסקי: ${e.message}`));return}if(m?.type==='DISCOUNT_GOTO_TX'){const has=txCandidates().length>0;// עונים לפני הלחיצה: הניווט הורג את הסקריפט, ותשובה שנשלחת אחריו לא תגיע לעולם
 reply({ok:true,already:has});if(!has){const link=[...document.querySelectorAll('a,button,[role="button"],[role="link"]')].find(el=>/לצפייה בתנועות|תנועות עו"ש/.test(text(el)));if(link)realClick(link)}return}if(m?.type==='DISCOUNT_GOTO_LOANS'){reply({ok:true});try{gotoLoans()}catch(e){note(`דיסקונט: ${e.message}`)}return}if(m?.type==='DISCOUNT_LOAN_STATE'){reply({ok:true,...loanProbe()});return}if(m?.type==='DISCOUNT_READ_LOANS'){reply({ok:true,loans:loans(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SYNC_SELECTED'){sync(m.keys||[],Boolean(m.private)).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:lastTxProbe}));return true}});
 let reported=false;const reportAuthenticated=()=>{if(!reported&&location.hash.includes('MY_ACCOUNT_HOMEPAGE')){reported=true;chrome.runtime.sendMessage({type:'DISCOUNT_AUTHENTICATED'}).catch(()=>{})}};setInterval(reportAuthenticated,800);reportAuthenticated();

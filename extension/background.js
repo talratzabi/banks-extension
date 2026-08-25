@@ -1440,10 +1440,32 @@ if(st&&st.rows===0){if(++emptyAnswers>=3)break}else emptyAnswers=0}
   const saved=(prevSt.accounts||[]).find(a=>a&&a.source==='discount-business'&&String(a.entityId)===String(key));
   if(saved&&Array.isArray(saved.transactions)&&saved.transactions.length&&saved.balance!=null){
     let live=null,liveErr='';
-    try{const sb=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE',withBalance:true}),15000,'יתרה');live=sb?sb.balance:null}
+    let liveTotals=null;
+    try{const sb=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE',withBalance:true}),15000,'יתרה');live=sb?sb.balance:null;liveTotals=sb?sb.totals:null}
     catch(e){liveErr=String(e?.message||e).slice(0,60)}
-    const same=live!=null&&Number.isFinite(Number(live))&&Math.abs(Number(live)-Number(saved.balance))<0.005;
-    try{await chrome.storage.local.set({discountSkip:{entity:String(key),live,saved:saved.balance,same,liveErr,at:new Date().toISOString()}})}catch{}
+    const balSame=live!=null&&Number.isFinite(Number(live))&&Math.abs(Number(live)-Number(saved.balance))<0.005;
+    // ⚠⚠ בקשת טל: היתרה לבדה אינה מספיקה — שתי תנועות נגדיות באותו
+    // סכום משאירות אותה זהה. לכן גם **סכום חובה וסכום זכות**, ורק
+    // בתוך טווח התאריכים שהדף באמת מציג (`fromMs`..`toMs`); השמור
+    // מכסה טווח רחב יותר, וסכום עליו היה חסר משמעות.
+    // ⚠ אם אי אפשר לחשב סכומים — **לא מדלגים.** ספק פועל לטובת סנכרון.
+    const lt=liveTotals;
+    let sumSame=false,savedD=null,savedC=null,inRange=0;
+    if(lt&&lt.n&&Number.isFinite(lt.fromMs)&&Number.isFinite(lt.toMs)){
+      const toMs=v=>{const q=String(v||'').match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}(?:\d{2})?)$/);
+        if(!q)return NaN;let y=Number(q[3]);if(y<100)y+=2000;return Date.UTC(y,Number(q[2])-1,Number(q[1]))};
+      let d=0,c=0;
+      for(const t of saved.transactions){const ms=toMs(t.date);
+        if(!Number.isFinite(ms)||ms<lt.fromMs||ms>lt.toMs)continue;
+        d+=Number(t.debit)||0;c+=Number(t.credit)||0;inRange++}
+      savedD=Math.round(d*100)/100;savedC=Math.round(c*100)/100;
+      sumSame=inRange>0&&Math.abs(savedD-lt.debit)<0.005&&Math.abs(savedC-lt.credit)<0.005;
+    }
+    const same=balSame&&sumSame;
+    try{await chrome.storage.local.set({discountSkip:{entity:String(key),live,saved:saved.balance,
+      balSame,sumSame,same,liveErr,inRange,
+      liveDebit:lt?lt.debit:null,liveCredit:lt?lt.credit:null,savedDebit:savedD,savedCredit:savedC,
+      at:new Date().toISOString()}})}catch{}
     if(same){
       await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: ${key} — היתרה לא השתנתה, מדלג`});
       out.push({...saved,lastSync:now,status:`${saved.status||'מסונכרן'} · היתרה לא השתנתה`});
