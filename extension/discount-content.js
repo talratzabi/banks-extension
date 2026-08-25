@@ -440,7 +440,9 @@ async function applyCollectSince(){
     const before=earliestRow(),beforeRows=rowCount();
     phase('טווח: earliestRow #2');
     from.focus();nativeSet(from,want);await wait(300);
+    phase('טווח: שדה מתאריך הוזן');
     to.focus();nativeSet(to,today);await wait(300);
+    phase('טווח: שדה עד תאריך הוזן');
     btn.click();
     phase('טווח: השדות הוזנו והכפתור נלחץ');
     // ⚠ 20.08.2026 — הריצה הראשונה רשמה rows:0: הטבלה מתרוקנת בזמן הבקשה, והקריאה
@@ -450,6 +452,19 @@ async function applyCollectSince(){
     // ⚠ 15 שניות ולא 30 — אותו תקציב. הטבלה נמדדה חיה כמתמלאת תוך פחות משנייה.
     for(let i=0;i<25;i++){
       await wait(600);const n=rowCount();
+      // ⚠⚠ 25.08.2026 — **תנאי היציאה הוא עכשיו היעד עצמו, לא פרוקסי.**
+      // נמדד: הלולאה רצה **28 שניות** ומיצתה את כל 25 הסבבים, בעוד
+      // הטבלה כבר הציגה 75 שורות. הסיבה: היציאה דרשה **יציבות ספירה**
+      // (`n===last` פעמיים ברציפות), ובטבלה שמתרנדרת מחדש הספירה
+      // מתנודדת ולכן התנאי לעולם אינו מתקיים.
+      // מה שבאמת רצינו לדעת: **האם הטבלה מגיעה לתאריך המבוקש.**
+      // עד היום זו הייתה שאלה יקרה — `earliestRow` הריץ `innerText` על
+      // כל שורה. אחרי המעבר ל-`textContent` היא עולה **2 מילישניות**
+      // (נמדד: „earliestRow #1" ב-15 מ״ש, „#2" ב-16). ⚠ כלומר תיקון
+      // הביצועים הוא מה שאיפשר את תיקון הנכונות — לא רק זירז אותו.
+      if(n>0&&Number.isFinite(wantMs)){const e=earliestRow();if(e&&e<=wantMs)break}
+      // יציבות הספירה נשארת כנפילה-לאחור, לחשבון שאין בו תנועה עד
+      // התאריך המבוקש ולכן היעד לעולם לא יושג.
       if(n>0&&n===last){if(++stable>=2)break}else stable=0;
       last=n;
       if(!retried&&n===0&&i===10){retried=true;btn.click()}
