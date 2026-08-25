@@ -336,13 +336,25 @@ async function assertEntityMatches(id,repaired=false){
     for(const a of st.discoveredAccounts||[])if(a.source==='discount-business'&&a.accountNumber)known[String(a.entityId||a.key).replace(/^.*\|/,'')]=String(a.accountNumber)}catch{}
   const mine=known[String(id)]||'';
   const others=Object.entries(known).filter(([k])=>k!==String(id)).map(([,v])=>v);
+  // ⚠⚠ 25.08.2026 — נמדד חסימה עם {want:"024844714", label:"024844714",
+  // expected:"2556371", seen:"0690300"}. **הבורר היה על הישות הנכונה**,
+  // ו-`0690300` **אינו אף אחד מארבעת החשבונות שהזיהוי מצא** — כלומר
+  // `activeAccount()` חטף מספר זר מן הדף (אותה משפחת באג כמו מסגרת
+  // האשראי: regex גורף על טקסט הגוף).
+  // לכן נוספה ראיה שנייה, **בלי להחליש את הגלאי**: אם מספר החשבון שלנו
+  // מופיע בדף ו**אף חשבון של ישות אחרת אינו מופיע** — זו הישות הנכונה,
+  // גם אם הקורא המספרי טעה. שתי ישויות בדף בבת אחת = דו-משמעות = חסימה.
+  const onPage=v=>!!v&&text(document.body).includes(v);
   let seen='',label='';
   // ⚠ 8 שניות ולא 15: יחד עם הרחבת הטווח זה חרג מתקציב 90 השניות של הרקע.
   for(let i=0;i<8;i++){
     seen=String(activeAccount().accountNumber||'');label=entityId(text(entityButton()));
     const okLabel=!label||label===String(id);
-    const okNumber=mine?seen===mine:(seen&&!others.includes(seen));
-    if(okLabel&&okNumber&&seen)return;
+    const othersOnPage=others.filter(onPage);
+    const okNumber=mine
+      ?(seen===mine||(onPage(mine)&&!othersOnPage.length))
+      :(seen&&!others.includes(seen));
+    if(okLabel&&okNumber&&(seen||onPage(mine)))return;
     await wait(1000)}
   // ⚠ 21.08.2026 — נמדד: {want:"024844714", expected:"2556371", seen:"9832685",
   //   label:"570012930"} — הדף היה על ינון והסנכרון ביקש את טל. כלומר הסנכרון
@@ -354,7 +366,15 @@ async function assertEntityMatches(id,repaired=false){
     try{await selectEntity(String(id))}catch(e){note(`דיסקונט: המעבר נכשל — ${e.message}`)}
     return assertEntityMatches(id,true);
   }
-  try{await chrome.storage.local.set({discountIdentityBlock:{want:String(id),expected:mine,seen,label,at:new Date().toISOString()}})}catch{}
+  // ⚠ הגשש רושם **מה בדיוק נראה בדף**, כדי שלא נצטרך לנחש מה היה
+  // `0690300`: כל מספרי החשבון שהזיהוי מכיר ומי מהם נוכח, וכל רצף בן
+  // 10 ספרות שנמצא. בלי זה „מוצג חשבון X" הוא מבוי סתום.
+  try{const body=text(document.body);
+    await chrome.storage.local.set({discountIdentityBlock:{want:String(id),expected:mine,seen,label,
+      minePresent:onPage(mine),othersPresent:others.filter(onPage),
+      tenDigits:[...new Set(body.match(/\d{10}/g)||[])].slice(0,12),
+      near:seen?(body.match(new RegExp(`.{0,40}${seen}.{0,40}`))||[''])[0]:'',
+      at:new Date().toISOString()}})}catch{}
   throw Error(`הדף לא עבר לישות ${id}: מוצג חשבון ${seen||'לא ידוע'}${mine?` במקום ${mine}`:''}${label&&label!==String(id)?` (הבורר מציג ${label})`:''} — הסנכרון נעצר כדי לא לשמור נתונים של חשבון אחר`);
 }
 async function extract(id,isPrivate=false){// ⚠ הלקח שחזר שלוש פעמים: להמתין לטעינה לפני קריאה. אחרי הניווט וההזרקה מחדש הדף

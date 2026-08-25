@@ -56,6 +56,7 @@ const chqSince=Number.isFinite(chqAsked)?Math.max(chqAsked,chqUntil-LEUMI_MAX_BA
 // והמקטע שיחזור יכיל אותו. בלי זה שיק מחוץ למקטע הראשון לא יימצא לעולם —
 // זה כשל 1.3.2 בלבוש חדש.
 let curFrom=null,curLatest=null;
+const chqProbe={at:new Date().toISOString(),applies:0,misses:[]};
 const ensureWindowFor=async(dateStr)=>{
   if(!Number.isFinite(chqSince))return;
   const ms=ilToMs(dateStr);
@@ -64,8 +65,19 @@ const ensureWindowFor=async(dateStr)=>{
   const from=Math.max(ms-864e5,chqSince);
   await applyLeumiRange(from,chqUntil);
   try{await openCurrentAccount();await loadAllRows()}catch(e){}
-  curFrom=from;curLatest=latestShown();
-  // אם התאריך עדיין מחוץ למקטע שחזר, אין מה לעשות — הדילוג ייספר ב-notFound.
+  // ⚠⚠ **25.08.2026 — כאן היה `curFrom=from`, וזה עלה 30 שיקים.**
+  // `from` הוא מה ש**ביקשנו**, לא מה שהדף הציג. כשההחלה נכשלת בשקט
+  // (הפאנל סגור, השדות לא נמצאו) הדף ממשיך להציג מקטע מאוחר — אבל
+  // הקוד הצהיר „החלון מתחיל בינואר". מאותו רגע **כל שיק שנפל בין
+  // ינואר לתאריך המוצג נחשב „כבר בחלון" ולא גרם לטעינה מחדש**, ודולג
+  // בשקט. נמדד: asked 94 · saved 64 · notFound 30, וכולם מינואר עד מרץ.
+  // **הכלל: חלון נרשם לפי מה שנצפה בדף, לעולם לא לפי מה שהתבקש.**
+  curFrom=earliestShown();curLatest=latestShown();
+  chqProbe.applies++;
+  // אם התאריך עדיין מחוץ למקטע שחזר — נרשם. „דילוג שקט" הוא באג בפני עצמו.
+  if(curFrom==null||curLatest==null||ms<curFrom||ms>curLatest)
+    chqProbe.misses.push({want:dateStr,
+      got:(curFrom==null?'?':ilShort(curFrom))+'..'+(curLatest==null?'?':ilShort(curLatest))});
 };
 // מיון **מהישן לחדש** — אותו כיוון שבו הבנק מגיש את המקטעים, כך שכל
 // מקטע נטען פעם אחת והשיקים שבתוכו נקצרים ברצף.
@@ -91,6 +103,10 @@ chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_IMAGE',reference,front:fresh[0],b
 await closeViewer();
 // ⚠ הדילוגים נשלחים הלאה, אחרת הרשומה תמשיך לומר „failed:0" על כשל מלא.
 if(notFound.length)out.__notFound=notFound.slice(0,20);
+// ⚠ הגשש נשמר תמיד, גם בהצלחה: „0 החלות" מול „12 החלות ו-0 החטאות"
+// הם שני מצבים שונים לגמרי שנראים זהה בדוח השיקים.
+try{chqProbe.misses=chqProbe.misses.slice(0,25);
+  await chrome.storage.local.set({leumiChequeWindows:chqProbe})}catch{}
 return out}
 function snapshot(){try{const dated=datedRows(),page=normalized(txt(document.body));return{url:location.href,tables:document.querySelectorAll('table').length,rows:gridRows().length,datedRows:dated.length,cols:dated[0]?dated[0].cells.length:0,firstRow:dated[0]?dated[0].cells.slice(0,10):[],tabs:accountTabs().length,chooser:txt(chooser()).slice(0,140),shekelBefore:/₪\s*-?[\d,]+\.\d{2}/.test(page),shekelAfter:/-?[\d,]+\.\d{2}\s*₪/.test(page),head:page.slice(0,500),...probe()}}catch(e){return{snapshotError:e.message,url:location.href}}}
 function probe(){try{const roleCounts={};for(const role of['table','grid','treegrid','row','rowgroup','gridcell','cell','columnheader','list','listitem']){const n=document.querySelectorAll(`[role="${role}"]`).length;if(n)roleCounts[role]=n}
