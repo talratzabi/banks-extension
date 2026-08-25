@@ -1441,7 +1441,20 @@ if(st&&st.rows===0){if(++emptyAnswers>=3)break}else emptyAnswers=0}
   if(saved&&Array.isArray(saved.transactions)&&saved.transactions.length&&saved.balance!=null){
     let live=null,liveErr='';
     let liveTotals=null;
-    try{const sb=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE',withBalance:true}),15000,'יתרה');live=sb?sb.balance:null;liveTotals=sb?sb.totals:null}
+    let liveEntity='';
+    // ⚠⚠ 25.08.2026 — **היתרה נקראה מישות אחרת, ונתפס בגשש.**
+    // נמדד: `{entity:"570012930", live:93188.32, saved:285292.66}` —
+    // ו-93,188.32 היא היתרה של **514649565**, הישות הקודמת. הדף עדיין
+    // לא סיים להחליף ישות כשהיתרה נקראה.
+    // הפעם זה יצא `same:false` במקרה — **אבל אילו היתרה הישנה הייתה
+    // מתלכדת עם השמורה, היינו מדלגים על סמך נתון של ישות אחרת.**
+    // זו אותה משפחת באג של 21.08 („סנכרן את החשבון של יובל, נתן לו
+    // שם של ינון"), ושם היא כבר גרמה לשמירת כסף בחשבון הלא נכון.
+    // לכן: **הבורר חייב להצביע על הישות המבוקשת**, אחרת אין מדלגים.
+    try{const sb=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE',withBalance:true}),15000,'יתרה');
+      liveEntity=String(sb&&sb.entity||'');
+      const trust=liveEntity===String(key);
+      live=trust&&sb?sb.balance:null;liveTotals=trust&&sb?sb.totals:null}
     catch(e){liveErr=String(e?.message||e).slice(0,60)}
     const balSame=live!=null&&Number.isFinite(Number(live))&&Math.abs(Number(live)-Number(saved.balance))<0.005;
     // ⚠⚠ בקשת טל: היתרה לבדה אינה מספיקה — שתי תנועות נגדיות באותו
@@ -1463,7 +1476,7 @@ if(st&&st.rows===0){if(++emptyAnswers>=3)break}else emptyAnswers=0}
     }
     const same=balSame&&sumSame;
     try{await chrome.storage.local.set({discountSkip:{entity:String(key),live,saved:saved.balance,
-      balSame,sumSame,same,liveErr,inRange,
+      balSame,sumSame,same,liveErr,inRange,liveEntity,entityMatch:liveEntity===String(key),
       liveDebit:lt?lt.debit:null,liveCredit:lt?lt.credit:null,savedDebit:savedD,savedCredit:savedC,
       at:new Date().toISOString()}})}catch{}
     if(same){
