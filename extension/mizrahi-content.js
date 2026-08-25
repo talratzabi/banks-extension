@@ -1,4 +1,6 @@
 (()=>{
+if(window.__mizrahiSyncLoaded)return;window.__mizrahiSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+
 const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();
 const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};
 const docs=()=>{const out=[document];for(const f of document.querySelectorAll('iframe'))try{if(f.contentDocument)out.push(f.contentDocument)}catch{}return out};

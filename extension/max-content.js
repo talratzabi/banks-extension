@@ -1,4 +1,6 @@
 (()=>{
+if(window.__maxSyncLoaded)return;window.__maxSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+
 const clean=v=>String(v||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim(),wait=ms=>new Promise(r=>setTimeout(r,ms));
 const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);return m?Number(m[0].replace(/,/g,'')):null};
 function authenticated(){return /(^|\.)max\.co\.il$/.test(location.hostname)&&/היי\s+[^\n(]+\s*\(:|התנתקו/.test(document.body?.innerText||'')}

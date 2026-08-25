@@ -1,4 +1,6 @@
 (()=>{
+if(window.__isracardSyncLoaded)return;window.__isracardSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+
 const clean=v=>String(v||'').replace(/[\u200e\u200f]/g,'').replace(/\s+/g,' ').trim();
 const amount=v=>{const m=clean(v).replace(/,/g,'').match(/-?\d+(?:\.\d+)?/);return m?Number(m[0]):0};
 const monthNames=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];

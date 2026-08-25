@@ -1,4 +1,6 @@
 (()=>{
+if(window.__poalimSyncLoaded)return;window.__poalimSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if(message?.type==='PING'){sendResponse({ok:true});return}
   if (message?.type === 'EXTRACT_ACCOUNT') extractAccount(message.account).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));

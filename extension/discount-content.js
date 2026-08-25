@@ -1,4 +1,15 @@
 (()=>{
+if(window.__discountSyncLoaded)return;window.__discountSyncLoaded=true;
+// ⚠⚠ 25.08.2026 — **שומר הזרקה.** טל ראה:
+// „A listener indicated an asynchronous response by returning true,
+//  but the message channel closed before a response was received".
+// הרקע מזריק את הקובץ שוב ושוב (`prepareDiscountContent`), ובלי שומר
+// **כל הזרקה מוסיפה `onMessage` נוסף באותו דף**. כמה מאזינים
+// מחזירים `true` על אותה הודעה, רק אחד עונה, והשאר סוגרים ערוץ
+// בלי תשובה — וזו בדיוק ההודעה.
+// ⚠ התקדים כבר היה בקובץ: `leumi-content.js` מחזיק `__leumiSyncLoaded`
+// מזמן, **ורק הוא** — ולכן לאומי לא סבל מזה ודיסקונט כן.
+
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 // הזיהוי עובר בין הישויות ולוקח זמן; בלי משוב הוא נראה תקוע, וזה מה שקרה ב-0.19.
 let lastSwitchErrors=[],lastTxProbe=null;

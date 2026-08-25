@@ -1,4 +1,6 @@
 (()=>{
+if(window.__fibiSyncLoaded)return;window.__fibiSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{
   if(m?.type==='FIBI_PING'){reply({ok:true});return}
   if(m?.type==='FIBI_SUMMARY'){try{reply({ok:true,data:summary()})}catch(e){reply({ok:false,error:e.message})}return}
