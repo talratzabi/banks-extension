@@ -4,6 +4,21 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 let lastSwitchErrors=[],lastTxProbe=null;
 const note=t=>{try{chrome.runtime.sendMessage({type:'DISCOUNT_PROGRESS',text:t}).catch(()=>{})}catch{}};
 const text=el=>(el?.innerText||el?.textContent||'').replace(/\s+/g,' ').trim();
+// ⚠⚠ 25.08.2026 — **`innerText` כופה חישוב פריסה מלא של הדף.**
+// נמדד: „קריאת התנועות לא השיב תוך 150 שניות", שלושה ניסיונות, וגלאי
+// הזהות לבדו סיים ב-155 שניות. הסיבה: `bodyText()` נקרא
+// ~32 פעמים (הגלאי + `activeAccount` בכל אחד מ-8 הסבבים, פעמיים עם
+// מסלול התיקון), ובדף דיסקונט עם מאות שורות כל קריאה כזו עולה שניות.
+// `textContent` **אינו כופה פריסה** ומחזיר את אותו טקסט לצרכים כאן:
+// חיפוש רצף ספרות ובדיקת `includes` על מספר חשבון. הפרש: הוא כולל גם
+// טקסט מוסתר — וזה דווקא לטובה כשמחפשים מספר חשבון שאולי אינו גלוי.
+// ⚠ **לא לשנות את `text()` עצמו** — הוא משמש לקריאת תוויות וערכים
+// שבהם ההבדל בין גלוי למוסתר כן משנה.
+// ⚠ `textContent` אינו מנרמל רווחים כמו `text()`, ותווית שמפוצלת בין
+// צמתים (רווח או שורה חדשה בין המילים) לא הייתה מתאימה יותר.
+// הנרמול נשאר; רק חישוב הפריסה נעלם.
+const tc=el=>(el?.textContent||'').replace(/\s+/g,' ').trim();
+const bodyText=()=>(document.body?.textContent||'').replace(/\s+/g,' ').trim();
 const money=v=>{const s=String(v??'').replace(/[−–]/g,'-');const m=s.match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};
 // ⚠ לחיצה רגילה אינה פותחת את בורר הישויות — אותו כשל בדיוק כמו בלאומי. הרכיב מאזין
 // לאירועי pointer, ובלי הרצף המלא התפריט נשאר סגור והזיהוי מדווח "לא זוהו ישויות".
@@ -69,8 +84,8 @@ return [already,menuEntities(),loose].sort((a,b)=>distinct(b)-distinct(a)||b.len
 // ⚠ מעבר בין ישויות טוען מחדש את הדף והורג את ה-content script — הערוץ נסגר באמצע
 // ('message channel closed'). לכן הזיהוי אינו עובר בין ישויות: הוא מונה אותן בלבד.
 // מספר החשבון והיתרה נקראים בסנכרון, ישות אחת בכל קריאה.
-async function ready(){for(let i=0;i<120;i++){const t=text(document.body);if(t.length>200&&ENTITY.test(t))return true;await wait(250)}return false}
-async function discover(){if(!await ready())throw Error(`דף דיסקונט לא נטען בתוך 30 שניות (${text(document.body).length} תווים) — ייתכן שההתחברות פגה`);const options=await entityOptions(),entities=[],seen=new Set();for(const b of options){const label=text(b),id=entityId(label);if(id&&!seen.has(id)){seen.add(id);entities.push({id,owner:label.replace(ENTITY,'').replace(/\s{2,}/g,' ').trim()})}}const back=entityButton();if(back)realClick(back);if(!entities.length)throw Error('לא זוהו ישויות בחיבור דיסקונט עסקי');const here=activeAccount(),cur=entityId(text(entityButton()));return entities.map(e=>({key:e.id,entityId:e.id,nickname:e.owner,owner:e.owner,branch:e.id===cur?here.branch:'',accountNumber:e.id===cur?here.accountNumber:'',balance:null}))}
+async function ready(){for(let i=0;i<120;i++){const t=bodyText();if(t.length>200&&ENTITY.test(t))return true;await wait(250)}return false}
+async function discover(){if(!await ready())throw Error(`דף דיסקונט לא נטען בתוך 30 שניות (${bodyText().length} תווים) — ייתכן שההתחברות פגה`);const options=await entityOptions(),entities=[],seen=new Set();for(const b of options){const label=text(b),id=entityId(label);if(id&&!seen.has(id)){seen.add(id);entities.push({id,owner:label.replace(ENTITY,'').replace(/\s{2,}/g,' ').trim()})}}const back=entityButton();if(back)realClick(back);if(!entities.length)throw Error('לא זוהו ישויות בחיבור דיסקונט עסקי');const here=activeAccount(),cur=entityId(text(entityButton()));return entities.map(e=>({key:e.id,entityId:e.id,nickname:e.owner,owner:e.owner,branch:e.id===cur?here.branch:'',accountNumber:e.id===cur?here.accountNumber:'',balance:null}))}
 async function privateAccountOptions(){const trigger=document.querySelector('button.accountDropdownMenu,[role="combobox"].accountDropdownMenu');if(!trigger)throw Error('בורר החשבונות הפרטיים לא נמצא');if(!document.querySelector('[role="menu"] [role="radio"]'))realClick(trigger);for(let i=0;i<40;i++){await wait(250);const rows=[...document.querySelectorAll('[role="menu"] [role="radio"]')];if(rows.length)return rows}return[]}
 const privateAccountFromRow=row=>{const parts=[...row.querySelectorAll('p')].map(text).filter(Boolean),raw=(parts[0]?.match(/\b\d{9,10}\b/)||[])[0]||'',full=raw.padStart(10,'0'),owner=parts[1]||'דיסקונט פרטי';return full?{key:`${full.slice(0,3)}-${full.slice(3)}`,nickname:owner,owner,branch:full.slice(0,3),accountNumber:full.slice(3),balance:null}:null};
 async function discoverPrivate(){for(let i=0;i<120;i++){try{const rows=await privateAccountOptions(),accounts=rows.map(privateAccountFromRow).filter(Boolean);if(accounts.length)return accounts}catch{}await wait(250)}throw Error('רשימת החשבונות הפרטיים לא נמצאה לאחר ההתחברות')}
@@ -105,9 +120,14 @@ async function switched(id,previous,ms){const until=Date.now()+ms;let steady=0;
   const account=activeAccount().accountNumber;return entityNow()===id&&!!account}
 // ⚠ מדידת שלבים. 154 שניות במעבר ישות אינן מוסברות ע"י `switched` לבדו
 // (51 קריאות?), ואין לי מדידה בפירוט הזה. **לא מנחשים — מודדים.**
-let phaseT0=0,phases=[];
-function phaseStart(){phaseT0=Date.now();phases=[]}
-function phase(name){phases.push({name,ms:Date.now()-phaseT0})}
+let phaseT0=0,phases=[],phaseEntity='';
+function phaseStart(id){phaseT0=Date.now();phases=[];phaseEntity=String(id||'')}
+// ⚠ נכתב **מיד**, ולא רק בסוף `extract`. הריצה שנכשלה ב-timeout לא
+// הגיעה לשמירה, ולכן המדידה שהייתי צריך בדיוק אז — אבדה.
+// גשש ששורד רק בהצלחה אינו גשש.
+function phase(name){phases.push({name,ms:Date.now()-phaseT0});
+  try{chrome.storage.local.set({discountPhases:{entity:phaseEntity,at:new Date().toISOString(),
+    total:Date.now()-phaseT0,phases}})}catch{}}
 async function phaseSave(id){try{await chrome.storage.local.set(
   {discountPhases:{entity:String(id||''),at:new Date().toISOString(),
    total:Date.now()-phaseT0,phases}})}catch{}}
@@ -142,8 +162,11 @@ for(let level=0;level<chain.length;level++){const el=chain[level];
   if(await switched(id,previous,3000)){phase(`מעבר הצליח אחרי ${tried.length} לחיצות`);try{chrome.storage.local.set({discountSelectWorked:{entity:id,level,path:brief(el),chain:tried,at:new Date().toISOString()}})}catch{}return}}}
 try{chrome.storage.local.set({discountSelectFailed:{entity:id,tried,candidates:ranked.map(brief),seen:entityNow(),account:activeAccount().accountNumber,at:new Date().toISOString()}})}catch{}
 throw Error(`דיסקונט לא עבר לישות ${id} — נוסו ${tried.length} לחיצות על ${ranked.length} מועמדים (${tried.join(' | ')})`)}
-function valueAfter(label){const nodes=[...document.querySelectorAll('button,p,div,span')].filter(el=>text(el).includes(label)).sort((a,b)=>text(a).length-text(b).length);for(const el of nodes){const own=money(text(el).slice(text(el).indexOf(label)+label.length));if(own!=null)return own;for(const near of [el.nextElementSibling,el.previousElementSibling,...(el.parentElement?.children||[])]){const n=money(text(near));if(n!=null)return n}}return null}
-function activeAccount(){const body=text(document.body);const candidates=[...body.matchAll(/\b(\d{10})\b/g)].map(m=>m[1]);const visible=(body.match(/\b(\d{10})\s+[^\d\n]{2,60}/)||[])[1]||'';const full=visible||candidates[0]||entityId(text(entityButton()));return{branch:full.length>=10?full.slice(0,3):'',accountNumber:full.length>=10?full.slice(3):full}}
+// ⚠ הסינון עבר ל-`textContent`: הוא רץ על **כל** button/p/div/span,
+// ו-`innerText` שם הוא חישוב פריסה לכל אלמנט בנפרד. הערך עצמו עדיין
+// נקרא ב-`text()` — שם דיוק התצוגה כן חשוב, ושם מדובר במעטים.
+function valueAfter(label){const nodes=[...document.querySelectorAll('button,p,div,span')].filter(el=>tc(el).includes(label)).sort((a,b)=>tc(a).length-tc(b).length);for(const el of nodes){const own=money(text(el).slice(text(el).indexOf(label)+label.length));if(own!=null)return own;for(const near of [el.nextElementSibling,el.previousElementSibling,...(el.parentElement?.children||[])]){const n=money(text(near));if(n!=null)return n}}return null}
+function activeAccount(){const body=bodyText();const candidates=[...body.matchAll(/\b(\d{10})\b/g)].map(m=>m[1]);const visible=(body.match(/\b(\d{10})\s+[^\d\n]{2,60}/)||[])[1]||'';const full=visible||candidates[0]||entityId(text(entityButton()));return{branch:full.length>=10?full.slice(0,3):'',accountNumber:full.length>=10?full.slice(3):full}}
 // לקח מלאומי: לא להניח <table>. קוראים גם רשת ARIA וגם טבלה אמיתית, ובוחרים את מה שיש.
 const CELL='[role="cell"],[role="gridcell"]';
 const DATEV=/\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}/;
@@ -188,7 +211,7 @@ return{url:location.href,rangeNote,tables:document.querySelectorAll('table').len
 datedRows:rows.length,headers:[...document.querySelectorAll('[role="columnheader"],table th')].map(x=>f(x.innerText)).filter(Boolean).slice(0,15),
 sample:rows.slice(0,3).map(r=>r.cells.map((v,i)=>i+'|'+v.slice(0,40))),
 links:[...document.querySelectorAll('a,button')].map(el=>f(text(el))).filter(t=>t&&t.length<45).slice(0,25),
-head:f(text(document.body)).slice(0,400)}}catch(e){return{probeError:e.message}}}
+head:f(bodyText()).slice(0,400)}}catch(e){return{probeError:e.message}}}
 // נמדד חי ב-#/OSH_LENTRIES_ALTAMIRA: כל תנועה היא div.rc-strip-row ובתוכה ארבעה עלים —
 // תאריך dd/MM/yy, תיאור, סכום חתום, יתרה. שורות הודעות הדואר נראות דומה אך חסר בהן ₪,
 // ותאריכן בן ארבע ספרות שנה — לכן הסינון על ₪ מפריד ביניהן.
@@ -255,7 +278,7 @@ function creditLimitValue(labels){
   let found=null,negated=false;
   for(const label of labels){
     const nodes=[...document.querySelectorAll('button,p,div,span')]
-      .filter(el=>text(el).includes(label)).sort((a,b)=>text(a).length-text(b).length);
+      .filter(el=>tc(el).includes(label)).sort((a,b)=>tc(a).length-tc(b).length);
     for(const el of nodes){
       const t=text(el),after=t.slice(t.indexOf(label)+label.length);
       if(NEG.test(t)){negated=true;probe.tried.push({label,why:'שלילה מפורשת',t:t.slice(0,90)});break}
@@ -294,7 +317,7 @@ function loanDate(s,labels){for(const label of labels){const m=s.match(new RegEx
 function finalPaymentDate(next,installments){const d=String(next||'').match(/^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$/),p=String(installments||'').match(/(\d+)\s*\/\s*(\d+)/);if(!d||!p)return'';let year=Number(d[3]);if(year<100)year+=2000;const paid=Number(p[1]),total=Number(p[2]),remainingAfterNext=total-paid-1;if(remainingAfterNext<0)return'';const date=new Date(year,Number(d[2])-1+remainingAfterNext,Number(d[1]));return`${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`}
 function loans(){const tables=[...document.querySelectorAll('table')],detail=tables.find(t=>/מספר הלוואה/.test(text(t))&&/יתרת הלוואה/.test(text(t))&&/תשלום קרוב/.test(text(t)));if(detail){return[...detail.querySelectorAll('tbody tr')].map((row,i)=>{const c=[...row.querySelectorAll('td,[role="cell"],[role="gridcell"]')].map(text);if(c.length<8)return null;const installments=c[4]||'',nextPaymentDate=c[6]||'';return{id:c[1]||String(i+1),type:c[0]||'הלוואה',balance:money(c[2]),originalPrincipal:null,repaymentMethod:c[3]||'',installments,interest:c[5]||'',nextPaymentDate,nextPayment:money(c[7]),endDate:finalPaymentDate(nextPaymentDate,installments)}}).filter(Boolean)}const candidates=[...document.querySelectorAll('tr,[role="row"],article,.card,[class*="loan" i],[class*="credit" i],li')].map(el=>({el,s:text(el)})).filter(x=>/הלווא|אשראי/.test(x.s)&&(/\b\d{8,14}\b/.test(x.s)||/יתרה|ריבית|החזר/.test(x.s)));const out=[],seen=new Set();for(const{x,s}of candidates){const id=(s.match(/\b\d{8,14}\b/)||[])[0]||String(out.length+1);if(seen.has(id))continue;const balance=loanValue(s,['יתרת הלוואה','יתרה לסילוק','יתרת קרן','יתרה']),nextPayment=loanValue(s,['החזר קרוב','תשלום קרוב','החזר חודשי','סכום החיוב הקרוב']),originalPrincipal=loanValue(s,['סכום הלוואה','קרן מקורית']);const interest=(s.match(/(?:שיעור )?ריבית[^%]{0,45}([A-Za-z+ .\d%-]*%)/)||[])[1]?.trim()||'';if(balance==null&&nextPayment==null&&!interest)continue;seen.add(id);out.push({id,type:'הלוואה',balance,originalPrincipal,nextPayment,nextPaymentDate:loanDate(s,['מועד תשלום קרוב','תשלום קרוב','חיוב קרוב']),endDate:loanDate(s,['מועד תשלום סופי','תאריך סיום','סיום ההלוואה']),interest})}return out}
 function mortgages(){const out=[];for(const row of document.querySelectorAll('[role="grid"] [role="row"]')){const c=[...row.querySelectorAll('[role="cell"],[role="gridcell"]')].map(text);if(c.length<6||!/הלווא|הלואה/.test(c[0]))continue;const installments=c[2]||'',near=c[5]||'',date=(near.match(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/)||[])[0]||'';out.push({id:`mortgage-${out.length+1}`,type:`משכנתא · ${c[0]}`,originalPrincipal:money(c[1]),installments,balance:money(c[3]),interest:c[4]||'',nextPayment:money(near),nextPaymentDate:date,endDate:finalPaymentDate(date,installments),isMortgage:true})}return out}
-function loanProbe(){return{url:location.href,heading:[...document.querySelectorAll('h1,h2,h3')].map(text).filter(Boolean).slice(0,12),loanCount:loans().length,mortgageCount:mortgages().length,head:text(document.body).slice(0,700)}}
+function loanProbe(){return{url:location.href,heading:[...document.querySelectorAll('h1,h2,h3')].map(text).filter(Boolean).slice(0,12),loanCount:loans().length,mortgageCount:mortgages().length,head:bodyText().slice(0,700)}}
 function gotoLoans(){const top=document.querySelector('#LOANS_MAIN_WORLD-link');if(!top)throw Error('לא נמצא תפריט הלוואות וערבויות');realClick(top.querySelector('img')||top);setTimeout(()=>{const links=[...document.querySelectorAll('a,button,[role="menuitem"],[role="option"],li')];const target=links.find(el=>/^(פירוט הלוואות|הלוואות|ריכוז הלוואות|הלוואות פעילות)$/.test(text(el)))||links.find(el=>/פירוט הלוואות|ריכוז הלוואות|הלוואות פעילות/.test(text(el)));const clickable=target?.closest?.('a,button')||target;if(clickable)realClick(clickable)},700)}
 // ⚠ 20.08.2026 — נמדד חי דרך CDP על הדף עצמו, ולא נוחש:
 //   input#fromDate (רכיב db-datepicker, placeholder dd/mm/yyyy, ערך התחלתי 01/05/2026)
@@ -382,7 +405,7 @@ async function assertEntityMatches(id,repaired=false){
   // לכן נוספה ראיה שנייה, **בלי להחליש את הגלאי**: אם מספר החשבון שלנו
   // מופיע בדף ו**אף חשבון של ישות אחרת אינו מופיע** — זו הישות הנכונה,
   // גם אם הקורא המספרי טעה. שתי ישויות בדף בבת אחת = דו-משמעות = חסימה.
-  // ⚠ 25.08.2026 — היה `text(document.body)` **בתוך** הפונקציה, כלומר
+  // ⚠ 25.08.2026 — היה `bodyText()` **בתוך** הפונקציה, כלומר
   // קריאת `innerText` על כל הגוף **לכל מועמד בנפרד**: פעם ל-`mine` ועוד
   // אחת לכל ישות אחרת, בכל אחד מ-8 הסבבים, ופעמיים עם מסלול התיקון.
   // `innerText` כופה חישוב פריסה מלא. הגוף נקרא עכשיו **פעם אחת לסבב**.
@@ -390,7 +413,7 @@ async function assertEntityMatches(id,repaired=false){
   let seen='',label='';
   // ⚠ 8 שניות ולא 15: יחד עם הרחבת הטווח זה חרג מתקציב 90 השניות של הרקע.
   for(let i=0;i<8;i++){
-    const bodyText=text(document.body);
+    const bodyText=bodyText();
     seen=String(activeAccount().accountNumber||'');label=entityId(text(entityButton()));
     const okLabel=!label||label===String(id);
     const othersOnPage=others.filter(v=>onPage(v,bodyText));
@@ -429,7 +452,7 @@ async function assertEntityMatches(id,repaired=false){
   // ⚠ הגשש רושם **מה בדיוק נראה בדף**, כדי שלא נצטרך לנחש מה היה
   // `0690300`: כל מספרי החשבון שהזיהוי מכיר ומי מהם נוכח, וכל רצף בן
   // 10 ספרות שנמצא. בלי זה „מוצג חשבון X" הוא מבוי סתום.
-  try{const body=text(document.body);
+  try{const body=bodyText();
     await chrome.storage.local.set({discountIdentityBlock:{want:String(id),expected:mine,seen,label,
       minePresent:onPage(mine,body),othersPresent:others.filter(v=>onPage(v,body)),
       tenDigits:[...new Set(body.match(/\d{10}/g)||[])].slice(0,12),
@@ -437,7 +460,7 @@ async function assertEntityMatches(id,repaired=false){
       at:new Date().toISOString()}})}catch{}
   throw Error(`הדף לא עבר לישות ${id}: מוצג חשבון ${seen||'לא ידוע'}${mine?` במקום ${mine}`:''}${label&&label!==String(id)?` (הבורר מציג ${label})`:''} — הסנכרון נעצר כדי לא לשמור נתונים של חשבון אחר`);
 }
-async function extract(id,isPrivate=false){phaseStart();// ⚠ הלקח שחזר שלוש פעמים: להמתין לטעינה לפני קריאה. אחרי הניווט וההזרקה מחדש הדף
+async function extract(id,isPrivate=false){phaseStart(id);// ⚠ הלקח שחזר שלוש פעמים: להמתין לטעינה לפני קריאה. אחרי הניווט וההזרקה מחדש הדף
 // עדיין מתרנדר, וקריאה מיידית מחזירה null ומפילה את הסנכרון.
 // ⚠⚠ 25.08.2026 — **הלולאה הזו היא רוב זמן הסנכרון בדיסקונט.**
 // נמדד: 304 שניות בין „פותח תנועות" ל-`discountIdentityPass`.
@@ -475,7 +498,7 @@ if(!isPrivate)await applyCollectSince();phase('אחרי החלת הטווח');
 const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();phase('אחרי גלאי הזהות');const known=isPrivate?null:await knownAccountFor(id);
 // ⚠ המספר שהזיהוי קרא גובר על גריפה מטקסט הדף. נפילה-לאחור נשמרת
 // לדיסקונט פרטי ולכל מקרה שבו הישות אינה ברשימה.
-const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}phase('סיום הקריאה');await phaseSave(id);
+const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${bodyText().slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}phase('סיום הקריאה');await phaseSave(id);
 return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
 async function sync(keys,isPrivate=false){const out=[];for(const key of keys)out.push(await extract(key,isPrivate));return out}
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txCandidates().length,balance:currentBalance()});return}if(m?.type==='DISCOUNT_SELECT_ENTITY'){const want=String(m.entity||'');// עונים לפני הבחירה: המעבר טוען מחדש את הדף והורג את הסקריפט
