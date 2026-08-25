@@ -1406,9 +1406,25 @@ try{await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_GOTO_TX'}),
 // עם 0 שורות, הוא טעון ופשוט ריק, ואין טעם להמשיך להמתין.
 // ⚠ אין כאן סיכון לקיצור מוקדם: `extract` עצמו ממתין לטעינה בשנית
 // (עד 30 שניות), ולכן אם השורות יופיעו מאוחר יותר הן ייקראו.
-let emptyAnswers=0;
-for(let w=0;w<12;w++){await delay(2000);await prepareDiscountContent(tab.id);
-let st=null;try{st=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE'}),15000,'מצב')}catch(e){}
+// ⚠⚠ 25.08.2026 — **מדידה, אחרי שניחשתי כאן פעמיים.** הלולאה הזו
+// אחראית ל-155 שניות שחוזרות בכל ריצה, ואין לי נתון מתוכה: לא כמה
+// סבבים רצו, לא כמה עלה כל אחד, ולא אם `DISCOUNT_STATE` בכלל השיב.
+// `discountWaitProbe` רושם את שלושת אלה. **בלי זה כל תיקון נוסף כאן
+// הוא ניחוש רביעי.**
+let emptyAnswers=0;const waitProbe={at:new Date().toISOString(),entity:String(key),rounds:[]};
+const waitT0=Date.now();
+for(let w=0;w<12;w++){
+const rt0=Date.now();
+await delay(2000);
+const tPrep=Date.now();let prepErr='';
+try{await prepareDiscountContent(tab.id)}catch(e){prepErr=String(e?.message||e).slice(0,60)}
+const tPrepDone=Date.now();
+let st=null,stErr='';
+try{st=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE'}),15000,'מצב')}catch(e){stErr=String(e?.message||e).slice(0,60)}
+waitProbe.rounds.push({r:w+1,ms:Date.now()-rt0,
+  prepMs:tPrepDone-tPrep,stateMs:Date.now()-tPrepDone,
+  rows:st?st.rows:null,prepErr,stErr});
+try{await chrome.storage.local.set({discountWaitProbe:{...waitProbe,total:Date.now()-waitT0}})}catch{}
 if(st?.rows>0)break;
 if(st&&st.rows===0){if(++emptyAnswers>=3)break}else emptyAnswers=0}
 let r=null,lastErr='',lastProbe=null;
