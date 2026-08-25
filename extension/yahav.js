@@ -98,10 +98,29 @@ let creditLimit=creditFrom(home.text),balance=home.transactions[0].balance;
     for(let i=0;i<16&&!loans.length;i++){await delay(400);list=await yahavRead(tabId);loans=list.loans||[]}
     if(loans.length){const clicked=await chrome.scripting.executeScript({target:{tabId},func:()=>{const clean=v=>String(v||'').replace(/\s+/g,' ').trim(),rows=[...document.querySelectorAll('[role="row"],tr')],loanRow=rows.find(r=>{const cells=[...r.querySelectorAll('[role="gridcell"],td')];return cells.length>=6&&!/סוג האשראי/.test(clean(r.textContent))}),link=[...document.querySelectorAll('a')].find(x=>clean(x.textContent).includes('קישור לעמוד'))||loanRow?.querySelector('a,button,[role="button"]');if(link){link.click();return true}if(loanRow){loanRow.click();return true}return false}});if(!clicked.some(x=>x.result))throw Error('שורת ההלוואה לא נפתחה');let d=null;for(let i=0;i<20;i++){await delay(350);await prepareYahav(tabId);const details=await yahavRead(tabId);if(details.detail?.balance!=null&&details.detail?.endDate){d=details.detail;break}}if(!d)throw Error('פירוט ההלוואה לא נטען לאחר לחיצה');loans[0]={...loans[0],...Object.fromEntries(Object.entries(d).filter(([,v])=>v!==''&&v!=null)),...yahavInstallments(d.startDate,d.nextPaymentDate,d.endDate)}}
 
+    /* ⚠⚠ 25.08.2026 — טל: „הרצתי, נעלמה המסגרת."
+       **המסגרת לא נשברה — היא נמחקה.** הרשומה נבנית מחדש בכל סנכרון,
+       ולכן קריאה שלא מצאה מסגרת דרסה את הערך הידוע ב-null.
+       ⚠ נמדד מן האחסון: הפרוב החזיר `near:[]` — כלומר סריקה של **כל**
+       אלמנט-עלה בדף לא מצאה את המחרוזת „מסגרת" ולו פעם אחת.
+       `document.body.innerText` פשוט אינו מכיל אותה ברגע הקריאה,
+       **ולכן שום רגקס לא היה עוזר.** זה גם מסביר למה „עבד בעבר":
+       תלוי במסך שבו הדף נמצא, לא בקוד.
+       הכלל כאן: **ערך ידוע אינו נמחק בגלל קריאה שנכשלה** — אותו כלל
+       של „כרטיס מחוק לא יחזור מהסנכרון", בכיוון ההפוך. */
+    const prevYahav=((await chrome.storage.local.get({accounts:[]})).accounts||[]).find(a=>a&&a.source==='yahav'&&String(a.accountNumber)===String(account.accountNumber));
+    let creditKept=false;
+    if(creditLimit==null&&prevYahav&&prevYahav.creditLimit!=null){creditLimit=prevYahav.creditLimit;creditKept=true}
     const now=new Date().toISOString(),selectionKey=`yahav|${account.branch}-${account.accountNumber}`,availableCredit=creditLimit==null?null:balance+creditLimit;
     const row={...account,nickname:home.owner||'טל',owner:home.owner||'טל',balance,creditLimit,availableCredit,transactions:home.transactions,loans,source:'yahav',sourceLabel:'יהב',selectionKey,id:`yahav-${account.branch}-${account.accountNumber}`,lastSync:now,status:'מסונכרן'};
     const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],accountKinds:{}}),accounts=[...state.accounts.filter(a=>a.source!=='yahav'),row],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('yahav|')),selectionKey])],accountKinds={...state.accountKinds,[selectionKey]:'private'};
     await chrome.storage.local.set({accounts,selectedAccountKeys,accountKinds,accountFilter:'both',pendingYahav:false,
+  /* ⚠ פרוב שאומר **באיזה מסך היינו**, לא רק מה לא נמצא. */
+  yahavTextProbe:{at:now,len:String(home.text||'').length,
+    hasMasgeret:String(home.text||'').indexOf('מסגרת')>=0,
+    hasOshRow:String(home.text||'').indexOf('חשבון עו״ש')>=0,
+    creditLimit,creditKept,head:String(home.text||'').slice(0,220)},
+
   // ⚠ גם בסיום — מוחקים רק את יהב, לא את הבורר של בנקים אחרים.
   discoveredAccounts:(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts.filter(a=>a&&a.source!=='yahav'),
   syncStatus:`יהב: הסנכרון הסתיים — ${home.transactions.length} תנועות ו־${loans.length} הלוואות`,lastAutoSync:now});
