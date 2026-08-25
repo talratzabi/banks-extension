@@ -167,10 +167,42 @@ function privateTriggerProbe(){
   out.distinctNumbers=[...new Set((f(document.body.textContent).match(/\b\d{2,3}[-\/]\d{5,9}\b/g)||[]))].slice(0,10);
   return out;
 }
-async function privateAccountOptions(deadline=0){const trigger=document.querySelector('button.accountDropdownMenu,[role="combobox"].accountDropdownMenu');
-if(!trigger){try{await chrome.storage.local.set({discountPrivateTriggerProbe:privateTriggerProbe()})}catch(e){}
-throw Error('בורר החשבונות הפרטיים לא נמצא')}if(!document.querySelector('[role="menu"] [role="radio"]'))realClick(trigger);for(let i=0;i<40;i++){if(deadline&&Date.now()>deadline)break;await wait(250);const rows=[...document.querySelectorAll('[role="menu"] [role="radio"]')];if(rows.length)return rows}return[]}
-const privateAccountFromRow=row=>{const parts=[...row.querySelectorAll('p')].map(text).filter(Boolean),raw=(parts[0]?.match(/\b\d{9,10}\b/)||[])[0]||'',full=raw.padStart(10,'0'),owner=parts[1]||'דיסקונט פרטי';return full?{key:`${full.slice(0,3)}-${full.slice(3)}`,nickname:owner,owner,branch:full.slice(0,3),accountNumber:full.slice(3),balance:null}:null};
+// ⚠⚠ 25.08.2026 — **הסלקטורים נכתבו מן המדידה, לא מהשערה.**
+// `discountPrivateTriggerProbe` מן הדף החי (`#/MY_ACCOUNT_HOMEPAGE`):
+//   <button class="dropdown-toggle commonDropdown__button">0113392534 רצבי טל…
+//   <li class="commonDropdown__menuItem selected">113392534 רצבי טל
+//   <li class="commonDropdown__menuItem">150497352 רצבי טל,קידר אושר
+//   <li class="commonDropdown__menuItem">163327612 רצבי טל,רצבי סופי טל
+// **שלושה חשבונות**, ו-`menus=0` — כלומר `[role="menu"] [role="radio"]`
+// שהקוד חיכה לו **אינו קיים בדף הזה כלל**, ולכן הזיהוי לא הצליח לעולם.
+// ⚠ הסלקטורים הישנים נשארים כנפילה-לאחור: לא נמדדו ככושלים בפריסה אחרת.
+// ⚠ הרשימה כבר ב-DOM (Angular מרנדר סגור). לוחצים **רק** אם אין פריטים —
+// לחיצה על בורר פתוח הייתה סוגרת אותו.
+const PRIVATE_TRIGGER='button.commonDropdown__button,.dropdown-toggle.commonDropdown__button,button.accountDropdownMenu,[role="combobox"].accountDropdownMenu';
+const PRIVATE_ITEMS='li.commonDropdown__menuItem,button.commonDropdown__menuItemBtn,[role="menu"] [role="radio"]';
+async function privateAccountOptions(deadline=0){
+  const found=()=>[...document.querySelectorAll(PRIVATE_ITEMS)];
+  let rows=found();
+  if(!rows.length){
+    const trigger=document.querySelector(PRIVATE_TRIGGER);
+    if(!trigger){try{await chrome.storage.local.set({discountPrivateTriggerProbe:privateTriggerProbe()})}catch(e){}
+      throw Error('בורר החשבונות הפרטיים לא נמצא')}
+    realClick(trigger);
+    for(let i=0;i<40;i++){
+      if(deadline&&Date.now()>deadline)break;
+      await wait(250);
+      rows=found();
+      if(rows.length)break;
+    }
+  }
+  try{await chrome.storage.local.set({discountPrivateOptions:{n:rows.length,at:new Date().toISOString(),
+    sample:rows.slice(0,4).map(r=>String(r.textContent||'').replace(/\s+/g,' ').trim().slice(0,44))}})}catch(e){}
+  return rows;
+}
+const // ⚠ הפרסור הסתמך על <p> בתוך השורה. בדף שנמדד הטקסט **מחובר**
+// („113392534רצבי טל") ואין <p>, ולכן נוספה נפילה-לאחור:
+// המספר נלקח מכל הטקסט, והבעלים הוא מה שנשאר אחרי הסרתו.
+privateAccountFromRow=row=>{const parts=[...row.querySelectorAll("p")].map(text).filter(Boolean),whole=text(row),raw=(parts[0]?.match(/\b\d{9,10}\b/)||whole.match(/\b\d{9,10}\b/)||[])[0]||"",full=raw.padStart(10,"0"),owner=parts[1]||whole.replace(raw,"").replace(/^[\s,:-]+/,"").trim()||"דיסקונט פרטי";return full?{key:`${full.slice(0,3)}-${full.slice(3)}`,nickname:owner,owner,branch:full.slice(0,3),accountNumber:full.slice(3),balance:null}:null};
 // ⚠⚠ 25.08.2026 — טל: „הסנכרון נכשל." נמדד פעמיים:
 // „שגיאה בדיסקונט פרטי: זיהוי חשבון פרטי לא השיב תוך 30 שניות".
 // **השורש — אותו באג בדיוק שעלה שבעה סבבים היום (1.10.5):**
