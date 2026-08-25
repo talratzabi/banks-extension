@@ -39,6 +39,10 @@
   // תאריך שגוי בהגדרות היה מייצר מאות לחיצות על הבורר.
   let back=valid?((now.getFullYear()-want.getFullYear())*12+(now.getMonth()-want.getMonth())):3;
   if(!Number.isFinite(back)||back<0)back=0;
+  // ⚠ נמדד 25.08.2026 (טל): **ביהב יש נתונים רק כחצי שנה אחורה.**
+  // התקרה נשארת 36 ולא 6 במכוון — הגבול האמיתי הוא של האתר, והוא
+  // עוצר את הבורר מעצמו. קיבוע 6 כאן היה הופך הנחה לקוד, ואם יהב
+  // ירחיב את הטווח נפסיד אותו בלי לדעת. **הבורר הוא מקור האמת.**
   if(back>36)back=36;
   const wantDay=valid?want.getDate():now.getDate();
   const report=async(ok,why,extra)=>{try{await chrome.storage.local.set({yahavRangeApplied:
