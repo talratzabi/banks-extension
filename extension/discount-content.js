@@ -464,7 +464,21 @@ async function applyCollectSince(){
     // ⚠ 20.08.2026 — הריצה הראשונה רשמה rows:0: הטבלה מתרוקנת בזמן הבקשה, והקריאה
     // חזרה לפני שהיא התמלאה. לכן לא מספיק „המוקדמת השתנתה" — ממתינים לטבלה
     // **לא ריקה ויציבה** בשתי דגימות רצופות, ואם נשארה ריקה — לוחצים שוב פעם אחת.
-    let stable=0,last=-1,retried=false;
+    // ⚠⚠ 25.08.2026 — **כאן נתקע הסנכרון, ונמדד במדויק.**
+    // `discountPrevPhases` של הריצה שנתקעה:
+    //   11,298 מ״ש „השדות הוזנו והכפתור נלחץ" → ואז **שקט עד 60,010**.
+    // ובריצה שהצליחה: 2,165 → 27,143 „לולאת ההמתנה נגמרה (0 שורות)",
+    // כלומר **25 שניות**.
+    // הלולאה חסומה ב-25 סבבים × 600 מ״ש = 15 שניות **לפי ספירה בלבד**,
+    // אבל כשהדף עסוק כל סבב עולה 1–2 שניות — ואז היא רצה 25 ואפילו
+    // 48 שניות, ומפילה את `DISCOUNT_SYNC_SELECTED` ל-timeout ולניסיון חוזר.
+    // ⚠ **תקרת סבבים אינה תקרת זמן.** נוסף גבול שעון־קיר, שאינו תלוי
+    // במחיר הסבב.
+    // ⚠ 12 שניות ולא פחות: בריצה שהצליחה הלולאה מיצתה 25 סבבים
+    // והסתיימה עם **0 שורות** — כלומר המתנה ארוכה יותר ממילא לא עזרה,
+    // ו-`extract` המשיך וקרא בהצלחה. הקיצור אינו גורע נתונים.
+    const loopDeadline=Date.now()+12000;
+    let stable=0,last=-1,retried=false,hitDeadline=false;
     // ⚠ 15 שניות ולא 30 — אותו תקציב. הטבלה נמדדה חיה כמתמלאת תוך פחות משנייה.
     for(let i=0;i<25;i++){
       await wait(600);const n=rowCount();
@@ -484,8 +498,9 @@ async function applyCollectSince(){
       if(n>0&&n===last){if(++stable>=2)break}else stable=0;
       last=n;
       if(!retried&&n===0&&i===10){retried=true;btn.click()}
+      if(Date.now()>loopDeadline){hitDeadline=true;break}
     }
-    phase(`טווח: לולאת ההמתנה נגמרה (${last} שורות)`);
+    phase(`טווח: לולאת ההמתנה נגמרה (${last} שורות${hitDeadline?', גבול זמן':''})`);
     await report('הופעל',{to:today,toValue:to.value,rows:rowCount(),beforeRows,earliest:(()=>{const e=earliestRow();return e?new Date(e).toISOString().slice(0,10):''})(),earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried,value:from.value})
     phase('טווח: הדיווח נכתב');
     note(`דיסקונט: טווח מ-${want}`);
