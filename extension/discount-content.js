@@ -330,6 +330,23 @@ async function applyCollectSince(){
   }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
 }
 // שומר הזהות: מוודא שהדף באמת מציג את הישות שביקשנו, לפי מספרי החשבון שהזיהוי כבר קרא.
+// ⚠⚠ 25.08.2026 — **מספר החשבון לא נקרא יותר מן הדף כשהוא כבר ידוע.**
+// נמדד: `activeAccount()` החזיר `0690300` — מספר החשבון של הנעבר בשורת
+// תנועה („העברה לטל רצבי בנק 12 ל 12-645-0000690300"), כי הוא גורף
+// רצפים בני 10 ספרות מטקסט הגוף. מסך התנועות **אינו מציג את מספר
+// החשבון של הישות כלל**, ולכן אין שם מה למצוא.
+// ⚠ זו לא הייתה רק חסימה: `extract` מחזיר `{...activeAccount()}` —
+// כלומר החשבון היה **נשמר כ-0690300**. הזיהוי כבר קרא את המספר הנכון
+// פעם אחת, ואין שום סיבה לנחש אותו שוב בכל סנכרון.
+async function knownAccountFor(id){
+  try{const st=await chrome.storage.local.get({discoveredAccounts:[]});
+    for(const a of st.discoveredAccounts||[]){
+      if(a.source!=='discount-business'||!a.accountNumber)continue;
+      if(String(a.entityId||a.key).replace(/^.*\|/,'')===String(id))
+        return{branch:String(a.branch||''),accountNumber:String(a.accountNumber)};
+    }}catch{}
+  return null;
+}
 async function assertEntityMatches(id,repaired=false){
   let known={};
   try{const st=await chrome.storage.local.get({discoveredAccounts:[]});
@@ -351,10 +368,27 @@ async function assertEntityMatches(id,repaired=false){
     seen=String(activeAccount().accountNumber||'');label=entityId(text(entityButton()));
     const okLabel=!label||label===String(id);
     const othersOnPage=others.filter(onPage);
+    // ⚠⚠ **בורר הישות הוא ראיה חיובית, ולא רק בדיקת שלילה.**
+    // נמדד: {label:"024844714"=want, minePresent:false, othersPresent:[]}
+    // — הבורר על הישות הנכונה, מספר החשבון שלנו פשוט **אינו על המסך**
+    // הזה, ואף חשבון של ישות אחרת אינו שם. דרישת `onPage(mine)` חסמה
+    // סנכרון תקין לחלוטין.
+    // ⚠ **זו החלשה מכוונת, וזה הגבול שלה:** בכשל שנמדד ב-21.08
+    // ({want:"024844714", label:"570012930"}) הבורר הצביע על הישות
+    // ה**לא** נכונה — ושם `labelConfirms` שקר והחסימה נשארת. וכל עוד
+    // חשבון של ישות אחרת נראה בדף, `othersOnPage` חוסם כמו קודם.
+    const labelConfirms=!!label&&label===String(id);
     const okNumber=mine
-      ?(seen===mine||(onPage(mine)&&!othersOnPage.length))
+      ?(seen===mine||((onPage(mine)||labelConfirms)&&!othersOnPage.length))
       :(seen&&!others.includes(seen));
-    if(okLabel&&okNumber&&(seen||onPage(mine)))return;
+    if(okLabel&&okNumber&&(seen||onPage(mine)||labelConfirms)){
+      // ⚠ נרשם **איך** התקבל האישור. „עבר" דרך הבורר בלבד הוא מצב חלש
+      // יותר מ„עבר" דרך התאמת מספר, ואם אי פעם יישמרו נתונים של ישות
+      // אחרת — זו הרשומה שתגיד מאיזה מסלול זה הגיע.
+      try{await chrome.storage.local.set({discountIdentityPass:{want:String(id),
+        via:seen===mine?'מספר תואם':(onPage(mine)?'החשבון בדף':'בורר הישות בלבד'),
+        seen,label,minePresent:onPage(mine),at:new Date().toISOString()}})}catch{}
+      return}
     await wait(1000)}
   // ⚠ 21.08.2026 — נמדד: {want:"024844714", expected:"2556371", seen:"9832685",
   //   label:"570012930"} — הדף היה על ינון והסנכרון ביקש את טל. כלומר הסנכרון
@@ -397,7 +431,10 @@ if(!isPrivate)await applyCollectSince();
 // הישנה. שומר הזהות מ-1.0.17 אימת את **מספר החשבון** בלבד, והשם עקף אותו:
 // הכסף היה נכון והתווית שיקרה. עכשיו השם נקרא באותו רגע שבו נקראים היתרה,
 // מספר החשבון והתנועות — אחרי שהמעבר אומת — ולכן כולם מאותו מצב של הדף.
-const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();const account=activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
+const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();const known=isPrivate?null:await knownAccountFor(id);
+// ⚠ המספר שהזיהוי קרא גובר על גריפה מטקסט הדף. נפילה-לאחור נשמרת
+// לדיסקונט פרטי ולכל מקרה שבו הישות אינה ברשימה.
+const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
 async function sync(keys,isPrivate=false){const out=[];for(const key of keys)out.push(await extract(key,isPrivate));return out}
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txCandidates().length,balance:currentBalance()});return}if(m?.type==='DISCOUNT_SELECT_ENTITY'){const want=String(m.entity||'');// עונים לפני הבחירה: המעבר טוען מחדש את הדף והורג את הסקריפט
 reply({ok:true,already:entityId(text(entityButton()))===want});if(entityId(text(entityButton()))!==want)selectEntity(want).catch(e=>note(`דיסקונט עסקי: ${e.message}`));return}if(m?.type==='DISCOUNT_GOTO_TX'){const has=txCandidates().length>0;// עונים לפני הלחיצה: הניווט הורג את הסקריפט, ותשובה שנשלחת אחריו לא תגיע לעולם
