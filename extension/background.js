@@ -20,6 +20,47 @@ const freshStart={...freshFlags,discoveredAccounts:[]};
 // ⚠ 18.08.2026, החלטת טל: הסנכרון האוטומטי **כבוי בברירת מחדל**, ונדלק רק בלחיצה.
 // הכניסה לבנק שייכת למשתמש; התוסף אינו לוקח לשונית שהוא לא פתח בלי בקשה מפורשת.
 // המעבר מוחל פעם אחת גם על התקנות קיימות — בלעדיו הערך `true` שכבר שמור גובר.
+// ⚠⚠ 25.08.2026 — **מיגרציה חד-פעמית: נרמול סדר התנועות השמורות.**
+// טל: „לא מחקתי, רק סינכרנתי." והסנכרון סיים ב„אין תנועות חדשות" —
+// כלומר **כל החשבונות דולגו**, `extract` לא רץ, ו-`orderedAscending`
+// (1.10.7) לא נגע בהם. **הדילוג מונע בדיוק את הקריאה שהייתה מתקנת.**
+// מחיקת החשבונות והסנכרון מחדש הייתה עובדת — אבל היא יקרה ומיותרת:
+// אותה בדיקה עצמה יכולה לרוץ על מה שכבר שמור.
+// ⚠ הכיוון נקבע לפי **שרשרת היתרה, שמאמתת את עצמה** — בסדר הנכון
+// מתקיים `balance[i]-balance[i-1] == credit-debit`. **לא לפי תאריכים.**
+// ⚠ **הופכים רק כשהציון ההפוך טוב ממש**, לא בשוויון. חשבון שכבר
+// תקין, או שאי אפשר להכריע לגביו, נשאר בדיוק כפי שהוא.
+// ⚠ דגל משלה (`rowOrderNormalizedApplied`) — התקדים הוא
+// `autoSyncDefaultOffApplied`: מיגרציה בלי דגל תרוץ שוב בכל טעינה.
+function chainScoreOf(rows){
+  let good=0;
+  for(let i=1;i<rows.length;i++){
+    const p=rows[i-1],c=rows[i];
+    if(p?.balance==null||c?.balance==null)continue;
+    const delta=Math.round((Number(c.balance)-Number(p.balance))*100)/100;
+    const move=Math.round(((Number(c.credit)||0)-(Number(c.debit)||0))*100)/100;
+    if(Math.abs(delta-move)<0.011)good++;
+  }
+  return good;
+}
+async function normalizeStoredRowOrder(){
+  const st=await chrome.storage.local.get({rowOrderNormalizedApplied:false,accounts:[]});
+  if(st.rowOrderNormalizedApplied)return;
+  const report=[];let changed=false;
+  const accounts=(st.accounts||[]).map(a=>{
+    const tx=Array.isArray(a?.transactions)?a.transactions:null;
+    if(!tx||tx.length<3)return a;
+    const fwd=chainScoreOf(tx),rev=chainScoreOf(tx.slice().reverse());
+    report.push({id:a.id||a.selectionKey||'',n:tx.length,forward:fwd,reversed:rev,flipped:rev>fwd});
+    if(rev<=fwd)return a;
+    changed=true;
+    return{...a,transactions:tx.slice().reverse()};
+  });
+  const patch={rowOrderNormalizedApplied:true,
+    rowOrderMigration:{at:new Date().toISOString(),changed,accounts:report}};
+  if(changed)patch.accounts=accounts;
+  await chrome.storage.local.set(patch);
+}
 async function applyAutoSyncDefaultOff(){
   const st=await chrome.storage.local.get({autoSyncDefaultOffApplied:false});
   if(st.autoSyncDefaultOffApplied)return;
@@ -29,8 +70,8 @@ chrome.runtime.onInstalled.addListener(details=>{
   // עדכון/רענון: הדגלים בלבד. התקנה: גם הרשימה, וגם סנכרון אוטומטי כבוי.
   const patch=details?.reason==='update'?{...freshFlags}:{...freshStart};
   if(details?.reason==='install')patch.autoSyncOnLogin=false;
-  chrome.storage.local.set(patch).then(applyAutoSyncDefaultOff).then(scanAuthenticatedTabs)});
-chrome.runtime.onStartup.addListener(()=>{chrome.storage.local.set(freshStart).then(scanAuthenticatedTabs)});
+  chrome.storage.local.set(patch).then(applyAutoSyncDefaultOff).then(normalizeStoredRowOrder).then(scanAuthenticatedTabs)});
+chrome.runtime.onStartup.addListener(()=>{chrome.storage.local.set(freshStart).then(normalizeStoredRowOrder).then(scanAuthenticatedTabs)});
 
 // ── חיווי מצב על סמל התוסף ────────────────────────────────────────────────
 // מאזין ל-syncStatus במקום להוסיף קריאה בכל מסלול — כך כל תהליך מקבל חיווי,
