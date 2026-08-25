@@ -179,9 +179,21 @@ function privateTriggerProbe(){
 // ⚠ הרשימה כבר ב-DOM (Angular מרנדר סגור). לוחצים **רק** אם אין פריטים —
 // לחיצה על בורר פתוח הייתה סוגרת אותו.
 const PRIVATE_TRIGGER='button.commonDropdown__button,.dropdown-toggle.commonDropdown__button,button.accountDropdownMenu,[role="combobox"].accountDropdownMenu';
-const PRIVATE_ITEMS='li.commonDropdown__menuItem,button.commonDropdown__menuItemBtn,[role="menu"] [role="radio"]';
+// ⚠⚠ 25.08.2026 — טל: „הבורר רושם כפול את החשבונות."
+// **השורש: סלקטור מאוחד בפסיקים תופס גם את ה-`<li>` וגם את ה-`<button>`
+// שבתוכו** — כל חשבון נספר פעמיים.
+// ⚠ **וזה היה בפלט הבדיקה שלי ולא פעלתי לפיו:** נרשם „li=3 סה״כ=6",
+// ואני בדקתי רק את תת-הקבוצה של ה-`li`. **בדיקה שמסננת את הרעש
+// מסתירה אותו.** מעכשיו — לבדוק את מה שהפונקציה **מחזירה**, לא את
+// מה שנוח לי לקרוא ממנו.
+// התיקון: רשימת סלקטורים **בסדר עדיפות**, והראשון שמחזיר משהו מנצח.
+// כך שתי רמות של אותו פריט לעולם אינן מעורבבות.
+const PRIVATE_ITEM_SETS=['li.commonDropdown__menuItem','button.commonDropdown__menuItemBtn','[role="menu"] [role="radio"]'];
 async function privateAccountOptions(deadline=0){
-  const found=()=>[...document.querySelectorAll(PRIVATE_ITEMS)];
+  const found=()=>{for(const sel of PRIVATE_ITEM_SETS){
+    const hit=[...document.querySelectorAll(sel)];
+    if(hit.length)return hit}
+    return[]};
   let rows=found();
   if(!rows.length){
     const trigger=document.querySelector(PRIVATE_TRIGGER);
@@ -220,7 +232,14 @@ async function discoverPrivate(){
   let lastErr='';
   for(let i=0;i<120;i++){
     try{
-      const rows=await privateAccountOptions(deadline),accounts=rows.map(privateAccountFromRow).filter(Boolean);
+      const rows=await privateAccountOptions(deadline);
+      // ⚠ חגורה שנייה: ניכוי כפילויות **לפי מפתח החשבון**, גם אם
+      // הסלקטור החזיר שתי רמות של אותו פריט. הסלקטור כבר מסודר לפי
+      // עדיפות — אבל כפילות בנתוני בנק גרועה מספיק כדי להצדיק שתיים.
+      const seenKeys=new Set(),accounts=[];
+      for(const r of rows){const a=privateAccountFromRow(r);
+        if(!a||!a.key||seenKeys.has(a.key))continue;
+        seenKeys.add(a.key);accounts.push(a)}
       if(accounts.length)return accounts;
     }catch(e){lastErr=String(e&&e.message||e).slice(0,80)}
     if(Date.now()>deadline)break;
