@@ -569,10 +569,13 @@ async function collectRangeRows(){
   // למטה, אין מסלול שבו הלולאה רצה בלי סוף מול הבנק.
   for(let step=0;step<24;step++){
     await applyLeumiRange(from,untilMs);
-    // ⚠ מקטע ללא תנועות הוא מצב חוקי. `openCurrentAccount` זורק אחרי
-    // 45 שניות כשאין שורות, ובלי התפיסה הזו חודש שקט היה מפיל הכל.
+    // ⚠ מקטע ללא תנועות הוא מצב חוקי — אבל `openCurrentAccount` ממתין לו
+    // **45 שניות** לפני שהוא זורק. יחד עם 18 השניות שלמעלה זה 63 שניות
+    // מבוזבזות לכל מקטע ריק, וזה מה שהוציא את הריצה מתקציב ה-worker.
+    // כאן די בהמתנה חסומה: הרשת כבר רונדרה פעם אחת לפני הבקשה הזו.
     let empty=false;
-    try{await openCurrentAccount();await loadAllRows()}catch(e){empty=true}
+    if(!datedRows().length){for(let i=0;i<32;i++){await wait(250);if(datedRows().length)break}}
+    if(!datedRows().length)empty=true;else{try{await loadAllRows()}catch(e){empty=true}}
     const cells=empty?[]:datedRows().map(x=>x.cells);
     let added=0;
     for(const c of cells){const k=c.join('|');if(seen.has(k))continue;seen.add(k);out.push(c);added++}
@@ -629,7 +632,14 @@ async function applyLeumiRange(winFrom,winTo){
           // ההליכה קדימה מזיזה את התאריך המוקדם **קדימה**, ולכן היציאה
           // המוקדמת לא נתפסה והמקטע חיכה 18 שניות ליציבות. כל שינוי נחשב.
           if(e!=null&&earlyBefore0!=null&&e!==earlyBefore0)break;
-          if(n>0&&n===last0){if(++stable0>=2)break}else stable0=0;last0=n}
+          // ⚠ 25.08.2026 — התנאי `n>0` גרם ל**18 שניות המתנה מלאה בכל מקטע
+          // ריק**: כשהתוצאה 0 שורות היציבות לא נספרה לעולם והלולאה מיצתה
+          // את כל 30 הסיבובים. מקטע ריק הוא תוצאה לגיטימית, לא כישלון.
+          // סף גבוה יותר לאפס (6 מול 2) כי „עדיין לא רונדר" נראה כמו „ריק".
+          if(n>0&&n===last0){if(++stable0>=2)break}
+          else if(n===0&&last0===0){if(++stable0>=6)break}
+          else stable0=0;
+          last0=n}
         const eAfter0=earliestShown(),iso0=ms=>ms==null?'':new Date(ms).toISOString().slice(0,10);
         // ⚠ ההצלחה נמדדת ב**תזוזה אחורה**, לא בהגעה מדויקת ל-collectSince:
         // לחשבון פשוט אין בהכרח תנועה ב-1 בינואר, ודרישת שוויון סימנה ריצה

@@ -857,6 +857,12 @@ if(state.leumiAttempts>=LEUMI_MAX_ATTEMPTS){await chrome.storage.local.set({pend
 leumiBusy=true;leumiLastRun=Date.now();
 await chrome.storage.local.set({leumiAttempts:state.leumiAttempts+1});
 try{return await runDiscoverLeumi(tabId,state)}finally{leumiBusy=false;await restoreSyncTabs()}}
+// ⚠ 25.08.2026 — התקציב היה קבוע (420 שניות) ונקבע כשהקריאה הייתה **בקשה
+// אחת לחשבון**. מאז 1.5.2 כל חשבון הוא הליכה של עד תשעה מקטעים, ו-6
+// חשבונות נבחרים חרגו מכל תקרה קבועה. עכשיו הוא נגזר ממספר החשבונות.
+// ⚠ תקרה מוחלטת נשמרת בכוונה: בלעדיה סנכרון תקוע ממתין לנצח, וזה גרוע
+// יותר מכישלון מוצהר.
+const leumiSyncBudget=n=>Math.min(1200000,180000+Math.max(1,n)*240000);
 async function runDiscoverLeumi(tabId,state){
 // הזיהוי רץ בעבר על הדף שבמקרה היה פתוח, ולכן נחת על gate-keeper והחזיר "לא נמצאה רשימת החשבונות".
 await prepareLeumiRoute(tabId,LEUMI_TX_URL);await delay(1200);
@@ -952,7 +958,7 @@ async function syncLeumi(keys){const tabs=leumiSession(await chrome.tabs.query({
 // היתרות שנקראו מבורר החשבונות בזיהוי משמשות נפילה לאחור, כדי שכרטיס יתרה שלא רונדר
 // לא יפיל את הסנכרון כולו אחרי שלושה ניסיונות של שתי דקות וחצי כל אחד.
 const disc=(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts;
-const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)balances[`${a.branch}-${a.accountNumber}`]=a.balance;const tabId=leumiTab(tabs).id,txUrl=LEUMI_TX_URL,loanUrl=LEUMI_LOAN_URL;let r,lastError='',lastDebug=null;for(let attempt=1;attempt<=3;attempt++){await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא תנועות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,txUrl);r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_SYNC_SELECTED',keys,balances}),420000,'קריאת תנועות בלאומי');if(r?.ok&&r.accounts?.length===keys.length&&r.accounts.every(a=>a.balance!=null&&Array.isArray(a.transactions)))break;lastError=r?.error||'לא התקבלו תנועות ויתרות מלאות';lastDebug=r?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}r=null}if(!r){await chrome.storage.local.set({leumiDebug:{stage:'transactions',asked:txUrl,error:lastError,text:dbgText(txUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת תנועות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}let lr;lastError='';lastDebug=null;for(let attempt=1;attempt<=3;attempt++){await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא הלוואות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,loanUrl);lr=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_LOANS_SELECTED',keys}),120000,'קריאת הלוואות בלאומי');if(lr?.ok&&lr.accounts?.length===keys.length&&lr.accounts.every(a=>Array.isArray(a.loans)))break;lastError=lr?.error||'לא התקבל פירוט הלוואות מלא';lastDebug=lr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}lr=null}if(!lr){await chrome.storage.local.set({leumiDebug:{stage:'loans',asked:loanUrl,error:lastError,text:dbgText(loanUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת הלוואות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}// ⚠⚠ 22.08.2026 — טל: „הסנכרון בלאומי לא נראה לי תקין." הוא צדק, ונמדד:
+const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)balances[`${a.branch}-${a.accountNumber}`]=a.balance;const tabId=leumiTab(tabs).id,txUrl=LEUMI_TX_URL,loanUrl=LEUMI_LOAN_URL;let r,lastError='',lastDebug=null;for(let attempt=1;attempt<=3;attempt++){await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא תנועות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,txUrl);r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_SYNC_SELECTED',keys,balances}),leumiSyncBudget(keys.length),'קריאת תנועות בלאומי');if(r?.ok&&r.accounts?.length===keys.length&&r.accounts.every(a=>a.balance!=null&&Array.isArray(a.transactions)))break;lastError=r?.error||'לא התקבלו תנועות ויתרות מלאות';lastDebug=r?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}r=null}if(!r){await chrome.storage.local.set({leumiDebug:{stage:'transactions',asked:txUrl,error:lastError,text:dbgText(txUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת תנועות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}let lr;lastError='';lastDebug=null;for(let attempt=1;attempt<=3;attempt++){await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא הלוואות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,loanUrl);lr=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_LOANS_SELECTED',keys}),120000,'קריאת הלוואות בלאומי');if(lr?.ok&&lr.accounts?.length===keys.length&&lr.accounts.every(a=>Array.isArray(a.loans)))break;lastError=lr?.error||'לא התקבל פירוט הלוואות מלא';lastDebug=lr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}lr=null}if(!lr){await chrome.storage.local.set({leumiDebug:{stage:'loans',asked:loanUrl,error:lastError,text:dbgText(loanUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת הלוואות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}// ⚠⚠ 22.08.2026 — טל: „הסנכרון בלאומי לא נראה לי תקין." הוא צדק, ונמדד:
 // חשבון 921-348300 נשמר עם status „מסונכרן ומאומת" — ובפועל 28 תנועות
 // שמשתרעות על 06.07 עד 02.08 בלבד, בעוד היום 22.08. שרשרת היתרות שלהן
 // **תקינה לחלוטין** (0 שברים ב-27 מעברים), כלומר הקריאה נכונה אבל **חסרה**:
@@ -1032,7 +1038,25 @@ return pick}
 // לקח מלאומי: ניווט של ה-SPA הורג את ה-content script, והזרקה חוזרת אחת אינה מספיקה.
 // ⚠ content script שמת באמצע ניווט לא שולח תשובה לעולם, ו-sendMessage ממתין ללא הגבלה.
 // בלי המעטפת הזו הסנכרון נראה "רץ" לנצח במקום להיכשל ולדווח.
-const withTimeout=(promise,ms,what)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(Error(`${what} לא השיב תוך ${Math.round(ms/1000)} שניות`)),ms))]);
+// ⚠⚠ 25.08.2026 — **ה-service worker מת באמצע, וזה השבית סנכרון שלם.**
+// נמדד: אפס כתיבות לאחסון במשך 9.5 דקות בזמן „קורא תנועות", ו**אפילו
+// ה-timeout לא ירה** — כי ה-`setTimeout` שלו חי בתוך אותו worker שנהרג.
+// ב-MV3 ה-worker נהרג אחרי ~30 שניות **ללא קריאת API**, וכל זמן שהרקע
+// רק ממתין ל-`sendMessage` הוא אינו קורא לשום API.
+// עד 1.5.2 הקריאה הייתה בקשה אחת ונכנסה בתקציב; **ההליכה של 1.5.2
+// חרגה ממנו, וזה מה שחשף את היעדר ה-keepalive.**
+// הפתרון: קריאת API זולה כל 20 שניות **כל עוד יש פעולה ארוכה באוויר**.
+// ⚠ נספר בעומק ולא בדגל — שתי פעולות ארוכות במקביל, והראשונה שנגמרת
+// הייתה מכבה את ה-keepalive של השנייה.
+let kaTimer=null,kaDepth=0;
+function keepAlive(on){
+  if(on){kaDepth++;if(!kaTimer)kaTimer=setInterval(()=>{try{chrome.runtime.getPlatformInfo(()=>{})}catch{}},20000);return}
+  kaDepth=Math.max(0,kaDepth-1);
+  if(!kaDepth&&kaTimer){clearInterval(kaTimer);kaTimer=null}
+}
+const withTimeout=(promise,ms,what)=>{keepAlive(true);
+  return Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(Error(`${what} לא השיב תוך ${Math.round(ms/1000)} שניות`)),ms))])
+    .finally(()=>keepAlive(false))};
 async function prepareDiscountContent(tabId){let last='';for(let attempt=1;attempt<=5;attempt++){
 try{const p=await chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_PING'});if(p?.ok)return}catch(e){last=e.message}
 try{await chrome.scripting.executeScript({target:{tabId},files:['discount-content.js']})}catch(e){last=e.message}
