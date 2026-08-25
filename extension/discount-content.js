@@ -1,5 +1,17 @@
 (()=>{
-if(window.__discountSyncLoaded)return;window.__discountSyncLoaded=true;
+// ⚠⚠ 25.08.2026 — **שומר הזרקה עמיד למות הקשר.**
+// דגל בוליאני פשוט (1.9.0) מנע מאזינים כפולים — אבל יצר תקלה גרועה
+// יותר: כשמרעננים את התוסף, ה-content script הישן מת אבל **ה-`window` של
+// העולם המבודד שורד** עם הדגל דלוק. ההזרקה החדשה יוצאת מיד
+// ו**אינה רושמת מאזין כלל** — ואז הרקע מדווח „לא השיב תוך 60 שניות".
+// לכן במקום דגל: **בדיקת חיות.** הסקריפט הקודם משאיר פונקציה
+// שנוגעת ב-`chrome.runtime.id` **מתוך הסגור שלו**; כשהקשרו מת הגישה זורקת,
+// הבדיקה מחזירה false, והסקריפט החדש נרשם. שני המצבים נפתרים בבת אחת.
+if(window.__discountSyncLoaded){try{if(window.__discountSyncLoaded())return}catch(e){}}
+// ⚠ ההפניה נתפסת כאן ולא נקראת מחדש בכל בדיקה: קריאה מחדש
+// מחזירה את ה-chrome החדש, והגשש מדווח „חי" גם כשההקשר שלו מת. נתפס בבדיקה.
+const __rt__discountSyncLoaded=(()=>{try{return chrome.runtime}catch(e){return null}})();
+window.__discountSyncLoaded=()=>{try{return !!(__rt__discountSyncLoaded&&__rt__discountSyncLoaded.id)}catch(e){return false}};
 // ⚠⚠ 25.08.2026 — **שומר הזרקה.** טל ראה:
 // „A listener indicated an asynchronous response by returning true,
 //  but the message channel closed before a response was received".

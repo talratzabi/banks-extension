@@ -1,5 +1,10 @@
 (()=>{
-if(window.__poalimSyncLoaded)return;window.__poalimSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+// שומר הזרקה עמיד למות הקשר — ראה discount-content.js
+if(window.__poalimSyncLoaded){try{if(window.__poalimSyncLoaded())return}catch(e){}}
+// ⚠ ההפניה נתפסת כאן ולא נקראת מחדש בכל בדיקה: קריאה מחדש
+// מחזירה את ה-chrome החדש, והגשש מדווח „חי" גם כשההקשר שלו מת. נתפס בבדיקה.
+const __rt__poalimSyncLoaded=(()=>{try{return chrome.runtime}catch(e){return null}})();
+window.__poalimSyncLoaded=()=>{try{return !!(__rt__poalimSyncLoaded&&__rt__poalimSyncLoaded.id)}catch(e){return false}};
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if(message?.type==='PING'){sendResponse({ok:true});return}

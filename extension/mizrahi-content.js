@@ -1,5 +1,10 @@
 (()=>{
-if(window.__mizrahiSyncLoaded)return;window.__mizrahiSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+// שומר הזרקה עמיד למות הקשר — ראה discount-content.js
+if(window.__mizrahiSyncLoaded){try{if(window.__mizrahiSyncLoaded())return}catch(e){}}
+// ⚠ ההפניה נתפסת כאן ולא נקראת מחדש בכל בדיקה: קריאה מחדש
+// מחזירה את ה-chrome החדש, והגשש מדווח „חי" גם כשההקשר שלו מת. נתפס בבדיקה.
+const __rt__mizrahiSyncLoaded=(()=>{try{return chrome.runtime}catch(e){return null}})();
+window.__mizrahiSyncLoaded=()=>{try{return !!(__rt__mizrahiSyncLoaded&&__rt__mizrahiSyncLoaded.id)}catch(e){return false}};
 
 const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();
 const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};

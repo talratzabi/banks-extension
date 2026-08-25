@@ -1,5 +1,10 @@
 (()=>{
-if(window.__maxSyncLoaded)return;window.__maxSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+// שומר הזרקה עמיד למות הקשר — ראה discount-content.js
+if(window.__maxSyncLoaded){try{if(window.__maxSyncLoaded())return}catch(e){}}
+// ⚠ ההפניה נתפסת כאן ולא נקראת מחדש בכל בדיקה: קריאה מחדש
+// מחזירה את ה-chrome החדש, והגשש מדווח „חי" גם כשההקשר שלו מת. נתפס בבדיקה.
+const __rt__maxSyncLoaded=(()=>{try{return chrome.runtime}catch(e){return null}})();
+window.__maxSyncLoaded=()=>{try{return !!(__rt__maxSyncLoaded&&__rt__maxSyncLoaded.id)}catch(e){return false}};
 
 const clean=v=>String(v||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim(),wait=ms=>new Promise(r=>setTimeout(r,ms));
 const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);return m?Number(m[0].replace(/,/g,'')):null};

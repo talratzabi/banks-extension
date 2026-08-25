@@ -1,5 +1,10 @@
 (()=>{
-if(window.__isracardSyncLoaded)return;window.__isracardSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+// שומר הזרקה עמיד למות הקשר — ראה discount-content.js
+if(window.__isracardSyncLoaded){try{if(window.__isracardSyncLoaded())return}catch(e){}}
+// ⚠ ההפניה נתפסת כאן ולא נקראת מחדש בכל בדיקה: קריאה מחדש
+// מחזירה את ה-chrome החדש, והגשש מדווח „חי" גם כשההקשר שלו מת. נתפס בבדיקה.
+const __rt__isracardSyncLoaded=(()=>{try{return chrome.runtime}catch(e){return null}})();
+window.__isracardSyncLoaded=()=>{try{return !!(__rt__isracardSyncLoaded&&__rt__isracardSyncLoaded.id)}catch(e){return false}};
 
 const clean=v=>String(v||'').replace(/[\u200e\u200f]/g,'').replace(/\s+/g,' ').trim();
 const amount=v=>{const m=clean(v).replace(/,/g,'').match(/-?\d+(?:\.\d+)?/);return m?Number(m[0]):0};

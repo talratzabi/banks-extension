@@ -1,5 +1,10 @@
 (()=>{
-if(window.__fibiSyncLoaded)return;window.__fibiSyncLoaded=true;  // שומר הזרקה — ראה discount-content.js
+// שומר הזרקה עמיד למות הקשר — ראה discount-content.js
+if(window.__fibiSyncLoaded){try{if(window.__fibiSyncLoaded())return}catch(e){}}
+// ⚠ ההפניה נתפסת כאן ולא נקראת מחדש בכל בדיקה: קריאה מחדש
+// מחזירה את ה-chrome החדש, והגשש מדווח „חי" גם כשההקשר שלו מת. נתפס בבדיקה.
+const __rt__fibiSyncLoaded=(()=>{try{return chrome.runtime}catch(e){return null}})();
+window.__fibiSyncLoaded=()=>{try{return !!(__rt__fibiSyncLoaded&&__rt__fibiSyncLoaded.id)}catch(e){return false}};
 
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{
   if(m?.type==='FIBI_PING'){reply({ok:true});return}

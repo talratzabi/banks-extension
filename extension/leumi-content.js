@@ -1,5 +1,10 @@
 (()=>{
-if(window.__leumiSyncLoaded)return;window.__leumiSyncLoaded=true;
+// שומר הזרקה עמיד למות הקשר — ראה discount-content.js
+if(window.__leumiSyncLoaded){try{if(window.__leumiSyncLoaded())return}catch(e){}}
+// ⚠ ההפניה נתפסת כאן ולא נקראת מחדש בכל בדיקה: קריאה מחדש
+// מחזירה את ה-chrome החדש, והגשש מדווח „חי" גם כשההקשר שלו מת. נתפס בבדיקה.
+const __rt__leumiSyncLoaded=(()=>{try{return chrome.runtime}catch(e){return null}})();
+window.__leumiSyncLoaded=()=>{try{return !!(__rt__leumiSyncLoaded&&__rt__leumiSyncLoaded.id)}catch(e){return false}};
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const txt=el=>{if(!el)return'';let visible=el.innerText||el.textContent||'';const isAccountArrow=el.matches?.('main button,button[aria-expanded],button[aria-haspopup]')&&!/\d/.test(visible);if(isAccountArrow)visible+=` ${el.parentElement?.innerText||''} ${el.parentElement?.parentElement?.innerText||''}`;const meta=['aria-label','title','data-account','data-account-number','data-value'].map(name=>el.getAttribute?.(name)||'').filter(Boolean).join(' ');return`${visible} ${meta}`.replace(/\s+/g,' ').trim()};
 const money=value=>{const s=String(value||'').replace(/[−–]/g,'-');if(!/\d/.test(s))return null;const neg=s.includes('-'),n=Number(s.replace(/[,₪\s-]/g,'').replace(/[^0-9.]/g,''));return Number.isFinite(n)?(neg?-n:n):null};
