@@ -29,7 +29,7 @@ if(!child)return{ok:false,error:`הפריט ${route.child} לא נמצא בתפ�
 realClick(child);
 for(let i=0;i<50;i++){await wait(300);if(location.pathname.includes(route.path))return{ok:true}}
 return{ok:false,error:`הניווט ל-${route.child} לא הגיע ל-${route.path}`}}
-chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),radios:radioProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
+chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){reply({ok:true});return}if(m?.type==='LEUMI_SNAPSHOT'){reply({ok:true,debug:snapshot()});return}if(m?.type==='LEUMI_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts,strategy:lastStrategy,optionProbe:lastOptionProbe})).catch(e=>reply({ok:false,error:e.message,debug:snapshot(),strategy:lastStrategy,optionProbe:lastOptionProbe}));return true}if(m?.type==='LEUMI_GO'){goRoute(m.path||'').then(reply).catch(e=>reply({ok:false,error:e.message}));return true}if(m?.type==='LEUMI_SYNC_SELECTED'){syncSelected(m.keys||[],m.balances||{}).then(async accounts=>reply({ok:true,accounts,rangeProbe:rangeProbe(),radios:radioProbe(),grid:gridProbe(),dateMenu:await dateMenuProbe()})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_LOANS_SELECTED'){syncLoans(m.keys||[]).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_CHEQUE_IMAGES'){chequeImages(m.wanted||[],m.key||'',m.offset||0,m.total||0).then(images=>reply({ok:true,images})).catch(e=>reply({ok:false,error:e.message,debug:snapshot()}));return true}if(m?.type==='LEUMI_OPEN_CHEQUE'){openCheque(m).then(()=>reply({ok:true})).catch(e=>reply({ok:false,error:e.message}));return true}});
 // הרחבת שורת התנועה מזריקה את צילום השיק כ-data:image ישירות ל-DOM — קדמי ואחורי.
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
@@ -43,12 +43,33 @@ async function chequeImages(wanted,key,offset=0,total=0){const notFound=[];if(ke
 // ברירת המחדל („40 התנועות האחרונות"), ולא מצאה אף אחת.
 // **זו תופעת לוואי של תיקון הטווח עצמו:** כל עוד החלון היה ממילא
 // יולי-אוגוסט, האסמכתאות היו שם והשיקים נשמרו (23, ואז 16).
-await applyLeumiRange();await openCurrentAccount();await loadAllRows();const out={};const dataSrc=()=>[...document.querySelectorAll('img')].map(i=>i.src).filter(s=>s.startsWith('data:image'));
+// ⚠ 25.08.2026 — חלון יחיד לא מספיק גם כאן. אם הטווח המבוקש ארוך
+// מחודשיים, שיק מינואר לעולם לא יימצא בחלון של אוגוסט — וזה בדיוק
+// הכשל של 1.3.2, בלבוש חדש. לכן מחילים את **החלון שמכיל את השיק**,
+// ומחליפים חלון רק כשצריך.
+const chqSt=await chrome.storage.local.get({collectSince:''});
+const chqSince=Date.parse(String(chqSt.collectSince||''));
+const chqWins=Number.isFinite(chqSince)?leumiWindows(chqSince,Date.now()):[];
+let curWin=null;
+const ensureWindowFor=async(dateStr)=>{
+  if(!chqWins.length)return;
+  const ms=ilToMs(dateStr);
+  if(!Number.isFinite(ms))return;
+  if(curWin&&ms>=curWin.from&&ms<=curWin.to)return;
+  const w=chqWins.find(x=>ms>=x.from&&ms<=x.to);
+  if(!w||(curWin&&w.from===curWin.from))return;
+  curWin=w;
+  await applyLeumiRange(w.from,w.to);await openCurrentAccount();await loadAllRows();
+};
+// מיון מהחדש לישן — אותו כיוון שבו נבנים החלונות, כך שכל חלון מוחל פעם אחת.
+wanted.sort((a,b)=>(ilToMs(b.date)||0)-(ilToMs(a.date)||0));
+if(!chqWins.length){await applyLeumiRange();await openCurrentAccount();await loadAllRows();}
+const out={};const dataSrc=()=>[...document.querySelectorAll('img')].map(i=>i.src).filter(s=>s.startsWith('data:image'));
 // ⚠ חלון הצילום נשאר פתוח אחרי שיק: הוא מכסה את הטבלה וחוסם את
 // הלחיצה הבאה, וגם מוסיף את תמונותיו ל-before כך שתמונה חדשה
 // אינה מזוהה. זה מייצר "חלק כן וחלק לא". סלקטור הסגירה כבר מדוד, מ-discover().
 const closeViewer=async()=>{const btn=document.querySelector('[role="dialog"] button[aria-label="סגירה"]')||document.querySelector('[role="dialog"] [aria-label*="סגירה"],[role="dialog"] [aria-label*="סגור"]');if(btn){realClick(btn);await wait(450);return}if(document.querySelector('[role="dialog"]')){document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(450)}};
-for(const item of wanted){const reference=String(item.reference||'');const hit=datedRows().find(({cells})=>cells.includes(item.date)&&cells.includes(reference));// ⚠ דילוג שקט הוא באג בפני עצמו: הוא הסתיר 15 כשלים מאחורי „asked:15,
+for(const item of wanted){const reference=String(item.reference||'');await ensureWindowFor(item.date);const hit=datedRows().find(({cells})=>cells.includes(item.date)&&cells.includes(reference));// ⚠ דילוג שקט הוא באג בפני עצמו: הוא הסתיר 15 כשלים מאחורי „asked:15,
 // saved:0, failed:0". עכשיו נספר ומדווח, כדי שלא ייראה שוב כהצלחה.
 if(!hit){notFound.push(reference);continue}
 chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_PROGRESS',done:offset+wanted.indexOf(item)+1,total:total||wanted.length,reference}).catch(()=>{});
@@ -258,7 +279,9 @@ async function extract(expectedKey='',fallbackBalance=null){await openCurrentAcc
 // באותה רשומה: `"תאריך23.08.2026-01.01.2026"` נקרא כחשבון מדומה `026-01` —
 // **זה טווח התאריכים שהקוד הזה עצמו כתב לדף.**
 // התיקון נעשה כבר ב-1.2.7 והוחזר ב„חזרה ל-1.2.5" לבקשת טל; זו החזרתו.
-await applyLeumiRange();await openCurrentAccount();await loadAllRows();const raw=datedRows().map(x=>x.cells);const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');if(!raw.length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
+// ⚠ 25.08.2026 — כאן היה `applyLeumiRange` יחיד, וזה מה שהגביל ל-29 שורות:
+// לאומי חותך לחודשיים, וחלון אחד החזיר חודש. עכשיו נקראים כל החלונות.
+const raw=await collectRangeRows();const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');if(!raw.length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
 if(balance==null&&Number.isFinite(fallbackBalance))balance=fallbackBalance;if(balance==null)throw Error(`לא זוהתה יתרת עו״ש בחשבון ${a.key} — לא בכרטיס היתרה ולא בבורר`);const limitMatch=cardText.match(/מסגרת אשראי\s*₪?\s*(-?[\d,]+\.\d{2})/);const creditLimit=limitMatch?money(limitMatch[1]):null;// העמודות נקראות לפי כותרת ולא לפי היסט קבוע. נמדד מול הדף החי: תאריך|תנועות|אסמכתא|חובה|זכות|יתרה מצטברת.
 const idx=columnIndex(),col=(label,fallback)=>Number.isInteger(idx[label])?idx[label]:fallback;
 const iDate=col('תאריך',1),iAction=col('תנועות',2),iRef=col('אסמכתא',3),iDebit=col('חובה',4),iCredit=col('זכות',5),iBalance=col('יתרה מצטברת',6);
@@ -399,12 +422,138 @@ function leumiRangeOption(sinceMs,now){
   // null, והקורא מדווח במקום לפעול.
   return null;
 }
-async function applyLeumiRange(){
+// ⚠ 25.08.2026 — הגשש הוחזר. הוא הוסר ב„חזרה ל-1.2.5", והפריט שהוא נועד
+// למדוד נשאר פתוח מאז. הוא **קריאה בלבד** ורץ אחרי שהקריאה הסתיימה.
+// ⚠ ההשערה שהוא נבנה לבדוק (רשת וירטואלית) כנראה שגויה — טל דיווח
+// שהטווח חסום לחודשיים, וזה מסביר את המספר. הגשש נשאר כדי **להפריך**:
+// אם אחרי החלונות עדיין ייקרא מספר קבוע, הוא יגיד אם יש בכלל וירטואליזציה.
+// ⚠⚠ 22.08.2026 — גשש מבנה הרשת. **קריאה בלבד: אפס לחיצות, אפס גלילה.**
+// הרקע: הקריאה נעצרת על ~29 שורות גם כשהטווח רחב, ו**שני ניסיונות תיקון
+// עיוורים נכשלו** — האחרון אף החמיר (13 שורות ו-70 שניות, ראה 1.2.5).
+// לכן לפני ניסיון שלישי מודדים **מה בכלל מפעיל טעינת עמוד נוסף**:
+//   · האם הרשת מווירטואלית (aria-rowcount מול שורות ב-DOM, transform/top
+//     על השורות, data-index) — אם כן, שורות מתחלפות ואין „לגלול עד הסוף";
+//   · האם יש „זקיף" של IntersectionObserver בתחתית (אלמנט זעיר/ריק,
+//     או שם מחלקה עם sentinel/loader/spinner/observer);
+//   · האם יש פקדי עימוד או ספירה מוצהרת („מוצגות X מתוך Y");
+//   · מי האב הנגלל בפועל, ומה היחס scrollHeight/clientHeight.
+// כל אלה **תצפית**. שום מסקנה לא תיכתב לקוד לפני שהמספרים יגיעו.
+// ⚠ רץ **אחרי** שהקריאה הסתיימה, ולכן אינו יכול לשבש אותה.
+function gridProbe(){
+  const f=t=>String(t||'').replace(/\s+/g,' ').trim();
+  try{
+    const rows=datedRows();
+    const tail=rows.at(-1)?.row,head=rows[0]?.row;
+    // האבות הנגללים בפועל, עם המידות — בלי לגעת בהם
+    const chain=[];let n=tail;
+    for(let i=0;i<10&&n&&n!==document.body;i++,n=n.parentElement){
+      const st=getComputedStyle(n);
+      chain.push({tag:n.tagName.toLowerCase(),cls:f(n.className).slice(0,38),
+        role:n.getAttribute&&n.getAttribute('role')||'',
+        sh:n.scrollHeight,ch:n.clientHeight,top:n.scrollTop,
+        ov:`${st.overflowY}`,scrollable:n.scrollHeight>n.clientHeight+8});
+    }
+    // סימני וירטואליזציה
+    const grid=tail&&tail.closest('[role="grid"],[role="table"],table');
+    const rowStyle=tail?getComputedStyle(tail):null;
+    const declared=(()=>{for(const el of document.querySelectorAll('[aria-rowcount],[data-total],[data-count]')){
+      const v=el.getAttribute('aria-rowcount')||el.getAttribute('data-total')||el.getAttribute('data-count');
+      if(v)return {attr:v,on:f(el.className).slice(0,30)}}return null})();
+    const totalText=(f(document.body.innerText).match(/(מוצג\w*|מתוך)[^.]{0,40}\d+[^.]{0,25}/)||[''])[0].slice(0,90);
+    // מועמדים ל„זקיף" בתחתית הרשימה: אלמנט אחרון, זעיר או בעל שם מרמז
+    const sentinels=[...document.querySelectorAll('div,span,li')]
+      .filter(el=>/sentinel|observer|loader|spinner|infinite|load-more|end-of/i.test(String(el.className||'')))
+      .map(el=>({cls:f(el.className).slice(0,40),h:el.getBoundingClientRect().height})).slice(0,8);
+    const afterTail=tail&&tail.nextElementSibling;
+    return{
+      rowsInDom:rows.length,
+      firstDate:head?f(rows[0].cells.join(' ')).match(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/)?.[0]||'':'',
+      lastDate:tail?f(rows.at(-1).cells.join(' ')).match(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/)?.[0]||'':'',
+      declared,totalText,
+      gridRole:grid?`${grid.tagName.toLowerCase()}[${grid.getAttribute('role')||''}]`:'',
+      gridAriaRowCount:grid?grid.getAttribute('aria-rowcount')||'':'',
+      rowPosition:rowStyle?rowStyle.position:'',
+      rowTransform:rowStyle?String(rowStyle.transform).slice(0,30):'',
+      rowHasIndex:tail?!!(tail.getAttribute('data-index')||tail.getAttribute('aria-rowindex')):false,
+      siblingAfterTail:afterTail?{tag:afterTail.tagName.toLowerCase(),
+        cls:f(afterTail.className).slice(0,40),h:afterTail.getBoundingClientRect().height,
+        text:f(afterTail.textContent).slice(0,40)}:null,
+      sentinels,
+      chain,
+      at:new Date().toISOString()};
+  }catch(e){return{probeError:String(e&&e.message||e)}}
+}
+
+// ⚠⚠ 25.08.2026 — **לאומי חוסם את הטווח לחודשיים.** דיווח טל, והוא מסביר
+// את „29 השורות" שעמדו בפני שלושה ניסיונות תיקון: זו מעולם לא הייתה
+// וירטואליזציה או גלילה חסרה — **הטווח פשוט נחתך.** הראיה מהריצה החיה
+// של 23.08: ביקשנו 01.01→23.08 (כמעט 8 חודשים) וקיבלנו תנועות
+// 01.01..02.02 בלבד — **חלון אחד של חודש, ואז כלום.**
+// לכן אין „לטעון עוד שורות": צריך **לבקש את הטווח שוב ושוב**, חלון אחר
+// חלון, ולצבור. 55 יום ולא 60 — מרווח ביטחון, כי לא ידוע אם הגבול נספר
+// בימים או בחודשי לוח.
+const LEUMI_WINDOW_DAYS=55;
+// dd.mm.yyyy → ms. חייב פרסור מפורש; Date.parse קורא את זה כאמריקאי.
+function ilToMs(v){const m=String(v||'').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  return m?Date.UTC(+m[3],+m[2]-1,+m[1]):NaN}
+// ⚠ החלונות מוחזרים **מהחדש לישן** במכוון. `applyLeumiRange` יוצא מוקדם
+// מלולאת ההמתנה ברגע ש„התאריך המוקדם ביותר בדף זז אחורה" — וזה קורה רק
+// בכיוון הזה. סדר הפוך היה מכריח אותו להמתין ליציבות בכל חלון (18 שניות).
+function leumiWindows(sinceMs,untilMs){
+  const out=[],step=LEUMI_WINDOW_DAYS*864e5;
+  let to=untilMs;
+  // תקרת 24 חלונות = כ-3.6 שנים. **שומר לולאה — לא להסיר.**
+  while(to>sinceMs&&out.length<24){
+    const from=Math.max(to-step,sinceMs);
+    out.push({from,to});
+    if(from<=sinceMs)break;
+    to=from+864e5; // חפיפה של יום, כדי שלא תיפול תנועה על התפר
+  }
+  return out.length?out:[{from:sinceMs,to:untilMs}];
+}
+// קורא את כל התקופה המבוקשת כרצף חלונות, ומחזיר שורות תאים מאוחדות.
+// ⚠ המפתח לניכוי כפילויות הוא **כל התאים**, כולל היתרה המצטברת — שתי
+// תנועות זהות באותו יום נבדלות ביתרה, ולכן אינן נבלעות זו בזו.
+async function collectRangeRows(){
+  const st=await chrome.storage.local.get({collectSince:''});
+  const sinceMs=Date.parse(String(st.collectSince||''));
+  const untilMs=Date.now();
+  if(!Number.isFinite(sinceMs)){
+    await applyLeumiRange();await openCurrentAccount();await loadAllRows();
+    return datedRows().map(x=>x.cells);
+  }
+  const wins=leumiWindows(sinceMs,untilMs),seen=new Set(),out=[],log=[];
+  for(const w of wins){
+    await applyLeumiRange(w.from,w.to);
+    // ⚠ חלון בן 55 יום **ללא אף תנועה הוא מצב חוקי**, לא תקלה.
+    // `openCurrentAccount` זורק אחרי 45 שניות כשאין שורות — ובלי התפיסה
+    // הזו חודשיים שקטים אחד היו מפילים את כל הסנכרון.
+    let empty=false;
+    try{await openCurrentAccount();await loadAllRows()}
+    catch(e){empty=true}
+    const cells=empty?[]:datedRows().map(x=>x.cells);
+    let added=0;
+    for(const c of cells){const k=c.join('|');if(seen.has(k))continue;seen.add(k);out.push(c);added++}
+    log.push({from:ilShort(w.from),to:ilShort(w.to),read:cells.length,added,empty});
+  }
+  // ⚠ הרשומה הזו היא המדידה. „read" גדול ו„added" אפס פירושו שהחלון לא
+  // הוחל בכלל והדף החזיר שוב את אותן שורות — כשל שנראה אחרת מחלון ריק.
+  try{await chrome.storage.local.set({leumiWindows:{at:new Date().toISOString(),
+    since:ilShort(sinceMs),windows:log,total:out.length}})}catch{}
+  return out;
+}
+async function applyLeumiRange(winFrom,winTo){
   const report=async(reason,extra)=>{try{await chrome.storage.local.set(
     {leumiRangeApplied:{reason,at:new Date().toISOString(),...extra}})}catch{}};
   try{
-    const st=await chrome.storage.local.get({collectSince:''});
-    const sinceMs=Date.parse(String(st.collectSince||''));
+    // ⚠ 25.08.2026 — הפונקציה מקבלת עכשיו חלון מפורש. בלי ארגומנטים
+    // ההתנהגות זהה לקודם (collectSince → היום), כדי שקוראים ישנים לא ישתנו.
+    let sinceMs=Number(winFrom);
+    const untilMs=Number.isFinite(Number(winTo))?Number(winTo):Date.now();
+    if(!Number.isFinite(sinceMs)){
+      const st=await chrome.storage.local.get({collectSince:''});
+      sinceMs=Date.parse(String(st.collectSince||''));
+    }
     if(!Number.isFinite(sinceMs))return report('אין גבול איסוף — נשאר חלון ברירת המחדל');
     const radios=[...document.querySelectorAll('input[name="filterRadioList"]')];
     if(!radios.length)return report('בורר התקופה לא נמצא בדף');
@@ -415,7 +564,7 @@ async function applyLeumiRange(){
       const earlyBefore0=earliestShown();
       nativeSet(fields.from,ilShort(sinceMs));
       await wait(250);
-      nativeSet(fields.to,ilShort(Date.now()));
+      nativeSet(fields.to,ilShort(untilMs));
       await wait(250);
       const panel0=fields.from.closest('form')||fields.from.closest('[role="radiogroup"]')?.parentElement||document.body;
       const apply0=applyButtonIn(panel0)||applyButtonIn(panel0.parentElement)||applyButtonIn(document.body);
@@ -430,7 +579,7 @@ async function applyLeumiRange(){
         // לחשבון פשוט אין בהכרח תנועה ב-1 בינואר, ודרישת שוויון סימנה ריצה
         // מוצלחת ככשל. תופס גם את המקרה שבו כן הגענו לגבול או מעברו.
         return report(eAfter0!=null&&((earlyBefore0!=null&&eAfter0<earlyBefore0)||eAfter0<=sinceMs)?'טווח מדויק הופעל':'טווח מדויק ללא שינוי מספיק',
-          {from:ilShort(sinceMs),to:ilShort(Date.now()),
+          {from:ilShort(sinceMs),to:ilShort(untilMs),
            earliestBefore:iso0(earlyBefore0),earliestAfter:iso0(eAfter0),rows:datedRows().length});
       }
       await report('שדות הטווח נמצאו אך אין כפתור החלה',{});
