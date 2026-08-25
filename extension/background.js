@@ -5,7 +5,18 @@ importScripts('cheque-store.js','card-history.js','yahav.js');
 // (§ההערה בשורה ~228), ולכן סנכרון שנקטע השאיר אותו תקוע לצמיתות — וגם הפעלה מחדש
 // של הדפדפן לא ניקתה אותו. במצב הזה handleAuthenticatedNavigation נכנס למסלול
 // queueDiscover, **שאינו בודק את autoSyncOnLogin ואף צינון**, וכל כניסה לפועלים נחטפה.
-const freshStart={pendingIsracard:false,pendingIsracardAt:0,pendingLeumi:false,pendingDiscountBusiness:false,pendingDiscountPrivate:false,pendingMizrahi:false,pendingYahav:false,leumiAttempts:0,leumiOptionProbe:null,discoveredAccounts:[],pendingSources:[]};
+// ⚠⚠ 25.08.2026 — טל: „לא מופיע חשבונות הבנק לסנכרון." **השורש כאן.**
+// `onInstalled` יורה עם `reason:'update'` **בכל ⟳ של תוסף unpacked**,
+// ולכן כל רענון מחק את רשימת החשבונות לבחירה. ביום אחד עם כמה גרסאות
+// זה אומר לזהות מחדש שוב ושוב — וזיהוי דורש סשן חי בבנק.
+// **ההפרדה:** הדגלים נוקו מסיבה טובה (תהליך חלקי שנקטע, `pendingSources`
+// תקוע שגרם לחטיפת לשוניות ב-18.08) — **הם ממשיכים להתנקות תמיד.**
+// אבל `discoveredAccounts` היא רשימת בחירה, לא תהליך.
+// ⚠ היא כן נמחקת ב**התקנה** וב**הפעלה מחדש של הדפדפן** — שם באמת אין
+// סשן חי מאחוריה. ברענון תוסף הדפדפן ממשיך לרוץ ולשונית הבנק עדיין
+// מחוברת, ולכן הרשימה תקפה.
+const freshFlags={pendingIsracard:false,pendingIsracardAt:0,pendingLeumi:false,pendingDiscountBusiness:false,pendingDiscountPrivate:false,pendingMizrahi:false,pendingYahav:false,leumiAttempts:0,leumiOptionProbe:null,pendingSources:[]};
+const freshStart={...freshFlags,discoveredAccounts:[]};
 // ⚠ 18.08.2026, החלטת טל: הסנכרון האוטומטי **כבוי בברירת מחדל**, ונדלק רק בלחיצה.
 // הכניסה לבנק שייכת למשתמש; התוסף אינו לוקח לשונית שהוא לא פתח בלי בקשה מפורשת.
 // המעבר מוחל פעם אחת גם על התקנות קיימות — בלעדיו הערך `true` שכבר שמור גובר.
@@ -14,7 +25,11 @@ async function applyAutoSyncDefaultOff(){
   if(st.autoSyncDefaultOffApplied)return;
   await chrome.storage.local.set({autoSyncOnLogin:false,autoSyncDefaultOffApplied:true});
 }
-chrome.runtime.onInstalled.addListener(details=>{const patch={...freshStart};if(details?.reason==='install')patch.autoSyncOnLogin=false;chrome.storage.local.set(patch).then(applyAutoSyncDefaultOff).then(scanAuthenticatedTabs)});
+chrome.runtime.onInstalled.addListener(details=>{
+  // עדכון/רענון: הדגלים בלבד. התקנה: גם הרשימה, וגם סנכרון אוטומטי כבוי.
+  const patch=details?.reason==='update'?{...freshFlags}:{...freshStart};
+  if(details?.reason==='install')patch.autoSyncOnLogin=false;
+  chrome.storage.local.set(patch).then(applyAutoSyncDefaultOff).then(scanAuthenticatedTabs)});
 chrome.runtime.onStartup.addListener(()=>{chrome.storage.local.set(freshStart).then(scanAuthenticatedTabs)});
 
 // ── חיווי מצב על סמל התוסף ────────────────────────────────────────────────
