@@ -52,7 +52,18 @@ const entityId=v=>(String(v).match(/\b(\d{9})\b/)||[])[1]||'';
 const menuEntitiesLoose=()=>{
   const trigger=entityButton();
   const raw=[...document.querySelectorAll('button,[role="button"],[role="option"],[role="menuitem"],li,a,div[tabindex]')]
-    .filter(el=>ENTITY.test(text(el))&&text(el).length<90&&el!==trigger&&!(trigger&&el.contains(trigger)));
+    .filter(el=>ENTITY.test(text(el))&&text(el).length<90&&el!==trigger&&!(trigger&&el.contains(trigger))
+      // ⚠⚠ 25.08.2026 — טל: „מאיפה החשבון החמישי?" נמדד:
+      //   {entity:"000213991", owner:"העברה ממשה ושרונה מיכאל חשבון
+      //    12-544-0005- שכירות צרכניה", resolved:false}
+      // **שורת תנועה נקראה כישות.** התיאור קצר מ-90 תווים, והאסמכתא היא
+      // מספר בן 9 ספרות — כלומר היא עונה על ההגדרה במדויק. התוצאה:
+      // „4 מתוך 5 חשבונות זוהו", וניסיונות מעבר לישות שאינה קיימת.
+      // ⚠ **הסינון כאן מבני ולא דירוגי, במכוון.** ההערה שמעל מתעדת
+      // שדירוג שהעדיף a/button על li **הפיל את הזיהוי כולו** ב-21.08.
+      // אפשרות בבורר הישויות לעולם אינה יושבת **בתוך שורת תנועה**, ולכן
+      // המבחן הזה אינו יכול לפסול אפשרות אמיתית.
+      &&!el.closest('[role="row"],div.rc-strip-row,table tr'));
   // הפנימי ביותר: אלמנט שמכיל מועמד אחר הוא מכולה, לא אפשרות.
   // ⚠ 21.08.2026 — **הוחזר.** דירוג שהעדיף a/button על li הפיל את הזיהוי כולו:
   // discoveredAccounts התרוקן ל-0 ו-discountDiscoverError רשם „לא השיב תוך 60 שניות".
