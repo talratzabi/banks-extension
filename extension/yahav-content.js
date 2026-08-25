@@ -22,7 +22,16 @@
   const loans=()=>{const out=[];for(const row of document.querySelectorAll('[role="row"]')){const c=[...row.querySelectorAll('[role="gridcell"]')].map(x=>clean(x.innerText));if(c.length<6||!c[0]||num(c[2])==null)continue;out.push({type:c[0],interest:c[1]?`${c[1]}%`:'',balance:num(c[2]),originalPrincipal:num(c[3]),nextPaymentDate:c[4],nextPayment:num(c[5])})}return out};
   const field=(label,nextLabels)=>{const t=body(),i=t.indexOf(label);if(i<0)return'';let s=t.slice(i+label.length);for(const n of nextLabels){const p=s.indexOf(n);if(p>=0)s=s.slice(0,p)}return clean(s)};
   const detail=()=>{const t=body(),match=re=>(t.match(re)||[])[1]||'';return{type:match(/סוג הלוואה\s+(.+?)\s+קרן הלוואה מקורית/),originalPrincipal:num(match(/קרן הלוואה מקורית\s+([\d,.]+)/)),endDate:match(/תאריך סיום ההלוואה\s+(\d{2}\/\d{2}\/\d{4})/),nextPaymentDate:match(/תאריך התשלום הבא\s+(\d{2}\/\d{2}\/\d{4})/),startDate:match(/תאריך תחילת ההלוואה\s+(\d{2}\/\d{2}\/\d{4})/),balance:num(match(/יתרה משוערת\s+([\d,.]+)/)),nextPayment:num(match(/סכום התשלום הבא\s+([\d,.]+)/)),interest:match(/ריבית נוכחית \(%\)\s+([\d.]+)/)}};
-  const summary=()=>{let balance=null,creditLimit=null,loanBalance=null;for(const row of document.querySelectorAll('table [role="row"],table tr')){const c=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>clean(x.innerText));if(c[0]==='חשבון עו״ש'&&balance==null)balance=num(c[1]);if(c[0]==='הלוואות'&&loanBalance==null)loanBalance=num(c[1])}const m=body().match(/מסגרת אשראי\s+([\d,.]+)/);if(m)creditLimit=num(m[1]);return{balance,creditLimit,loanBalance}};
+  const summary=()=>{let balance=null,creditLimit=null,loanBalance=null;for(const row of document.querySelectorAll('table [role="row"],table tr')){const c=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>clean(x.innerText));if(c[0]==='חשבון עו״ש'&&balance==null)balance=num(c[1]);if(c[0]==='הלוואות'&&loanBalance==null)loanBalance=num(c[1])}// ⚠⚠ 25.08.2026 — טל: „ביהב אין מסגרת".
+// הרגקס הישן דרש **רווח בלבד** בין התווית למספר, וכל ₪,
+// נקודתיים או רווח קשיח הפילו אותו בשקט.
+// ⚠ **לא ניחשתי את הנוסח.** שחררתי מפריד, הוספתי תוויות
+// שכבר נמדדו בדיסקונט, וגשש שרושם מה באמת כתוב ליד „מסגרת".
+// ⚠ **מסגרת שזהה ליתרה נדחית** — הלקח מ-1.8.4 בדיסקונט.
+// ⚠ המקף **הוסר ממחלקת המפריד**: הוא בלע את סימן
+// המינוס של המספר, ולכן ‎-2,160.71 נקרא כ-2,160.71 והגנת
+// „זהה ליתרה" לא תפסה. **נתפס בבדיקה.**
+const LABELS=['מסגרת אשראי','מסגרת עו״ש','מסגרת מאושרת','מסגרת'];const txt=body();for(const lab of LABELS){const mm=txt.match(new RegExp(lab+'[\\s:\\u00a0\\u20aa]{0,12}(-?[\\d,]+(?:\\.\\d{1,2})?)'));if(mm){creditLimit=num(mm[1]);break}}if(creditLimit!=null&&balance!=null&&Math.abs(creditLimit-balance)<0.011)creditLimit=null;try{const near=[];for(const el of document.querySelectorAll('td,th,div,span,li,p')){if(el.children.length)continue;const t=clean(el.innerText||el.textContent||'');if(t&&t.length<70&&t.indexOf('מסגרת')>=0){const s2=el.nextElementSibling;near.push({text:t,next:s2?clean(s2.innerText||s2.textContent||'').slice(0,40):''});if(near.length>=6)break}}chrome.storage.local.set({yahavCreditProbe:{value:creditLimit,balance,near,at:new Date().toISOString()}})}catch(e){}return{balance,creditLimit,loanBalance}};
   const setRangeFrom=async()=>{
   // ⚠⚠ 25.08.2026 — טל: „יש רק תנועות שלושה חודשים, אין התייחסות
   // לבורר [התאריך]." צודק, ונמדד: הפונקציה לחצה „חודש קודם" **שלוש
