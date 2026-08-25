@@ -122,7 +122,54 @@ async function ready(){for(let i=0;i<120;i++){const t=bodyText();if(t.length>200
 async function discover(){if(!await ready())throw Error(`דף דיסקונט לא נטען בתוך 30 שניות (${bodyText().length} תווים) — ייתכן שההתחברות פגה`);const options=await entityOptions(),entities=[],seen=new Set();for(const b of options){const label=text(b),id=entityId(label);if(id&&!seen.has(id)){seen.add(id);entities.push({id,owner:label.replace(ENTITY,'').replace(/\s{2,}/g,' ').trim()})}}const back=entityButton();if(back)realClick(back);if(!entities.length)throw Error('לא זוהו ישויות בחיבור דיסקונט עסקי');const here=activeAccount(),cur=entityId(text(entityButton()));return entities.map(e=>({key:e.id,entityId:e.id,nickname:e.owner,owner:e.owner,branch:e.id===cur?here.branch:'',accountNumber:e.id===cur?here.accountNumber:'',balance:null}))}
 // ⚠ מקבלת deadline מבחוץ: בלעדיו סבב יחיד כאן בלע את כל תקציב
 // הזיהוי (עד 10 שניות), והלולאה החיצונית חשבה שהיא זולה.
-async function privateAccountOptions(deadline=0){const trigger=document.querySelector('button.accountDropdownMenu,[role="combobox"].accountDropdownMenu');if(!trigger)throw Error('בורר החשבונות הפרטיים לא נמצא');if(!document.querySelector('[role="menu"] [role="radio"]'))realClick(trigger);for(let i=0;i<40;i++){if(deadline&&Date.now()>deadline)break;await wait(250);const rows=[...document.querySelectorAll('[role="menu"] [role="radio"]')];if(rows.length)return rows}return[]}
+// ⚠⚠ 25.08.2026 — נמדד חי: „בורר החשבונות הפרטיים לא נמצא".
+// כלומר הסלקטור `button.accountDropdownMenu` **אינו מתאים לדף הפרטי**
+// (`apollo/retail3`, אפליקציה אחרת מן העסקי).
+// ⚠ **לא ניחשתי סלקטור חדש.** הגשש רושם מה **באמת** יש בדף כשהוא לא
+// נמצא — מחלקות, id, aria, וטקסט קצר — ומן הרשומה הזו נכתוב סלקטור
+// לפי מדידה. **קריאה בלבד: אפס לחיצות, אפס ניווט.**
+function privateTriggerProbe(){
+  const f=t=>String(t||'').replace(/\s+/g,' ').trim();
+  const pick=el=>({tag:el.tagName.toLowerCase(),cls:f(el.className).slice(0,60),
+    id:el.id||'',role:el.getAttribute('role')||'',
+    haspopup:el.getAttribute('aria-haspopup')||'',expanded:el.getAttribute('aria-expanded')||'',
+    label:f(el.getAttribute('aria-label')).slice(0,40),
+    text:f(el.textContent).slice(0,60)});
+  const out={url:location.hash||location.pathname,at:new Date().toISOString()};
+  // מועמדים לפי תפקיד ולפי שם מחלקה מרמז
+  out.byRole=[...document.querySelectorAll('[role="combobox"],[aria-haspopup],[role="listbox"],select')]
+    .slice(0,10).map(pick);
+  out.byClass=[...document.querySelectorAll('[class*="account" i],[class*="dropdown" i],[class*="select" i]')]
+    .filter(el=>f(el.textContent).length<120).slice(0,10).map(pick);
+  // כפתורים שיש בהם מספר חשבון (רצף ספרות) — הבורר כמעט תמיד מציג אחד
+  out.withDigits=[...document.querySelectorAll('button,[role="button"],a')]
+    .filter(el=>/\d{4}/.test(f(el.textContent))&&f(el.textContent).length<90).slice(0,10).map(pick);
+  out.menus=document.querySelectorAll('[role="menu"],[role="listbox"]').length;
+  out.radios=document.querySelectorAll('[role="radio"]').length;
+  // ⚠⚠ טל, 25.08: „אין בורר חשבונות." כלומר ההנחה שבבסיס
+  // `privateAccountOptions` — שיש תפריט נפתח — **שגויה מיסודה**,
+  // ולא רק שהסלקטור התיישן. לכן הגשש חייב לרשום גם **איך החשבונות
+  // כן מוצגים**: אולי כרטיסים, שורות, או לשוניות.
+  // מחפשים תבנית של מספר חשבון (3 ספרות סניף + 6–9 ספרות), ורושמים
+  // את המכיל **הקטן ביותר** שמחזיק אותה — הוא הכרטיס/השורה.
+  const seen=new Set();out.accountLike=[];
+  const RX=/\b\d{2,3}[-\/]\d{5,9}\b|\b\d{9,10}\b/;
+  for(const el of document.querySelectorAll('div,li,article,section,td,a,button')){
+    if(el.children.length>6)continue;
+    const t=f(el.textContent);
+    if(t.length>120||!RX.test(t))continue;
+    const key=t.slice(0,40);
+    if(seen.has(key))continue;seen.add(key);
+    out.accountLike.push({...pick(el),match:(t.match(RX)||[''])[0]});
+    if(out.accountLike.length>=12)break;
+  }
+  // כמה מספרי חשבון שונים בכלל בדף — מבחין בין „חשבון אחד" ל„כמה"
+  out.distinctNumbers=[...new Set((f(document.body.textContent).match(/\b\d{2,3}[-\/]\d{5,9}\b/g)||[]))].slice(0,10);
+  return out;
+}
+async function privateAccountOptions(deadline=0){const trigger=document.querySelector('button.accountDropdownMenu,[role="combobox"].accountDropdownMenu');
+if(!trigger){try{await chrome.storage.local.set({discountPrivateTriggerProbe:privateTriggerProbe()})}catch(e){}
+throw Error('בורר החשבונות הפרטיים לא נמצא')}if(!document.querySelector('[role="menu"] [role="radio"]'))realClick(trigger);for(let i=0;i<40;i++){if(deadline&&Date.now()>deadline)break;await wait(250);const rows=[...document.querySelectorAll('[role="menu"] [role="radio"]')];if(rows.length)return rows}return[]}
 const privateAccountFromRow=row=>{const parts=[...row.querySelectorAll('p')].map(text).filter(Boolean),raw=(parts[0]?.match(/\b\d{9,10}\b/)||[])[0]||'',full=raw.padStart(10,'0'),owner=parts[1]||'דיסקונט פרטי';return full?{key:`${full.slice(0,3)}-${full.slice(3)}`,nickname:owner,owner,branch:full.slice(0,3),accountNumber:full.slice(3),balance:null}:null};
 // ⚠⚠ 25.08.2026 — טל: „הסנכרון נכשל." נמדד פעמיים:
 // „שגיאה בדיסקונט פרטי: זיהוי חשבון פרטי לא השיב תוך 30 שניות".
