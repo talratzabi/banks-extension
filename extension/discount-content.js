@@ -382,13 +382,18 @@ async function assertEntityMatches(id,repaired=false){
   // לכן נוספה ראיה שנייה, **בלי להחליש את הגלאי**: אם מספר החשבון שלנו
   // מופיע בדף ו**אף חשבון של ישות אחרת אינו מופיע** — זו הישות הנכונה,
   // גם אם הקורא המספרי טעה. שתי ישויות בדף בבת אחת = דו-משמעות = חסימה.
-  const onPage=v=>!!v&&text(document.body).includes(v);
+  // ⚠ 25.08.2026 — היה `text(document.body)` **בתוך** הפונקציה, כלומר
+  // קריאת `innerText` על כל הגוף **לכל מועמד בנפרד**: פעם ל-`mine` ועוד
+  // אחת לכל ישות אחרת, בכל אחד מ-8 הסבבים, ופעמיים עם מסלול התיקון.
+  // `innerText` כופה חישוב פריסה מלא. הגוף נקרא עכשיו **פעם אחת לסבב**.
+  const onPage=(v,body)=>!!v&&!!body&&body.includes(v);
   let seen='',label='';
   // ⚠ 8 שניות ולא 15: יחד עם הרחבת הטווח זה חרג מתקציב 90 השניות של הרקע.
   for(let i=0;i<8;i++){
+    const bodyText=text(document.body);
     seen=String(activeAccount().accountNumber||'');label=entityId(text(entityButton()));
     const okLabel=!label||label===String(id);
-    const othersOnPage=others.filter(onPage);
+    const othersOnPage=others.filter(v=>onPage(v,bodyText));
     // ⚠⚠ **בורר הישות הוא ראיה חיובית, ולא רק בדיקת שלילה.**
     // נמדד: {label:"024844714"=want, minePresent:false, othersPresent:[]}
     // — הבורר על הישות הנכונה, מספר החשבון שלנו פשוט **אינו על המסך**
@@ -400,15 +405,15 @@ async function assertEntityMatches(id,repaired=false){
     // חשבון של ישות אחרת נראה בדף, `othersOnPage` חוסם כמו קודם.
     const labelConfirms=!!label&&label===String(id);
     const okNumber=mine
-      ?(seen===mine||((onPage(mine)||labelConfirms)&&!othersOnPage.length))
+      ?(seen===mine||((onPage(mine,bodyText)||labelConfirms)&&!othersOnPage.length))
       :(seen&&!others.includes(seen));
-    if(okLabel&&okNumber&&(seen||onPage(mine)||labelConfirms)){
+    if(okLabel&&okNumber&&(seen||onPage(mine,bodyText)||labelConfirms)){
       // ⚠ נרשם **איך** התקבל האישור. „עבר" דרך הבורר בלבד הוא מצב חלש
       // יותר מ„עבר" דרך התאמת מספר, ואם אי פעם יישמרו נתונים של ישות
       // אחרת — זו הרשומה שתגיד מאיזה מסלול זה הגיע.
       try{await chrome.storage.local.set({discountIdentityPass:{want:String(id),
-        via:seen===mine?'מספר תואם':(onPage(mine)?'החשבון בדף':'בורר הישות בלבד'),
-        seen,label,minePresent:onPage(mine),at:new Date().toISOString()}})}catch{}
+        via:seen===mine?'מספר תואם':(onPage(mine,bodyText)?'החשבון בדף':'בורר הישות בלבד'),
+        seen,label,minePresent:onPage(mine,bodyText),at:new Date().toISOString()}})}catch{}
       return}
     await wait(1000)}
   // ⚠ 21.08.2026 — נמדד: {want:"024844714", expected:"2556371", seen:"9832685",
@@ -426,7 +431,7 @@ async function assertEntityMatches(id,repaired=false){
   // 10 ספרות שנמצא. בלי זה „מוצג חשבון X" הוא מבוי סתום.
   try{const body=text(document.body);
     await chrome.storage.local.set({discountIdentityBlock:{want:String(id),expected:mine,seen,label,
-      minePresent:onPage(mine),othersPresent:others.filter(onPage),
+      minePresent:onPage(mine,body),othersPresent:others.filter(v=>onPage(v,body)),
       tenDigits:[...new Set(body.match(/\d{10}/g)||[])].slice(0,12),
       near:seen?(body.match(new RegExp(`.{0,40}${seen}.{0,40}`))||[''])[0]:'',
       at:new Date().toISOString()}})}catch{}
@@ -434,7 +439,22 @@ async function assertEntityMatches(id,repaired=false){
 }
 async function extract(id,isPrivate=false){phaseStart();// ⚠ הלקח שחזר שלוש פעמים: להמתין לטעינה לפני קריאה. אחרי הניווט וההזרקה מחדש הדף
 // עדיין מתרנדר, וקריאה מיידית מחזירה null ומפילה את הסנכרון.
-for(let i=0;i<120;i++){if(txCandidates().length||valueAfter('יתרת עו"ש')!=null)break;await wait(250)}
+// ⚠⚠ 25.08.2026 — **הלולאה הזו היא רוב זמן הסנכרון בדיסקונט.**
+// נמדד: 304 שניות בין „פותח תנועות" ל-`discountIdentityPass`.
+// `valueAfter` סורק **כל button/p/div/span בדף** וקורא `innerText` על כל
+// אחד — וזה כופה חישוב פריסה מלא. בדף תנועות עם מאות שורות זו פעולה
+// יקרה, והיא רצה כאן עד 120 פעם.
+// ⚠ **וההערה שלמטה בקוד עצמו כבר אמרה את זה:** „בדף התנועות התווית היא
+// „עובר ושב", ו-„יתרת עו״ש" קיימת רק בדף הבית." כלומר בדף התנועות
+// הקריאה מחזירה `null` תמיד — **120 סריקות יקרות שאינן יכולות להצליח.**
+// `txCandidates()` הוא הבדיקה שבאמת עוצרת את הלולאה, והוא זול.
+// לכן: הזול בכל סבב, והיקר אחת ל-2 שניות בלבד — הנפילה-לאחור לדף הבית
+// נשמרת, ומחירה יורד פי שמונה.
+for(let i=0;i<120;i++){
+  if(txCandidates().length)break;
+  if(i%8===7&&valueAfter('יתרת עו"ש')!=null)break;
+  await wait(250)}
+phase('המתנה לטעינת הדף');
 // ⚠⚠ 21.08.2026 — **הבאג החמור ביותר עד כה.** טל: „הוא סנכרן את החשבון של יובל,
 // נתן לו שם של ינון, ומחק את הסנכרון של טל." נמדד מהמסך: בעלים „ינון" עם
 // סניף 008 חשבון 3920651 — **המספר של אביסידריס יובל.** הסיבה: `owner` נקרא
@@ -443,7 +463,7 @@ for(let i=0;i<120;i++){if(txCandidates().length||valueAfter('יתרת עו"ש')!
 // לכן: לא קוראים ישות שלא אומתה מול מספר חשבון ידוע. עדיף להיכשל מלשמור שקר.
 if(!isPrivate)await assertEntityMatches(id);
 // הטווח נשלח לאתר לפני קריאת השורות — אחרת נקרא את חלון ברירת המחדל (3 חודשים).
-if(!isPrivate)await applyCollectSince();
+if(!isPrivate)await applyCollectSince();phase('אחרי החלת הטווח');
 // ⚠ נמדד חי: בדף התנועות התווית היא "עובר ושב", ו-"יתרת עו\"ש" קיימת רק בדף הבית.
 // מרגע שהתחלנו לנווט לתנועות לפני הקריאה, החיפוש אחר התווית הישנה החזיר null תמיד.
 // ⚠ 21.08.2026 — נמדד חי: ישות 514220276 נשמרה בשם „טל רצבי" — השם של
