@@ -304,13 +304,17 @@ async function extract(expectedKey='',fallbackBalance=null){await openCurrentAcc
 // התיקון נעשה כבר ב-1.2.7 והוחזר ב„חזרה ל-1.2.5" לבקשת טל; זו החזרתו.
 // ⚠ 25.08.2026 — כאן היה `applyLeumiRange` יחיד, וזה מה שהגביל ל-29 שורות:
 // לאומי חותך לחודשיים, וחלון אחד החזיר חודש. עכשיו נקראים כל החלונות.
-const raw=await collectRangeRows();const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');if(!raw.length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
+const collected=await collectRangeRows(expectedKey),raw=collected.cells;const c=chooser(),a=parseAccount(expectedKey)||parseAccount(txt(c));if(!a)throw Error('לא זוהה החשבון הפעיל בלאומי');// ⚠ בדלתא, אפס שורות חדשות הוא מצב חוקי — חשבון בלי תנועה בחודש.
+// הכישלון הוא רק כשאין **כלום**: לא חדש ולא שמור.
+if(!raw.length&&!(collected.prev||[]).length)throw Error(`לא נטענו תנועות בחשבון ${a.key}`);const selected=[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map(txt).find(v=>parseAccount(v)?.key===a.key)||txt(c);const card=await accountCard(a);const cardText=card?normalized(cellText(card)):'';const balanceMatch=cardText.match(new RegExp(`${a.branch}-${a.accountNumber}(?:\\/\\d+)?[^₪]{0,20}₪\\s*(-?[\\d,]+\\.\\d{2})`));let balance=balanceMatch?money(balanceMatch[1]):null;// היתרה כבר נקראה מבורר החשבונות בזיהוי; אין סיבה להיכשל אם כרטיס היתרה לא רונדר.
 if(balance==null&&Number.isFinite(fallbackBalance))balance=fallbackBalance;if(balance==null)throw Error(`לא זוהתה יתרת עו״ש בחשבון ${a.key} — לא בכרטיס היתרה ולא בבורר`);const limitMatch=cardText.match(/מסגרת אשראי\s*₪?\s*(-?[\d,]+\.\d{2})/);const creditLimit=limitMatch?money(limitMatch[1]):null;// העמודות נקראות לפי כותרת ולא לפי היסט קבוע. נמדד מול הדף החי: תאריך|תנועות|אסמכתא|חובה|זכות|יתרה מצטברת.
 const idx=columnIndex(),col=(label,fallback)=>Number.isInteger(idx[label])?idx[label]:fallback;
 const iDate=col('תאריך',1),iAction=col('תנועות',2),iRef=col('אסמכתא',3),iDebit=col('חובה',4),iCredit=col('זכות',5),iBalance=col('יתרה מצטברת',6);
 // שורה עתידית ממלאת גם חובה וגם זכות ומשאירה את היתרה המצטברת ריקה — זה המבחן, ולא השוואת תאריכים.
 const parsed=raw.map(cells=>{const date=cells[iDate]||'';if(!/^\d{2}\.\d{2}\.\d{4}$/.test(date))return null;const action=cells[iAction]||'',credit=money(cells[iCredit]),rowBalance=money(cells[iBalance]);return{date,action,details:'',reference:cells[iRef]||'',debit:money(cells[iDebit]),credit,balance:rowBalance,future:rowBalance==null,cheque:/שיק/.test(action)&&credit>0,chequeAmount:credit}}).filter(Boolean);
-const rows=parsed.filter(r=>!r.future),future=parsed.filter(r=>r.future);
+// ⚠ המיזוג עם מה שכבר שמור. בקריאה מלאה `collected.prev` ריק והתוצאה
+// זהה לקודם; בדלתא זה מה שמשלים את התקופה שלא נקראה שוב.
+const rows=mergeRows(collected.prev||[],parsed.filter(r=>!r.future)),future=parsed.filter(r=>r.future);
 if(!rows.length)throw Error(`רשת התנועות בחשבון ${a.key} נקראה ללא שורות שבוצעו (${parsed.length} שורות, מהן ${future.length} עתידיות)`);const nickname=(selected.match(/^(.+?)\s+\d(?:\s+\d){2,}/)||[])[1]?.trim()||(txt(c).match(/^(.+?)\s+\d(?:\s+\d){2,}/)||[])[1]?.trim()||`חשבון ${a.accountNumber}`;return{...a,nickname,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,transactions:rows,transactionCount:rows.length,futureTransactions:future,futureCount:future.length,chequeCount:rows.filter(r=>r.cheque).length}}
 // ⚠ 22.08.2026 — גשש תקופה, **קריאה בלבד**. שתי ריצות לאומי שעות זו מזו החזירו
 // חלון זהה בדיוק — 28 תנועות, 06.07 עד 02.08, פער קבוע של 31,689.07 ש״ח מול
@@ -553,26 +557,33 @@ function ilToMs(v){const m=String(v||'').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
 // ⚠ החלון אינו קבוע בכוונה. גודל המקטע (~חודש? ~29 שורות?) **לא נמדד**,
 // וכל קבוע שאבחר יהיה ניחוש. ההליכה מתקדמת לפי **התאריך האחרון שהוחזר
 // בפועל**, ולכן היא מתכווננת מעצמה יהיה הגבול אשר יהיה.
-async function collectRangeRows(){
-  const st=await chrome.storage.local.get({collectSince:''});
-  const untilMs=Date.now();
-  const asked=Date.parse(String(st.collectSince||''));
-  // הבנק אינו מגיש מעבר לשנתיים; בקשה רחבה יותר נחתכת לרצפה האמיתית.
-  const sinceMs=Number.isFinite(asked)?Math.max(asked,untilMs-LEUMI_MAX_BACK_MS):asked;
-  if(!Number.isFinite(sinceMs)){
-    await applyLeumiRange();await openCurrentAccount();await loadAllRows();
-    return datedRows().map(x=>x.cells);
-  }
+// ⚠ 25.08.2026, בקשת טל — **סנכרון דלתא.** קריאה מלאה מ-01.01 היא תשעה
+// מקטעים ו-129 שיקים בכל ריצה, כש-99 מהם כבר שמורים. הדלתא קוראת רק
+// מ-`lastSync` פחות חפיפה.
+// ⚠ החפיפה אינה קישוט: תנועה בלאומי משנה תאריך רטרואקטיבית (נמדד —
+// `action` נושא תאריך שונה מ-`date`), ודלתא מ-`lastSync` המדויק הייתה
+// מפספסת תיקון בתנועה ישנה.
+// ⚠ ההרחבה **גיאומטרית ולא זוחלת**: 60 יום, אחר כך 180, ואז ישר לרצפה.
+// הרחבה בקפיצות קבועות הייתה יכולה לדרוש חמש הליכות מלאות — כלומר
+// **איטית יותר מקריאה מלאה אחת**, וזה מפספס את כל מטרת הדלתא.
+// ארבע הליכות במקרה הגרוע, אחת במקרה הרגיל.
+const DELTA_OVERLAP_DAYS=30,DELTA_WIDEN_DAYS=60,DELTA_MAX_WIDEN=4;
+// מפתח שורה משותף לשני העולמות: שורה גולמית מן הדף, ותנועה מפוענחת
+// שכבר שמורה. **היתרה המצטברת חלק מן המפתח** — היא מה שהופך „אותה
+// תנועה" ל„אותו מצב חשבון", וזו כל הבדיקה.
+function rowKeyOfCells(cells,col){
+  return [cells[col('תאריך',1)]||'',cells[col('אסמכתא',3)]||'',
+    money(cells[col('חובה',4)]),money(cells[col('זכות',5)]),
+    money(cells[col('יתרה מצטברת',6)])].join('|');
+}
+const rowKeyOfSaved=r=>[r.date||'',r.reference||'',r.debit,r.credit,r.balance].join('|');
+// ההליכה עצמה, שאומתה חי (9 מקטעים, 196 תנועות): מבקשת מקטע, קוראת,
+// ומקדמת את `from` לתאריך האחרון שחזר בפועל.
+async function walkFrom(fromMs,untilMs){
   const seen=new Set(),out=[],log=[];
-  let from=sinceMs,prevLatest=null,stop='';
-  // תקרת 24 מקטעים. **שומר לולאה — לא להסיר.** יחד עם מבחן „אין התקדמות"
-  // למטה, אין מסלול שבו הלולאה רצה בלי סוף מול הבנק.
+  let from=fromMs,prevLatest=null,stop='';
   for(let step=0;step<24;step++){
     await applyLeumiRange(from,untilMs);
-    // ⚠ מקטע ללא תנועות הוא מצב חוקי — אבל `openCurrentAccount` ממתין לו
-    // **45 שניות** לפני שהוא זורק. יחד עם 18 השניות שלמעלה זה 63 שניות
-    // מבוזבזות לכל מקטע ריק, וזה מה שהוציא את הריצה מתקציב ה-worker.
-    // כאן די בהמתנה חסומה: הרשת כבר רונדרה פעם אחת לפני הבקשה הזו.
     let empty=false;
     if(!datedRows().length){for(let i=0;i<32;i++){await wait(250);if(datedRows().length)break}}
     if(!datedRows().length)empty=true;else{try{await loadAllRows()}catch(e){empty=true}}
@@ -583,20 +594,97 @@ async function collectRangeRows(){
     log.push({from:ilShort(from),read:cells.length,added,
       latest:latest==null?'':ilShort(latest),empty});
     if(empty||latest==null){stop='מקטע ריק';break}
-    // הגענו לקצה העליון — אין מה להמשיך.
     if(latest>=untilMs-864e5){stop='הגיע להיום';break}
-    // ⚠ **מבחן ההתקדמות, והוא גם שומר הלולאה האמיתי.** אם המקטע החדש
-    // אינו מגיע רחוק יותר מקודמו, בקשה נוספת תחזיר שוב את אותו דבר.
     if(prevLatest!=null&&latest<=prevLatest){stop='אין התקדמות';break}
-    prevLatest=latest;
-    from=latest; // חפיפה של יום אחד: מתחילים מהיום האחרון שכבר נקרא
+    prevLatest=latest;from=latest;
   }
-  // ⚠ הרשומה הזו היא המדידה. `read` גדול עם `added:0` = הבקשה החזירה שוב
-  // את אותו מקטע; `stop` אומר למה נעצרנו, וזה ההבדל בין „נגמרו הנתונים"
-  // לבין „נתקענו".
-  try{await chrome.storage.local.set({leumiWindows:{at:new Date().toISOString(),
-    since:ilShort(sinceMs),steps:log,total:out.length,stop}})}catch{}
-  return out;
+  return{cells:out,steps:log,stop};
+}
+// ⚠⚠ **„אם אין התאמה ליתרות — ללכת עוד אחורה עד שתהיה" (טל, 25.08).**
+// המבחן: **השורה הישנה ביותר שנקראה חייבת להיות שורה שכבר שמורה אצלנו,
+// זהה לחלוטין כולל היתרה המצטברת.** אם כן — התפר מעוגן, ואין חור בין
+// מה שיש למה שנקרא. אם לא — התנועות הישנות השתנו, או שהחלון קצר מדי,
+// ואז מרחיבים 60 יום אחורה ומנסים שוב, עד `collectSince`.
+// ⚠ הרחבה נעצרת ב-`collectSince` ולא נמשכת לנצח: שם ממילא נקראת כל
+// התקופה, ואין „עוד אחורה" שיש בו טעם.
+async function collectRangeRows(expectedKey){
+  const st=await chrome.storage.local.get({collectSince:'',accounts:[]});
+  const untilMs=Date.now();
+  const asked=Date.parse(String(st.collectSince||''));
+  const floorMs=Number.isFinite(asked)?Math.max(asked,untilMs-LEUMI_MAX_BACK_MS):asked;
+  if(!Number.isFinite(floorMs)){
+    await applyLeumiRange();await openCurrentAccount();await loadAllRows();
+    return{cells:datedRows().map(x=>x.cells),prev:[]};
+  }
+  const acc=(st.accounts||[]).find(a=>a&&a.source==='leumi'&&a.selectionKey===`leumi|${expectedKey}`);
+  const prev=Array.isArray(acc&&acc.transactions)?acc.transactions.filter(r=>r&&r.date):[];
+  const lastSyncMs=Date.parse(String((acc&&acc.lastSync)||''));
+  // מיפוי מפתח→מיקום, כדי לדעת לא רק **אם** יש הסכמה אלא **היכן** —
+  // ומשם לקצץ את השמור.
+  const prevIndex=new Map();prev.forEach((r,i)=>{prevIndex.set(rowKeyOfSaved(r),i)});
+  let keep=prev;
+  const idx=columnIndex(),col=(l,f)=>Number.isInteger(idx[l])?idx[l]:f;
+  const useDelta=prev.length>0&&Number.isFinite(lastSyncMs);
+  let from=useDelta?Math.max(floorMs,lastSyncMs-DELTA_OVERLAP_DAYS*864e5):floorMs;
+  const report={at:new Date().toISOString(),key:String(expectedKey||''),
+    mode:useDelta?'דלתא':'מלא',prevRows:prev.length,
+    lastSync:Number.isFinite(lastSyncMs)?ilShort(lastSyncMs):'',attempts:[]};
+  let result={cells:[],steps:[],stop:''};
+  for(let attempt=0;attempt<DELTA_MAX_WIDEN;attempt++){
+    result=await walkFrom(from,untilMs);
+    // ⚠⚠ **„לחפש את היתרה האחרונה בבנק התואמת, ומשם להריץ עדכון"
+    // (טל, 25.08).** העיגון הוא על **נקודת ההסכמה האחרונה** — השורה
+    // החדשה ביותר שהבנק מחזיר ושכבר שמורה אצלנו זהה לחלוטין, כולל
+    // היתרה המצטברת.
+    // ⚠ **זה עדיף על עיגון בשורה הישנה ביותר, וזה לא ניואנס:** שורה
+    // שתוקנה רטרואקטיבית הייתה נכנסת **פעמיים** — הגרסה הישנה מן
+    // השמור והחדשה מן הבנק — כי המפתח כולל את היתרה ולכן הן שונות.
+    // עכשיו כל מה ששמור **אחרי** נקודת ההסכמה נזרק, והבנק הוא המקור
+    // היחיד משם והלאה.
+    const full=from<=floorMs;
+    let anchorPos=-1,pIdx=-1;
+    for(let i=result.cells.length-1;i>=0&&anchorPos<0;i--){
+      const k=rowKeyOfCells(result.cells[i],col);
+      const at=prevIndex.get(k);
+      if(at!=null){anchorPos=i;pIdx=at}
+    }
+    const anchored=anchorPos>=0||full;
+    report.attempts.push({from:ilShort(from),rows:result.cells.length,
+      anchored,full,anchorAt:anchorPos>=0?String(result.cells[anchorPos][col('תאריך',1)]||''):'',
+      droppedFromSaved:pIdx>=0?prev.length-(pIdx+1):0,stop:result.stop});
+    if(anchored){
+      report.anchoredAt=ilShort(from);
+      // ⚠⚠ **בתוך החלון שנקרא, הבנק הוא המקור היחיד.**
+      // עיגון על „ההסכמה האחרונה" בלבד לא הספיק, ובדיקה תפסה זאת:
+      // שורה שתוקנה רטרואקטיבית **לפני** נקודת ההסכמה נשארה בשמור
+      // בגרסתה הישנה, והבנק החזיר את החדשה — **שתי גרסאות של אותה
+      // תנועה** (נמדד: כפילות אחת בדיוק).
+      // לכן נשמר רק מה שישן מן השורה הראשונה שהבנק החזיר; כל השאר
+      // נקרא מחדש ממילא. נקודת ההסכמה נשארת **מבחן התקינות** — היא
+      // מוכיחה שהחלון חופף למה שיש לנו ואין חור באמצע.
+      const oldestMs=result.cells.length?ilToMs(String(result.cells[0][col('תאריך',1)]||'')):NaN;
+      keep=Number.isFinite(oldestMs)
+        ?prev.filter(r=>{const t=ilToMs(String(r.date||''));return Number.isFinite(t)&&t<oldestMs})
+        :(full?[]:prev);
+      report.oldestFromBank=Number.isFinite(oldestMs)?ilShort(oldestMs):'';
+      break}
+    if(full)break;
+    from=Math.max(floorMs,from-DELTA_WIDEN_DAYS*Math.pow(3,attempt)*864e5);
+  }
+  report.total=result.cells.length;report.steps=result.steps;
+  report.keptFromSaved=keep.length;
+  try{await chrome.storage.local.set({leumiDelta:report})}catch{}
+  return{cells:result.cells,prev:keep};
+}
+// מיזוג: מה שכבר שמור, ומה שנקרא עכשיו. **המפתח כולל את היתרה
+// המצטברת**, ולכן תנועה שתוקנה רטרואקטיבית נכנסת כשורה נפרדת ולא
+// נבלעת בישנה. מיון עולה בתאריך, כי `gapOf` ברקע משווה את **האחרונה**
+// ליתרת החשבון.
+function mergeRows(prev,fresh){
+  const seen=new Set(),out=[];
+  for(const r of [...prev,...fresh]){const k=rowKeyOfSaved(r);if(seen.has(k))continue;seen.add(k);out.push(r)}
+  const stamp=v=>{const m=String(v||'').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);return m?Date.UTC(+m[3],+m[2]-1,+m[1]):0};
+  return out.sort((a,b)=>stamp(a.date)-stamp(b.date));
 }
 async function applyLeumiRange(winFrom,winTo){
   const report=async(reason,extra)=>{try{await chrome.storage.local.set(
