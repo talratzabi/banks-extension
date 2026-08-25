@@ -1141,8 +1141,31 @@ try{const p=await chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_PING'});if(p?.ok
 try{await chrome.scripting.executeScript({target:{tabId},files:['discount-content.js']})}catch(e){last=e.message}
 await delay(attempt===1?500:1500)}
 throw Error(`אין חיבור לעמוד דיסקונט אחרי 5 ניסיונות: ${last}`)}
+// ⚠⚠ 25.08.2026 — טל: „מסנכרן דיסקונט פרטי והחשבון פתוח
+// מהסנכרון הקודם — הוא פותח עוד דף, בניגוד לבנקים האחרים."
+// **נמדד, וההשוואה חד-משמעית:**
+//   `startDiscountBusiness` → `discountTab()` ואם קיימת — מזהה בה.
+//   `startLeumi` · `startYahav` → אותו דפוס.
+//   `startDiscountPrivate` → **פתח חלון כניסה ללא תנאי.**
+// ⚠ `discountTab()` לא שימש כאן מסיבה טובה: הוא תופס כל
+// `start.telebank.co.il/*` — **גם עסקי וגם פרטי** — ועלול לבחור
+// את הלשונית הלא נכונה. לכן מסננים ל-`/apollo/retail3/`,
+// בדיוק כפי ש-`syncDiscountPrivate` כבר עושה.
+async function discountPrivateTab(){
+const all=await chrome.tabs.query({url:['https://start.telebank.co.il/apollo/retail3/*']});
+const tabs=all.filter(t=>!/\/login\//.test(t.url||''));
+if(!tabs.length)return null;
+const [active]=await chrome.tabs.query({active:true,currentWindow:true});
+return tabs.find(t=>t.id===active?.id)||tabs.find(t=>t.active)||[...tabs].sort((a,b)=>(b.lastAccessed||0)-(a.lastAccessed||0))[0];
+}
 async function startDiscountPrivate(){
-await chrome.storage.local.set({pendingDiscountPrivate:true,pendingDiscountBusiness:false,syncStatus:'ממתין להתחברות לדיסקונט פרטי'});
+await chrome.storage.local.set({pendingDiscountPrivate:true,pendingDiscountBusiness:false,syncStatus:'דיסקונט פרטי: בודק את החיבור'});
+// ⚠ מחזרים לשונית קיימת במקום לפתוח אחת. לא נוסף כאן
+// `returnToDashboard` — העסקי משתמש בו, אבל המסלול הפרטי
+// מנווט בעצמו ל-`#/MY_ACCOUNT_HOMEPAGE`, **ולא נמדד שהוא נדרש כאן.**
+const tab=await discountPrivateTab();
+if(tab){await prepareDiscountContent(tab.id);await discoverDiscountPrivate(tab.id);return{ok:true,status:'discovering'}}
+await chrome.storage.local.set({syncStatus:'ממתין להתחברות לדיסקונט פרטי'});
 await chrome.windows.create({url:DISCOUNT_LOGIN_PRIVATE,type:'popup',width:560,height:780,focused:true});
 return{ok:true,status:'waiting_login'}}
 async function handleDiscountAuthenticated(tabId){const state=await chrome.storage.local.get({pendingDiscountBusiness:false,pendingDiscountPrivate:false});
