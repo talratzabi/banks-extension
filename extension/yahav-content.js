@@ -1,5 +1,18 @@
 (()=>{
-  if(globalThis.__banksYahavLoaded)return;globalThis.__banksYahavLoaded=true;
+  // ⚠⚠ 25.08.2026 — **היה כאן דגל בוליאני, והוא מסוכן.** נמדד היום
+  // בדיסקונט: כשמרעננים את התוסף ה-content script הישן מת, אבל
+  // ה-`window`/`globalThis` של העולם המבודד **שורד עם הדגל דלוק** —
+  // וההזרקה החדשה יוצאת מיד **בלי לרשום מאזין כלל**. התוצאה שנרשמה
+  // שם: „זיהוי הישויות לא השיב תוך 60 שניות", וזה עלה כמה סבבים.
+  // ⚠ **יהב היה הקובץ האחרון שנשאר עם התבנית הזו** (נבדק: שמונת
+  // האחרים כבר עברו ב-1.9.6). הוא לא הופיע ברשימה שתיקנתי אז כי
+  // הוא רושם מאזין אחד גם בלי שומר — ולכן הבדיקה לא סימנה אותו.
+  // **בדיקת חיות:** ההפניה ל-`chrome.runtime` נתפסת **בסגור** בזמן
+  // הטעינה; כשההקשר מת הגישה זורקת, הבדיקה מחזירה false, והסקריפט
+  // החדש נרשם. שני המצבים נפתרים יחד.
+  if(globalThis.__banksYahavLoaded){try{if(globalThis.__banksYahavLoaded())return}catch(e){}}
+  const __rtYahav=(()=>{try{return chrome.runtime}catch(e){return null}})();
+  globalThis.__banksYahavLoaded=()=>{try{return !!(__rtYahav&&__rtYahav.id)}catch(e){return false}};
   const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();
   const num=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};
   const body=()=>clean(document.body?.innerText||'');
