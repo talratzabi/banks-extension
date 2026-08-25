@@ -120,9 +120,37 @@ return [already,menuEntities(),loose].sort((a,b)=>distinct(b)-distinct(a)||b.len
 // מספר החשבון והיתרה נקראים בסנכרון, ישות אחת בכל קריאה.
 async function ready(){for(let i=0;i<120;i++){const t=bodyText();if(t.length>200&&ENTITY.test(t))return true;await wait(250)}return false}
 async function discover(){if(!await ready())throw Error(`דף דיסקונט לא נטען בתוך 30 שניות (${bodyText().length} תווים) — ייתכן שההתחברות פגה`);const options=await entityOptions(),entities=[],seen=new Set();for(const b of options){const label=text(b),id=entityId(label);if(id&&!seen.has(id)){seen.add(id);entities.push({id,owner:label.replace(ENTITY,'').replace(/\s{2,}/g,' ').trim()})}}const back=entityButton();if(back)realClick(back);if(!entities.length)throw Error('לא זוהו ישויות בחיבור דיסקונט עסקי');const here=activeAccount(),cur=entityId(text(entityButton()));return entities.map(e=>({key:e.id,entityId:e.id,nickname:e.owner,owner:e.owner,branch:e.id===cur?here.branch:'',accountNumber:e.id===cur?here.accountNumber:'',balance:null}))}
-async function privateAccountOptions(){const trigger=document.querySelector('button.accountDropdownMenu,[role="combobox"].accountDropdownMenu');if(!trigger)throw Error('בורר החשבונות הפרטיים לא נמצא');if(!document.querySelector('[role="menu"] [role="radio"]'))realClick(trigger);for(let i=0;i<40;i++){await wait(250);const rows=[...document.querySelectorAll('[role="menu"] [role="radio"]')];if(rows.length)return rows}return[]}
+// ⚠ מקבלת deadline מבחוץ: בלעדיו סבב יחיד כאן בלע את כל תקציב
+// הזיהוי (עד 10 שניות), והלולאה החיצונית חשבה שהיא זולה.
+async function privateAccountOptions(deadline=0){const trigger=document.querySelector('button.accountDropdownMenu,[role="combobox"].accountDropdownMenu');if(!trigger)throw Error('בורר החשבונות הפרטיים לא נמצא');if(!document.querySelector('[role="menu"] [role="radio"]'))realClick(trigger);for(let i=0;i<40;i++){if(deadline&&Date.now()>deadline)break;await wait(250);const rows=[...document.querySelectorAll('[role="menu"] [role="radio"]')];if(rows.length)return rows}return[]}
 const privateAccountFromRow=row=>{const parts=[...row.querySelectorAll('p')].map(text).filter(Boolean),raw=(parts[0]?.match(/\b\d{9,10}\b/)||[])[0]||'',full=raw.padStart(10,'0'),owner=parts[1]||'דיסקונט פרטי';return full?{key:`${full.slice(0,3)}-${full.slice(3)}`,nickname:owner,owner,branch:full.slice(0,3),accountNumber:full.slice(3),balance:null}:null};
-async function discoverPrivate(){for(let i=0;i<120;i++){try{const rows=await privateAccountOptions(),accounts=rows.map(privateAccountFromRow).filter(Boolean);if(accounts.length)return accounts}catch{}await wait(250)}throw Error('רשימת החשבונות הפרטיים לא נמצאה לאחר ההתחברות')}
+// ⚠⚠ 25.08.2026 — טל: „הסנכרון נכשל." נמדד פעמיים:
+// „שגיאה בדיסקונט פרטי: זיהוי חשבון פרטי לא השיב תוך 30 שניות".
+// **השורש — אותו באג בדיוק שעלה שבעה סבבים היום (1.10.5):**
+// הלולאה כאן חסומה ב-120 סבבים, **בספירה בלבד**, והניחה שכל סבב עולה
+// 250 מ״ש. אבל `privateAccountOptions()` מכילה לולאה משלה של
+// 40 × 250 מ״ש — **עד 10 שניות לסבב.** במקרה הגרוע 120 × 10 = 20 דקות,
+// בעוד התקציב ברקע הוא **30 שניות**. לכן המטפל לא השיב לעולם, וההודעה
+// שהמשתמש ראה הייתה timeout ולא סיבה אמיתית.
+// **תקרת סבבים אינה תקרת זמן.** גבול שעון־קיר, ומתחת לתקציב הרקע.
+// ⚠ 20 שניות ולא 30: חייבים **להספיק לזרוק ולהשיב** בתוך התקציב,
+// אחרת הכשל שוב ייראה כשתיקה במקום כשגיאה מוסברת.
+const PRIVATE_DISCOVER_MS=20000;
+async function discoverPrivate(){
+  const deadline=Date.now()+PRIVATE_DISCOVER_MS;
+  let lastErr='';
+  for(let i=0;i<120;i++){
+    try{
+      const rows=await privateAccountOptions(deadline),accounts=rows.map(privateAccountFromRow).filter(Boolean);
+      if(accounts.length)return accounts;
+    }catch(e){lastErr=String(e&&e.message||e).slice(0,80)}
+    if(Date.now()>deadline)break;
+    await wait(250);
+  }
+  // ⚠ השגיאה נושאת עכשיו את הסיבה האחרונה שנתפסה. קודם היא נבלעה
+  // ב-`catch{}` ריק, והמשתמש קיבל „לא נמצאה" בלי לדעת למה.
+  throw Error(`רשימת החשבונות הפרטיים לא נמצאה לאחר ההתחברות${lastErr?` — ${lastErr}`:''}`);
+}
 async function selectPrivateAccount(key){const wanted=String(key).replace(/\D/g,'').padStart(10,'0'),current=activeAccount();if(`${current.branch}${current.accountNumber}`===wanted)return;const rows=await privateAccountOptions(),row=rows.find(r=>{const a=privateAccountFromRow(r);return a&&`${a.branch}${a.accountNumber}`===wanted});if(!row)throw Error(`החשבון ${key} לא נמצא בבורר דיסקונט פרטי`);realClick(row);for(let i=0;i<50;i++){await wait(300);const a=activeAccount();if(`${a.branch}${a.accountNumber}`===wanted)return}throw Error(`דיסקונט לא עבר לחשבון ${key}`)}
 // ⚠ 20.08.2026 — נמדד מ-discountEntityReport ולא שוחזר בהשערה: לשלוש הישויות
 //   passes=2 · resolved=false · seenEntities=["024844714"] · selectError ריק.
