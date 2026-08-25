@@ -432,13 +432,17 @@ async function applyCollectSince(){
     // ⚠ הערך בשדה אינו הוכחה שהטבלה מציגה את הטווח: האתר זוכר את החיפוש הקודם,
     // אבל אחרי ניווט הטבלה חוזרת לברירת המחדל. לכן לוחצים גם כשהערך כבר נכון,
     // אלא אם התנועה המוקדמת כבר קודמת לתאריך המבוקש.
+    phase('טווח: פקדים נמצאו');
     const wantMs=Date.parse(String(st.collectSince)),cur=earliestRow();
+    phase('טווח: earliestRow #1');
     if(from.value===want&&to.value===today&&cur&&cur<=wantMs)return report('כבר בטווח',{earliest:new Date(cur).toISOString().slice(0,10),rows:document.querySelectorAll('.rc-table-row').length});
     const rowCount=()=>document.querySelectorAll('.rc-table-row').length;
     const before=earliestRow(),beforeRows=rowCount();
+    phase('טווח: earliestRow #2');
     from.focus();nativeSet(from,want);await wait(300);
     to.focus();nativeSet(to,today);await wait(300);
     btn.click();
+    phase('טווח: השדות הוזנו והכפתור נלחץ');
     // ⚠ 20.08.2026 — הריצה הראשונה רשמה rows:0: הטבלה מתרוקנת בזמן הבקשה, והקריאה
     // חזרה לפני שהיא התמלאה. לכן לא מספיק „המוקדמת השתנתה" — ממתינים לטבלה
     // **לא ריקה ויציבה** בשתי דגימות רצופות, ואם נשארה ריקה — לוחצים שוב פעם אחת.
@@ -450,7 +454,9 @@ async function applyCollectSince(){
       last=n;
       if(!retried&&n===0&&i===10){retried=true;btn.click()}
     }
+    phase(`טווח: לולאת ההמתנה נגמרה (${last} שורות)`);
     await report('הופעל',{to:today,toValue:to.value,rows:rowCount(),beforeRows,earliest:(()=>{const e=earliestRow();return e?new Date(e).toISOString().slice(0,10):''})(),earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried,value:from.value})
+    phase('טווח: הדיווח נכתב');
     note(`דיסקונט: טווח מ-${want}`);
   }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
 }
