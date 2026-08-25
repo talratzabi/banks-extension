@@ -125,7 +125,10 @@ function phaseStart(id){phaseT0=Date.now();phases=[];phaseEntity=String(id||'')}
 // ⚠ נכתב **מיד**, ולא רק בסוף `extract`. הריצה שנכשלה ב-timeout לא
 // הגיעה לשמירה, ולכן המדידה שהייתי צריך בדיוק אז — אבדה.
 // גשש ששורד רק בהצלחה אינו גשש.
-function phase(name){phases.push({name,ms:Date.now()-phaseT0});
+// ⚠ `selectEntity` נקרא גם **מחוץ** ל-`extract` (מעבר ישות ברקע), ואז
+// `phaseT0` היה 0 ו-`ms` יצא חותמת זמן מוחלטת (1.787e12) במקום משך.
+// גשש שמדווח מספר חסר פשר גרוע מגשש שותק.
+function phase(name){if(!phaseT0)return;phases.push({name,ms:Date.now()-phaseT0});
   try{chrome.storage.local.set({discountPhases:{entity:phaseEntity,at:new Date().toISOString(),
     total:Date.now()-phaseT0,phases}})}catch{}}
 async function phaseSave(id){try{await chrome.storage.local.set(
@@ -304,7 +307,17 @@ function latestRowBalance(rows){
 // מספר חשבון בדיסקונט הוא בן עשר ספרות ומזהה ישות בן תשע — בדיוק הצורה
 // שנקראה בטעות. זה **אינו** תחליף לכלל המיקום, אלא רשת ביטחון אחריו.
 const plausibleLimit=n=>Number.isFinite(n)&&Math.abs(n)<1e8;
-function creditLimitValue(labels){
+// ⚠⚠ 25.08.2026 — **מסגרת שזהה ליתרה בדיוק היא היתרה, לא מסגרת.**
+// נמדד פעמיים אצל טל, ובשני המקרים ההתאמה הייתה לאגורה:
+//   „אביסידריס יובל" מסגרת 154.92 = יתרה 154.92
+//   „ינון מושב"      מסגרת 285,292.66 = יתרה 285,292.66
+// והגשש הראה איך: `{t:"₪285,292.66", why:"אח שכולו סכום"}` — בחשבון
+// **ללא** מסגרת, התווית „מסגרת אשראי" יושבת ליד סכום היתרה, והסריקה
+// הרחבה תופסת אותו כי הוא אכן „אלמנט שכולו סכום".
+// ⚠ אין דרך להבחין ביניהם לפי מבנה — **רק לפי הערך**. ההסתברות
+// שמסגרת אשראי אמיתית תהיה זהה ליתרה עד האגורה זניחה, והנפילה
+// בטוחה: ריק במקום מספר שגוי.
+function creditLimitValue(labels,balance){
   const probe={at:new Date().toISOString(),tried:[]},NEG=/(לא\s+קיימ|לא\s+קיים|אין\s|ללא\s)/;
   const PURE=/^[₪\s]*-?[\d,]+(?:\.\d{1,2})?[₪\s]*$/;
   let found=null,negated=false;
@@ -338,6 +351,10 @@ function creditLimitValue(labels){
       if(found!=null)break;
     }
     if(found!=null||negated)break;
+  }
+  if(found!=null&&Number.isFinite(Number(balance))&&Math.abs(found-Number(balance))<0.005){
+    probe.tried.push({why:'נדחה — זהה ליתרה',v:found,balance:Number(balance)});
+    found=null;
   }
   probe.value=found;probe.negated=negated;
   try{chrome.storage.local.set({discountCreditProbe:probe})}catch{}
@@ -532,7 +549,7 @@ if(!isPrivate)await applyCollectSince();phase('אחרי החלת הטווח');
 const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();phase('אחרי גלאי הזהות');const known=isPrivate?null:await knownAccountFor(id);
 // ⚠ המספר שהזיהוי קרא גובר על גריפה מטקסט הדף. נפילה-לאחור נשמרת
 // לדיסקונט פרטי ולכל מקרה שבו הישות אינה ברשימה.
-const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${bodyText().slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}phase('סיום הקריאה');await phaseSave(id);
+const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת'],balance),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${bodyText().slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}phase('סיום הקריאה');await phaseSave(id);
 return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
 async function sync(keys,isPrivate=false){const out=[];for(const key of keys)out.push(await extract(key,isPrivate));return out}
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txRowCount(),
