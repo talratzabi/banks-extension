@@ -89,7 +89,28 @@ const rankOption=el=>{const tag=el.tagName.toLowerCase();if(tag==='a'||tag==='bu
 const brief=el=>`${el.tagName.toLowerCase()}${el.id?'#'+el.id:''}${(String(el.className||'').trim().split(/\s+/)[0]||'')?'.'+String(el.className).trim().split(/\s+/)[0]:''}`;
 // המתנה אחרי לחיצה: הישות בבורר **וגם** מספר חשבון אחר. אם הבורר התחלף אבל
 // המספר לא — נותנים לדף עוד חלון, ורק בסופו מקבלים החלפה בלי שינוי מספר.
-async function switched(id,previous,ms){const until=Date.now()+ms;while(Date.now()<until){await wait(250);const account=activeAccount().accountNumber;if(entityNow()===id&&account&&account!==previous)return true}const account=activeAccount().accountNumber;return entityNow()===id&&!!account}
+// ⚠⚠ 25.08.2026 — **כאן נשרפו שניות רבות, ומאותו שורש כמו כל השאר היום.**
+// התנאי דרש `account!==previous`, ו-`previous` מגיע מ-`activeAccount()` —
+// אותו קורא שנמדד כמחזיר `0690300`, מספר החשבון של הנעבר בשורת תנועה.
+// כשהמספר הזר אינו משתנה התנאי **לעולם אינו מתקיים**, והלולאה שורפת את
+// מלוא ה-3 שניות **גם כשהמעבר הצליח מיד** — ואז נופלת לשורה האחרונה
+// שמחזירה true בדיוק על סמך `entityNow()`.
+// **בורר הישות הוא האות האמין** (נקבע היום ב-1.6.1, `discountIdentityPass`).
+// לכן: שינוי מספר חשבון נשאר האות החזק ומחזיר מיד; ובהיעדרו די בבורר
+// שמצביע על הישות **שלוש בדיקות ברציפות** (750 מ״ש), במקום 3 שניות מלאות.
+async function switched(id,previous,ms){const until=Date.now()+ms;let steady=0;
+  while(Date.now()<until){await wait(250);const account=activeAccount().accountNumber;
+    if(entityNow()===id&&account&&account!==previous)return true;
+    if(entityNow()===id){if(++steady>=3)return true}else steady=0}
+  const account=activeAccount().accountNumber;return entityNow()===id&&!!account}
+// ⚠ מדידת שלבים. 154 שניות במעבר ישות אינן מוסברות ע"י `switched` לבדו
+// (51 קריאות?), ואין לי מדידה בפירוט הזה. **לא מנחשים — מודדים.**
+let phaseT0=0,phases=[];
+function phaseStart(){phaseT0=Date.now();phases=[]}
+function phase(name){phases.push({name,ms:Date.now()-phaseT0})}
+async function phaseSave(id){try{await chrome.storage.local.set(
+  {discountPhases:{entity:String(id||''),at:new Date().toISOString(),
+   total:Date.now()-phaseT0,phases}})}catch{}}
 // ⚠⚠ 22.08.2026 — טל: „עשיתי סנכרון ממרץ ליובל" → „דיסקונט לא עבר לישות
 // 514220276 — נוסו 1 רמות לחיצה (0:li.commonDropdown__menuItem)".
 // **נמדד משלוש רשומות שהקוד כתב לעצמו, ולא משוער:**
@@ -106,7 +127,7 @@ async function switched(id,previous,ms){const until=Date.now()+ms;while(Date.now
 // **סינן** li והפיל את הזיהוי כולו (discoveredAccounts=0), כי discover()
 // נשען על אותה רשימה. כאן לא מסננים דבר — הרשימה נשארת שלמה, רק סדר
 // הניסיון משתנה, והשינוי מקומי ל-selectEntity ואינו נוגע ב-discover().
-async function selectEntity(id){if(entityNow()===id)return;const previous=activeAccount().accountNumber,options=await entityOptions();
+async function selectEntity(id){if(entityNow()===id){phase('הישות כבר פעילה');return}phase('תחילת מעבר ישות');const previous=activeAccount().accountNumber,options=await entityOptions();
 const matches=options.filter(b=>entityId(text(b))===id);
 if(!matches.length)throw Error(`הישות ${id} לא נמצאה בדיסקונט עסקי`);
 // a/button לפני li — `a.dropdown-item` הוא היחיד שנמדד כמצליח. זו העדפת
@@ -118,7 +139,7 @@ for(let level=0;level<chain.length;level++){const el=chain[level];
   // הורה שמכיל יותר ממזהה אחד הוא הרשימה כולה, לא האפשרות — לחיצה עליו תפגע במקום אחר.
   if(level&&idsIn(el)>1)break;
   tried.push(`${level}:${brief(el)}`);realClick(el);
-  if(await switched(id,previous,3000)){try{chrome.storage.local.set({discountSelectWorked:{entity:id,level,path:brief(el),chain:tried,at:new Date().toISOString()}})}catch{}return}}}
+  if(await switched(id,previous,3000)){phase(`מעבר הצליח אחרי ${tried.length} לחיצות`);try{chrome.storage.local.set({discountSelectWorked:{entity:id,level,path:brief(el),chain:tried,at:new Date().toISOString()}})}catch{}return}}}
 try{chrome.storage.local.set({discountSelectFailed:{entity:id,tried,candidates:ranked.map(brief),seen:entityNow(),account:activeAccount().accountNumber,at:new Date().toISOString()}})}catch{}
 throw Error(`דיסקונט לא עבר לישות ${id} — נוסו ${tried.length} לחיצות על ${ranked.length} מועמדים (${tried.join(' | ')})`)}
 function valueAfter(label){const nodes=[...document.querySelectorAll('button,p,div,span')].filter(el=>text(el).includes(label)).sort((a,b)=>text(a).length-text(b).length);for(const el of nodes){const own=money(text(el).slice(text(el).indexOf(label)+label.length));if(own!=null)return own;for(const near of [el.nextElementSibling,el.previousElementSibling,...(el.parentElement?.children||[])]){const n=money(text(near));if(n!=null)return n}}return null}
@@ -411,7 +432,7 @@ async function assertEntityMatches(id,repaired=false){
       at:new Date().toISOString()}})}catch{}
   throw Error(`הדף לא עבר לישות ${id}: מוצג חשבון ${seen||'לא ידוע'}${mine?` במקום ${mine}`:''}${label&&label!==String(id)?` (הבורר מציג ${label})`:''} — הסנכרון נעצר כדי לא לשמור נתונים של חשבון אחר`);
 }
-async function extract(id,isPrivate=false){// ⚠ הלקח שחזר שלוש פעמים: להמתין לטעינה לפני קריאה. אחרי הניווט וההזרקה מחדש הדף
+async function extract(id,isPrivate=false){phaseStart();// ⚠ הלקח שחזר שלוש פעמים: להמתין לטעינה לפני קריאה. אחרי הניווט וההזרקה מחדש הדף
 // עדיין מתרנדר, וקריאה מיידית מחזירה null ומפילה את הסנכרון.
 for(let i=0;i<120;i++){if(txCandidates().length||valueAfter('יתרת עו"ש')!=null)break;await wait(250)}
 // ⚠⚠ 21.08.2026 — **הבאג החמור ביותר עד כה.** טל: „הוא סנכרן את החשבון של יובל,
@@ -431,10 +452,11 @@ if(!isPrivate)await applyCollectSince();
 // הישנה. שומר הזהות מ-1.0.17 אימת את **מספר החשבון** בלבד, והשם עקף אותו:
 // הכסף היה נכון והתווית שיקרה. עכשיו השם נקרא באותו רגע שבו נקראים היתרה,
 // מספר החשבון והתנועות — אחרי שהמעבר אומת — ולכן כולם מאותו מצב של הדף.
-const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();const known=isPrivate?null:await knownAccountFor(id);
+const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();phase('אחרי גלאי הזהות');const known=isPrivate?null:await knownAccountFor(id);
 // ⚠ המספר שהזיהוי קרא גובר על גריפה מטקסט הדף. נפילה-לאחור נשמרת
 // לדיסקונט פרטי ולכל מקרה שבו הישות אינה ברשימה.
-const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
+const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת']),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${text(document.body).slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}phase('סיום הקריאה');await phaseSave(id);
+return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
 async function sync(keys,isPrivate=false){const out=[];for(const key of keys)out.push(await extract(key,isPrivate));return out}
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txCandidates().length,balance:currentBalance()});return}if(m?.type==='DISCOUNT_SELECT_ENTITY'){const want=String(m.entity||'');// עונים לפני הבחירה: המעבר טוען מחדש את הדף והורג את הסקריפט
 reply({ok:true,already:entityId(text(entityButton()))===want});if(entityId(text(entityButton()))!==want)selectEntity(want).catch(e=>note(`דיסקונט עסקי: ${e.message}`));return}if(m?.type==='DISCOUNT_GOTO_TX'){const has=txCandidates().length>0;// עונים לפני הלחיצה: הניווט הורג את הסקריפט, ותשובה שנשלחת אחריו לא תגיע לעולם
