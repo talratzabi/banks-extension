@@ -398,7 +398,17 @@ function gotoLoans(){const top=document.querySelector('#LOANS_MAIN_WORLD-link');
 //   אחרת ngModel לא מתעדכן והחיפוש רץ על הערך הישן.
 const nativeSet=(el,v)=>{const d=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),'value');if(d&&d.set)d.set.call(el,v);else el.value=v;for(const t of['input','change','blur'])el.dispatchEvent(new Event(t,{bubbles:true}))};
 const ilDate=iso=>{const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:''};
-const rowDates=()=>{const out=[];for(const r of document.querySelectorAll('tr,[role="row"],.rc-table-row'))for(const m of text(r).matchAll(/\b(\d{2})\/(\d{2})\/(\d{2,4})\b/g)){const y=m[3].length===2?2000+Number(m[3]):Number(m[3]);out.push(new Date(y,Number(m[2])-1,Number(m[1])).getTime())}return out};
+const rowDates=()=>{const out=[];
+// ⚠⚠ 25.08.2026 — **115.7 מתוך 129.6 שניות של סנכרון ישות היו כאן.**
+// נמדד מ-`discountPhases`: „אחרי החלת הטווח" ב-115,688 מ״ש, וכל שאר
+// השלבים מילישניות. `applyCollectSince` קורא ל-`earliestRow()` ארבע
+// פעמים, וכל קריאה מריצה `text(r)` — כלומר **`innerText` על כל שורה
+// בטבלה**, וכל אחת כופה חישוב פריסה.
+// ⚠ זו השכבה **הרביעית** של אותו באג, ובמקום שלא הגעתי אליו קודם:
+// טיפלתי ב-`bodyText`, ב-`valueAfter`, וב-`txRowCount` — ולא כאן.
+// **הלקח: אחרי שמוצאים `innerText` בנתיב חם, לחפש את כל אחיו.**
+// `textContent` מספיק כאן לחלוטין — מחפשים תבנית dd/mm/yyyy בטקסט.
+for(const r of document.querySelectorAll('tr,[role="row"],.rc-table-row'))for(const m of tc(r).matchAll(/\b(\d{2})\/(\d{2})\/(\d{2,4})\b/g)){const y=m[3].length===2?2000+Number(m[3]):Number(m[3]);out.push(new Date(y,Number(m[2])-1,Number(m[1])).getTime())}return out};
 const earliestRow=()=>{const d=rowDates();return d.length?Math.min(...d):0};
 // „תחילת איסוף נתונים" חדלה להיות מסננת בלבד: כאן היא נשלחת לאתר.
 // מבודד לחלוטין — רץ אחרי בחירת החשבון ורק בדף התנועות. דף בלי הפקדים האלה
@@ -440,7 +450,7 @@ async function applyCollectSince(){
       last=n;
       if(!retried&&n===0&&i===10){retried=true;btn.click()}
     }
-    await report('הופעל',{to:today,toValue:to.value,rows:rowCount(),beforeRows,earliest:earliestRow()?new Date(earliestRow()).toISOString().slice(0,10):'',earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried,value:from.value})
+    await report('הופעל',{to:today,toValue:to.value,rows:rowCount(),beforeRows,earliest:(()=>{const e=earliestRow();return e?new Date(e).toISOString().slice(0,10):''})(),earliestBefore:before?new Date(before).toISOString().slice(0,10):'',retried,value:from.value})
     note(`דיסקונט: טווח מ-${want}`);
   }catch(e){note(`דיסקונט: הרחבת הטווח נכשלה — ${e.message}`)}
 }
