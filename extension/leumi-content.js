@@ -48,22 +48,29 @@ async function chequeImages(wanted,key,offset=0,total=0){const notFound=[];if(ke
 // הכשל של 1.3.2, בלבוש חדש. לכן מחילים את **החלון שמכיל את השיק**,
 // ומחליפים חלון רק כשצריך.
 const chqSt=await chrome.storage.local.get({collectSince:''});
-const chqSince=Date.parse(String(chqSt.collectSince||''));
-const chqWins=Number.isFinite(chqSince)?leumiWindows(chqSince,Date.now()):[];
-let curWin=null;
+const chqUntil=Date.now();
+const chqAsked=Date.parse(String(chqSt.collectSince||''));
+const chqSince=Number.isFinite(chqAsked)?Math.max(chqAsked,chqUntil-LEUMI_MAX_BACK_MS):NaN;
+// ⚠ אותו גבול כמו בקריאת התנועות: הבקשה מחזירה **מקטע אחד** שמתחיל
+// בתאריך ה-from. לכן כדי להגיע לשיק מ-15.05 מבקשים טווח שמתחיל ב-14.05,
+// והמקטע שיחזור יכיל אותו. בלי זה שיק מחוץ למקטע הראשון לא יימצא לעולם —
+// זה כשל 1.3.2 בלבוש חדש.
+let curFrom=null,curLatest=null;
 const ensureWindowFor=async(dateStr)=>{
-  if(!chqWins.length)return;
+  if(!Number.isFinite(chqSince))return;
   const ms=ilToMs(dateStr);
   if(!Number.isFinite(ms))return;
-  if(curWin&&ms>=curWin.from&&ms<=curWin.to)return;
-  const w=chqWins.find(x=>ms>=x.from&&ms<=x.to);
-  if(!w||(curWin&&w.from===curWin.from))return;
-  curWin=w;
-  await applyLeumiRange(w.from,w.to);await openCurrentAccount();await loadAllRows();
+  if(curFrom!=null&&curLatest!=null&&ms>=curFrom&&ms<=curLatest)return;
+  const from=Math.max(ms-864e5,chqSince);
+  await applyLeumiRange(from,chqUntil);
+  try{await openCurrentAccount();await loadAllRows()}catch(e){}
+  curFrom=from;curLatest=latestShown();
+  // אם התאריך עדיין מחוץ למקטע שחזר, אין מה לעשות — הדילוג ייספר ב-notFound.
 };
-// מיון מהחדש לישן — אותו כיוון שבו נבנים החלונות, כך שכל חלון מוחל פעם אחת.
-wanted.sort((a,b)=>(ilToMs(b.date)||0)-(ilToMs(a.date)||0));
-if(!chqWins.length){await applyLeumiRange();await openCurrentAccount();await loadAllRows();}
+// מיון **מהישן לחדש** — אותו כיוון שבו הבנק מגיש את המקטעים, כך שכל
+// מקטע נטען פעם אחת והשיקים שבתוכו נקצרים ברצף.
+wanted.sort((a,b)=>(ilToMs(a.date)||0)-(ilToMs(b.date)||0));
+if(!Number.isFinite(chqSince)){await applyLeumiRange();await openCurrentAccount();await loadAllRows();}
 const out={};const dataSrc=()=>[...document.querySelectorAll('img')].map(i=>i.src).filter(s=>s.startsWith('data:image'));
 // ⚠ חלון הצילום נשאר פתוח אחרי שיק: הוא מכסה את הטבלה וחוסם את
 // הלחיצה הבאה, וגם מוסיף את תמונותיו ל-before כך שתמונה חדשה
@@ -498,45 +505,38 @@ function gridProbe(){
   }catch(e){return{probeError:String(e&&e.message||e)}}
 }
 
-// ⚠⚠ 25.08.2026 — **לאומי חוסם את הטווח לחודשיים.** דיווח טל, והוא מסביר
-// את „29 השורות" שעמדו בפני שלושה ניסיונות תיקון: זו מעולם לא הייתה
-// וירטואליזציה או גלילה חסרה — **הטווח פשוט נחתך.** הראיה מהריצה החיה
-// של 23.08: ביקשנו 01.01→23.08 (כמעט 8 חודשים) וקיבלנו תנועות
-// 01.01..02.02 בלבד — **חלון אחד של חודש, ואז כלום.**
-// לכן אין „לטעון עוד שורות": צריך **לבקש את הטווח שוב ושוב**, חלון אחר
-// חלון, ולצבור. 55 יום ולא 60 — מרווח ביטחון, כי לא ידוע אם הגבול נספר
-// בימים או בחודשי לוח.
-// ⚠⚠ **תיקון 25.08.2026, טל:** „אין מגבלה בבנק לצפיה בנתונים עד שנתיים
-// אחורה וברצף. צריך לברור נכון את תאריכי הצפיה בנתונים."
-// כלומר ההנחה של „חודשיים" **הופרכה** — הגבול האמיתי הוא **שנתיים, ברצף**,
-// ולכן כל בקשה עד שנתיים היא **בקשה אחת**, לא סדרת חלונות.
-// המנגנון נשאר כמות שהוא ופשוט מקבל חלון בגודל הגבול האמיתי: לכל טווח עד
-// שנתיים `leumiWindows` מחזיר **חלון יחיד**, וההתנהגות זהה לקריאה בודדת.
-// הוא נשאר בשביל טווח ארוך משנתיים בלבד — שאותו הבנק ממילא אינו מגיש.
-const LEUMI_WINDOW_DAYS=730;
+// ⚠⚠ **היסטוריית ההנחות כאן, כי כל אחת מהן עלתה סבב שלם:**
+//  1. „הרשת מווירטואלית / צריך לגלול" — **הופרך** ב-25.08 ע"י `gridProbe`:
+//     אין וירטואליזציה, אין זקיף, ואף אב אינו נגלל.
+//  2. „לאומי חוסם את הטווח לחודשיים" (1.5.0, שלי) — **הופרך** ע"י טל:
+//     „אין מגבלה עד שנתיים אחורה וברצף."
+//  3. „התאריכים לא נבררים נכון" — **נבדק ונשלל**: `wrote` זהה למבוקש,
+//     `placeholder` הוא dd.mm.yy, והדף מציג „01.01.26 - 25.08.26".
+// **מה שנשאר, ונמדד:** הטווח מתקבל במלואו, אבל הבנק מחזיר **מקטע אחד**
+// שמתחיל בקצה המוקדם שלו (01.01 → 03.02, 29 שורות). לכן ההליכה קדימה.
 // מעבר לשנתיים אין נתונים בבנק. אין טעם לבקש, וזה גם מונע ניסיון חוזר עקר.
 const LEUMI_MAX_BACK_MS=730*864e5;
 // dd.mm.yyyy → ms. חייב פרסור מפורש; Date.parse קורא את זה כאמריקאי.
 function ilToMs(v){const m=String(v||'').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   return m?Date.UTC(+m[3],+m[2]-1,+m[1]):NaN}
-// ⚠ החלונות מוחזרים **מהחדש לישן** במכוון. `applyLeumiRange` יוצא מוקדם
-// מלולאת ההמתנה ברגע ש„התאריך המוקדם ביותר בדף זז אחורה" — וזה קורה רק
-// בכיוון הזה. סדר הפוך היה מכריח אותו להמתין ליציבות בכל חלון (18 שניות).
-function leumiWindows(sinceMs,untilMs){
-  const out=[],step=LEUMI_WINDOW_DAYS*864e5;
-  let to=untilMs;
-  // תקרת 24 חלונות = כ-3.6 שנים. **שומר לולאה — לא להסיר.**
-  while(to>sinceMs&&out.length<24){
-    const from=Math.max(to-step,sinceMs);
-    out.push({from,to});
-    if(from<=sinceMs)break;
-    to=from+864e5; // חפיפה של יום, כדי שלא תיפול תנועה על התפר
-  }
-  return out.length?out:[{from:sinceMs,to:untilMs}];
-}
-// קורא את כל התקופה המבוקשת כרצף חלונות, ומחזיר שורות תאים מאוחדות.
-// ⚠ המפתח לניכוי כפילויות הוא **כל התאים**, כולל היתרה המצטברת — שתי
-// תנועות זהות באותו יום נבדלות ביתרה, ולכן אינן נבלעות זו בזו.
+// ⚠⚠ **25.08.2026 — נמדד חי, וזה מפריך גם את 1.5.0 וגם את הנחת הגלילה.**
+// ביקשנו `01.01.26 - 25.08.26`, והדף **קיבל את הטווח במלואו**:
+//   wrote:{from:"01.01.26",to:"25.08.26"} · rangeText:"01.01.26 - 25.08.26"
+//   „1 סננים פעילים" · כל ה-filterRadioList ב-checked:false
+//   earliestAfter: 2026-01-01   ← הקצה התחתון כובד במדויק
+// ואף על פי כן: **latestAfter: 2026-02-02, ורק 29 שורות.**
+// `gridProbe` סגר את הכיוון השני: rowsInDom 29, sentinels [],
+// siblingAfterTail null, rowTransform "none", rowHasIndex false,
+// ו**אף אב אינו נגלל** (table-scroll: scrollHeight === clientHeight).
+// **אין וירטואליזציה, אין זקיף, ואין לאן לגלול.** הדף החזיר מקטע אחד.
+//
+// **המסקנה:** הבנק מגיש עד שנתיים (טל, 25.08) אבל **מחזיר מקטע אחד לכל
+// בקשה**, מהקצה המוקדם של הטווח. לכן אין „לטעון עוד שורות" — צריך
+// **לבקש שוב, החל מהמקום שבו המקטע נגמר.**
+//
+// ⚠ החלון אינו קבוע בכוונה. גודל המקטע (~חודש? ~29 שורות?) **לא נמדד**,
+// וכל קבוע שאבחר יהיה ניחוש. ההליכה מתקדמת לפי **התאריך האחרון שהוחזר
+// בפועל**, ולכן היא מתכווננת מעצמה יהיה הגבול אשר יהיה.
 async function collectRangeRows(){
   const st=await chrome.storage.local.get({collectSince:''});
   const untilMs=Date.now();
@@ -547,24 +547,36 @@ async function collectRangeRows(){
     await applyLeumiRange();await openCurrentAccount();await loadAllRows();
     return datedRows().map(x=>x.cells);
   }
-  const wins=leumiWindows(sinceMs,untilMs),seen=new Set(),out=[],log=[];
-  for(const w of wins){
-    await applyLeumiRange(w.from,w.to);
-    // ⚠ חלון בן 55 יום **ללא אף תנועה הוא מצב חוקי**, לא תקלה.
-    // `openCurrentAccount` זורק אחרי 45 שניות כשאין שורות — ובלי התפיסה
-    // הזו חודשיים שקטים אחד היו מפילים את כל הסנכרון.
+  const seen=new Set(),out=[],log=[];
+  let from=sinceMs,prevLatest=null,stop='';
+  // תקרת 24 מקטעים. **שומר לולאה — לא להסיר.** יחד עם מבחן „אין התקדמות"
+  // למטה, אין מסלול שבו הלולאה רצה בלי סוף מול הבנק.
+  for(let step=0;step<24;step++){
+    await applyLeumiRange(from,untilMs);
+    // ⚠ מקטע ללא תנועות הוא מצב חוקי. `openCurrentAccount` זורק אחרי
+    // 45 שניות כשאין שורות, ובלי התפיסה הזו חודש שקט היה מפיל הכל.
     let empty=false;
-    try{await openCurrentAccount();await loadAllRows()}
-    catch(e){empty=true}
+    try{await openCurrentAccount();await loadAllRows()}catch(e){empty=true}
     const cells=empty?[]:datedRows().map(x=>x.cells);
     let added=0;
     for(const c of cells){const k=c.join('|');if(seen.has(k))continue;seen.add(k);out.push(c);added++}
-    log.push({from:ilShort(w.from),to:ilShort(w.to),read:cells.length,added,empty});
+    const latest=empty?null:latestShown();
+    log.push({from:ilShort(from),read:cells.length,added,
+      latest:latest==null?'':ilShort(latest),empty});
+    if(empty||latest==null){stop='מקטע ריק';break}
+    // הגענו לקצה העליון — אין מה להמשיך.
+    if(latest>=untilMs-864e5){stop='הגיע להיום';break}
+    // ⚠ **מבחן ההתקדמות, והוא גם שומר הלולאה האמיתי.** אם המקטע החדש
+    // אינו מגיע רחוק יותר מקודמו, בקשה נוספת תחזיר שוב את אותו דבר.
+    if(prevLatest!=null&&latest<=prevLatest){stop='אין התקדמות';break}
+    prevLatest=latest;
+    from=latest; // חפיפה של יום אחד: מתחילים מהיום האחרון שכבר נקרא
   }
-  // ⚠ הרשומה הזו היא המדידה. „read" גדול ו„added" אפס פירושו שהחלון לא
-  // הוחל בכלל והדף החזיר שוב את אותן שורות — כשל שנראה אחרת מחלון ריק.
+  // ⚠ הרשומה הזו היא המדידה. `read` גדול עם `added:0` = הבקשה החזירה שוב
+  // את אותו מקטע; `stop` אומר למה נעצרנו, וזה ההבדל בין „נגמרו הנתונים"
+  // לבין „נתקענו".
   try{await chrome.storage.local.set({leumiWindows:{at:new Date().toISOString(),
-    since:ilShort(sinceMs),windows:log,total:out.length}})}catch{}
+    since:ilShort(sinceMs),steps:log,total:out.length,stop}})}catch{}
   return out;
 }
 async function applyLeumiRange(winFrom,winTo){
@@ -597,13 +609,22 @@ async function applyLeumiRange(winFrom,winTo){
         realClick(apply0);
         let last0=-1,stable0=0;
         for(let i=0;i<30;i++){await wait(600);const n=datedRows().length,e=earliestShown();
-          if(e!=null&&earlyBefore0!=null&&e<earlyBefore0)break;
+          // ⚠ 25.08.2026 — היה כאן `e<earlyBefore0`, כלומר „זז אחורה בלבד".
+          // ההליכה קדימה מזיזה את התאריך המוקדם **קדימה**, ולכן היציאה
+          // המוקדמת לא נתפסה והמקטע חיכה 18 שניות ליציבות. כל שינוי נחשב.
+          if(e!=null&&earlyBefore0!=null&&e!==earlyBefore0)break;
           if(n>0&&n===last0){if(++stable0>=2)break}else stable0=0;last0=n}
         const eAfter0=earliestShown(),iso0=ms=>ms==null?'':new Date(ms).toISOString().slice(0,10);
         // ⚠ ההצלחה נמדדת ב**תזוזה אחורה**, לא בהגעה מדויקת ל-collectSince:
         // לחשבון פשוט אין בהכרח תנועה ב-1 בינואר, ודרישת שוויון סימנה ריצה
         // מוצלחת ככשל. תופס גם את המקרה שבו כן הגענו לגבול או מעברו.
-        return report(eAfter0!=null&&((earlyBefore0!=null&&eAfter0<earlyBefore0)||eAfter0<=sinceMs)?'טווח מדויק הופעל':'טווח מדויק ללא שינוי מספיק',
+        // ⚠ ההצלחה נמדדת עכשיו ב„המקטע מתחיל היכן שביקשנו" (בסבילות של
+        // שלושה ימים — לחשבון אין בהכרח תנועה בדיוק בתאריך המבוקש),
+        // או בכל תזוזה מהמצב הקודם. הדרישה הישנה `eAfter0<=sinceMs`
+        // סימנה כל הליכה קדימה ככישלון.
+        const moved0=earlyBefore0!=null&&eAfter0!==earlyBefore0;
+        const landed0=eAfter0!=null&&eAfter0>=sinceMs-3*864e5;
+        return report(eAfter0!=null&&(moved0||landed0)?'טווח מדויק הופעל':'טווח מדויק ללא שינוי מספיק',
           {from:ilShort(sinceMs),to:ilShort(untilMs),
            // ⚠ **מה שבאמת יושב בשדות אחרי ההחלה, ולא מה שביקשנו לכתוב.**
            // טל, 25.08: „צריך לברור נכון את תאריכי הצפיה בנתונים." זו
