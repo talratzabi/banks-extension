@@ -1427,6 +1427,30 @@ waitProbe.rounds.push({r:w+1,ms:Date.now()-rt0,
 try{await chrome.storage.local.set({discountWaitProbe:{...waitProbe,total:Date.now()-waitT0}})}catch{}
 if(st?.rows>0)break;
 if(st&&st.rows===0){if(++emptyAnswers>=3)break}else emptyAnswers=0}
+// ⚠⚠ 25.08.2026, בקשת טל: „להשוות את היתרות — אם זהה, לדלג; אם לא,
+// לסנכרן מה שהשתנה." **וזה גם עוקף את התקלה הפתוחה:**
+// `DISCOUNT_SYNC_SELECTED` אינו נענה (נמדד: 60ש׳ ואז 150ש׳, שניהם
+// נכשלו), בעוד `DISCOUNT_STATE` **כן** עונה — שש מילישניות.
+// לכן ההשוואה נשענת על ההודעה שעובדת, ולא על זו שנתקעת.
+// ⚠ הפשרה מוצהרת: שתי תנועות נגדיות באותו סכום ביום אחד ישאירו את
+// היתרה זהה והשינוי יפוספס. **טל ביקש זאת במפורש**, וזה המחיר.
+// ⚠ מדלגים **רק** כשיש כבר תנועות שמורות — אחרת אין מה לשמר.
+{
+  const prevSt=await chrome.storage.local.get({accounts:[]});
+  const saved=(prevSt.accounts||[]).find(a=>a&&a.source==='discount-business'&&String(a.entityId)===String(key));
+  if(saved&&Array.isArray(saved.transactions)&&saved.transactions.length&&saved.balance!=null){
+    let live=null,liveErr='';
+    try{const sb=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE',withBalance:true}),15000,'יתרה');live=sb?sb.balance:null}
+    catch(e){liveErr=String(e?.message||e).slice(0,60)}
+    const same=live!=null&&Number.isFinite(Number(live))&&Math.abs(Number(live)-Number(saved.balance))<0.005;
+    try{await chrome.storage.local.set({discountSkip:{entity:String(key),live,saved:saved.balance,same,liveErr,at:new Date().toISOString()}})}catch{}
+    if(same){
+      await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: ${key} — היתרה לא השתנתה, מדלג`});
+      out.push({...saved,lastSync:now,status:`${saved.status||'מסונכרן'} · היתרה לא השתנתה`});
+      continue;
+    }
+  }
+}
 let r=null,lastErr='',lastProbe=null;
 // ⚠⚠ 25.08.2026 — **התקציב היה 150 שניות בכל שלושת הניסיונות, וזה
 // היה רוב זמן הסנכרון.** נמדד אצל ישות 514220276: זמן קיר 155 שניות,
