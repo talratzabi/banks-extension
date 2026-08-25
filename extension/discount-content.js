@@ -155,7 +155,11 @@ async function switched(id,previous,ms){const until=Date.now()+ms;let steady=0;
 // ⚠ מדידת שלבים. 154 שניות במעבר ישות אינן מוסברות ע"י `switched` לבדו
 // (51 קריאות?), ואין לי מדידה בפירוט הזה. **לא מנחשים — מודדים.**
 let phaseT0=0,phases=[],phaseEntity='';
-function phaseStart(id){phaseT0=Date.now();phases=[];phaseEntity=String(id||'')}
+// ⚠ השלבים של ריצה קודמת נשמרים לפני האיפוס. בלי זה **הניסיון החוזר
+// דורס בדיוק את העקבות של הריצה שנתקעה** — וזו הריצה שמעניינת.
+function phaseStart(id){
+  if(phases.length){try{chrome.storage.local.set({discountPrevPhases:{entity:phaseEntity,phases,total:Date.now()-phaseT0,at:new Date().toISOString()}})}catch(e){}}
+  phaseT0=Date.now();phases=[];phaseEntity=String(id||'')}
 // ⚠ נכתב **מיד**, ולא רק בסוף `extract`. הריצה שנכשלה ב-timeout לא
 // הגיעה לשמירה, ולכן המדידה שהייתי צריך בדיוק אז — אבדה.
 // גשש ששורד רק בהצלחה אינו גשש.
@@ -645,6 +649,29 @@ totals:m.withBalance?(()=>{const rows=transactions();
   return{debit:Math.round(d*100)/100,credit:Math.round(c*100)/100,fromMs:lo,toMs:hi,n:rows.length};
 })():null});return}if(m?.type==='DISCOUNT_SELECT_ENTITY'){const want=String(m.entity||'');// עונים לפני הבחירה: המעבר טוען מחדש את הדף והורג את הסקריפט
 reply({ok:true,already:entityId(text(entityButton()))===want});if(entityId(text(entityButton()))!==want)selectEntity(want).catch(e=>note(`דיסקונט עסקי: ${e.message}`));return}if(m?.type==='DISCOUNT_GOTO_TX'){const has=txCandidates().length>0;// עונים לפני הלחיצה: הניווט הורג את הסקריפט, ותשובה שנשלחת אחריו לא תגיע לעולם
-reply({ok:true,already:has});if(!has){const link=[...document.querySelectorAll('a,button,[role="button"],[role="link"]')].find(el=>/לצפייה בתנועות|תנועות עו"ש/.test(text(el)));if(link)realClick(link)}return}if(m?.type==='DISCOUNT_GOTO_LOANS'){reply({ok:true});try{gotoLoans()}catch(e){note(`דיסקונט: ${e.message}`)}return}if(m?.type==='DISCOUNT_LOAN_STATE'){reply({ok:true,...loanProbe()});return}if(m?.type==='DISCOUNT_READ_LOANS'){reply({ok:true,loans:loans(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SYNC_SELECTED'){sync(m.keys||[],Boolean(m.private)).then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:lastTxProbe}));return true}});
+reply({ok:true,already:has});if(!has){const link=[...document.querySelectorAll('a,button,[role="button"],[role="link"]')].find(el=>/לצפייה בתנועות|תנועות עו"ש/.test(text(el)));if(link)realClick(link)}return}if(m?.type==='DISCOUNT_GOTO_LOANS'){reply({ok:true});try{gotoLoans()}catch(e){note(`דיסקונט: ${e.message}`)}return}if(m?.type==='DISCOUNT_LOAN_STATE'){reply({ok:true,...loanProbe()});return}if(m?.type==='DISCOUNT_READ_LOANS'){reply({ok:true,loans:loans(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_DISCOVER'){discover().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SYNC_SELECTED'){
+// ⚠⚠ 25.08.2026 — **מדידה בגבול המטפל.** נמדד שוב ושוב: המטפל הזה
+// **אינו משיב** (60ש׳ ואז 150ש׳, שניהם), בעוד `DISCOUNT_STATE` באותו
+// `onMessage`, באותה לשונית ובאותו רגע, משיב בשש מילישניות.
+// `sync()` עצמה טריוויאלית (`for … await extract`), וכל ההמתנות
+// בתוך `extract` חסומות ומסתכמות בכ-60 שניות — **כלומר 150 שניות
+// ללא תשובה אינן מוסברות בקוד שאני רואה.**
+// ⚠ שלוש אפשרויות שלא ניתן להפריד ביניהן בלי מדידה:
+//   1. המטפל לא נכנס כלל (ההודעה לא הגיעה),
+//   2. `sync()` זורק **סינכרונית** ולכן `.then/.catch` לא נבנים,
+//   3. ה-promise אינו נפתר לעולם,
+//   4. `reply()` נקרא אך נבלע (הקשר מת).
+// `discountSyncTrace` מפריד את ארבעתן. **הוא נכתב בכל נקודה, מיד.**
+const __t0=Date.now();
+const __mark=w=>{try{chrome.runtime.sendMessage({type:'DISCOUNT_TRACE',where:w,ms:Date.now()-__t0}).catch(()=>{})}catch(e){}
+  try{chrome.storage.local.set({discountSyncTrace:{at:new Date().toISOString(),where:w,ms:Date.now()-__t0,keys:m.keys||[]}})}catch(e){}};
+__mark('נכנס למטפל');
+try{
+  const __p=sync(m.keys||[],Boolean(m.private));
+  __mark('sync() החזיר promise');
+  __p.then(accounts=>{__mark('sync() נפתר');reply({ok:true,accounts});__mark('reply נשלח')})
+     .catch(e=>{__mark('sync() נדחה: '+String(e&&e.message||e).slice(0,50));reply({ok:false,error:e.message,probe:lastTxProbe})});
+}catch(e){__mark('sync() זרק סינכרונית: '+String(e&&e.message||e).slice(0,50));reply({ok:false,error:e.message,probe:lastTxProbe})}
+return true}});
 let reported=false;const reportAuthenticated=()=>{if(!reported&&location.hash.includes('MY_ACCOUNT_HOMEPAGE')){reported=true;chrome.runtime.sendMessage({type:'DISCOUNT_AUTHENTICATED'}).catch(()=>{})}};setInterval(reportAuthenticated,800);reportAuthenticated();
 })();

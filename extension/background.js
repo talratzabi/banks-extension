@@ -214,6 +214,10 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
         .then(()=>{chequeCtx.savedRefs.add(String(m.reference))}).catch(()=>{})}
     reply({ok:true});return}
   if(m?.type==='LEUMI_CHEQUE_PROGRESS'){chequeCtx.done++;const at=chequeCtx.base+chequeCtx.done,tot=chequeCtx.total||m.total;chrome.storage.local.set({syncStatus:`לאומי: שומר צילומי שיקים ${at}/${tot}`+(chequeCtx.base?` · ${chequeCtx.base} כבר היו שמורים`:'')+(chequeCtx.noRef?` · ${chequeCtx.noRef} ללא אסמכתא`:'')});reply({ok:true});return}
+// ⚠ ערוץ שני לגשש של דיסקונט: אם כתיבת האחסון **מן הדף** נבלעת
+// (הקשר מת), ההודעה לרקע עדיין עשויה לעבור — ולהפך. שני ערוצים
+// בלתי תלויים, כי בדיוק את הכשל הזה אנחנו מנסים לתפוס.
+if(m?.type==='DISCOUNT_TRACE'){try{chrome.storage.local.set({discountSyncTraceBg:{where:m.where,ms:m.ms,at:new Date().toISOString()}})}catch(e){}reply({ok:true});return}
 if(m?.type==='LEUMI_AUTHENTICATED'&&sender.tab?.id){chrome.storage.local.get({pendingLeumi:false}).then(x=>{if(!x.pendingLeumi)maybeAutoSync('leumi','לאומי',sender.tab.id).catch(()=>{})});discoverLeumi(sender.tab.id).catch(async e=>{
 // ⚠ תקלת חיבור היא רגעית. כיבוי pendingLeumi כאן גרם לכך שכל אירוע התחברות נוסף
 // מהדף נבלע בשקט, והתוסף נראה כאילו הוא לא עושה כלום עד לחיצה חוזרת על סנכרון.
