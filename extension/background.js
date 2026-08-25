@@ -1442,6 +1442,20 @@ if(st&&st.rows===0){if(++emptyAnswers>=3)break}else emptyAnswers=0}
     let live=null,liveErr='';
     let liveTotals=null;
     let liveEntity='';
+    // ⚠⚠ 25.08.2026 — **ממתינים שהבורר יתייצב על הישות המבוקשת.**
+    // נמדד במדידה הראשונה של החסימה: `{entity:"024844714",
+    // liveEntity:"570012930", entityMatch:false}` — הדף עדיין הציג את
+    // הישות מהריצה הקודמת. החסימה סירבה נכון, **אבל אז הדילוג לא
+    // מנוצל והישות מסתנכרנת לחינם.**
+    // הבדיקה עולה **שש מילישניות** (נמדד), ולכן אפשר פשוט לדגום אותה
+    // עד 12 פעמים. ⚠ זו המתנה **קצרה ומוגבלת**: אם הבורר לא מתייצב,
+    // ממשיכים לסנכרון הרגיל ולא מדלגים — ספק פועל לטובת סנכרון.
+    for(let w=0;w<12;w++){
+      let probeEnt='';
+      try{const pe=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE'}),8000,'זהות');probeEnt=String(pe&&pe.entity||'')}catch(e){}
+      if(probeEnt===String(key))break;
+      await delay(500);
+    }
     // ⚠⚠ 25.08.2026 — **היתרה נקראה מישות אחרת, ונתפס בגשש.**
     // נמדד: `{entity:"570012930", live:93188.32, saved:285292.66}` —
     // ו-93,188.32 היא היתרה של **514649565**, הישות הקודמת. הדף עדיין
