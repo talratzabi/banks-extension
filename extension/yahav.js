@@ -78,7 +78,18 @@ async function runYahav(tabId){
     if(!account)throw Error('לא זוהה מספר החשבון הפעיל');
     if(!home.transactions?.length)throw Error('לא נקראו תנועות עו״ש');
 
-    const creditMatch=String(home.text||'').match(/מסגרת אשראי\s+([\d,.]+)/),creditLimit=creditMatch?Number(creditMatch[1].replace(/,/g,'')):null,balance=home.transactions[0].balance;
+    /* ⚠⚠ 25.08.2026 — **עותק שלישי של אותה לוגיקה, והוא זה שקובע.**
+   המסגרת שנשמרת לחשבון מגיעה מכאן — מ-`home.text` של `YAHAV_READ` —
+   ולא מ-`summary()` (תוקן 1.12.5) ולא מ-`readYahavTotals` (תוקן 1.12.7).
+   ⚠ **שלושה עותקים של אותו רגקס נוקשה.** כל תיקון חייב לעבור על
+   שלושתם. טל: „ביהב המסגרת עבדה בעבר" — והלוגיקה לא שונתה
+   מאז פיצול הקובץ (נבדק ב-`git log -S`), כלומר **הדף השתנה**. */
+const creditFrom=t=>{const txt=String(t||'');
+  for(const lab of ['מסגרת אשראי','מסגרת עו״ש','מסגרת מאושרת','מסגרת']){
+    const mm=txt.match(new RegExp(lab+'[\\s:\\u00a0\\u20aa]{0,12}(-?[\\d,]+(?:\\.\\d{1,2})?)'));
+    if(mm){const n=Number(String(mm[1]).replace(/,/g,''));if(Number.isFinite(n))return n}}
+  return null};
+let creditLimit=creditFrom(home.text),balance=home.transactions[0].balance;
     if(balance==null)throw Error('יתרת העו״ש לא נקראה מהתנועה האחרונה');
 
     await chrome.storage.local.set({syncStatus:'יהב: קורא הלוואות ופירוט ריבית'});
