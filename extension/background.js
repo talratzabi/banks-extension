@@ -1428,10 +1428,32 @@ try{await chrome.storage.local.set({discountWaitProbe:{...waitProbe,total:Date.n
 if(st?.rows>0)break;
 if(st&&st.rows===0){if(++emptyAnswers>=3)break}else emptyAnswers=0}
 let r=null,lastErr='',lastProbe=null;
+// ⚠⚠ 25.08.2026 — **התקציב היה 150 שניות בכל שלושת הניסיונות, וזה
+// היה רוב זמן הסנכרון.** נמדד אצל ישות 514220276: זמן קיר 155 שניות,
+// מתוכם לולאת ההמתנה 2 שניות ו-`extract` **26 מילישניות** — כלומר
+// **ניסיון 1 נתקע ומיצה את מלוא 150 השניות, וניסיון 2 הצליח מיד.**
+// המקסימום האמיתי של `extract` אחרי תיקוני 1.8.x הוא כ-46 שניות
+// (ישות 024844714, הגדולה). לכן ניסיון ראשון מקבל 75 שניות — פי 1.6
+// מהמקסימום הנמדד — והבאים מקבלים את המלוא.
+// ⚠ **לא קיצרתי מתחת ל-46 שניות במכוון:** קיצור אגרסיבי היה הופך ישות
+// גדולה לכישלון קבוע. הראיה למקסימום היא `discountPhases` מ-19 ריצות.
+// ⚠ `discountSyncAttempts` רושם **מה קרה בכל ניסיון** — עד עכשיו רק
+// `lastErr` שרד, ולא היה אפשר לדעת אם הניסיון פג בזמן או החזיר שגיאה.
+const SYNC_BUDGET=[75000,150000,150000];
+const attemptLog=[];
 for(let attempt=1;attempt<=3;attempt++){
+const at0=Date.now();
 // ⚠ שומרים את הצילום לפני איפוס r, אחרת האבחון של הניסיון הכושל נמחק ואי אפשר לדעת למה נכשל.
-try{r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_SYNC_SELECTED',keys:[key]}),150000,'קריאת התנועות');if(r?.probe)lastProbe=r.probe;if(r?.ok)break;lastErr=r?.error||'קריאה ריקה'}
-catch(e){lastErr=e.message;await prepareDiscountContent(tab.id)}
+let threw=false;
+try{r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_SYNC_SELECTED',keys:[key]}),SYNC_BUDGET[attempt-1],'קריאת התנועות');if(r?.probe)lastProbe=r.probe;
+attemptLog.push({n:attempt,ms:Date.now()-at0,ok:Boolean(r?.ok),err:r?.ok?'':String(r?.error||'קריאה ריקה').slice(0,70)})}
+catch(e){threw=true;lastErr=e.message;attemptLog.push({n:attempt,ms:Date.now()-at0,ok:false,err:String(e.message).slice(0,70)})}
+// ⚠ הכתיבה **לפני** ה-break. קודם היא ישבה אחריו, ולכן **הניסיון
+// המוצלח — המקרה הנפוץ ביותר — לא נרשם מעולם.** אותו לקח כמו ב-1.8.0:
+// גשש שאינו שורד את המסלול הנפוץ אינו גשש.
+try{await chrome.storage.local.set({discountSyncAttempts:{entity:String(key),at:new Date().toISOString(),attempts:attemptLog}})}catch{}
+if(!threw&&r?.ok)break;
+if(!threw)lastErr=r?.error||'קריאה ריקה';else await prepareDiscountContent(tab.id);
 r=null}
 if(lastProbe)await chrome.storage.local.set({discountTxProbe:lastProbe});
 if(!r?.ok)throw Error(`ישות ${key} נכשלה אחרי 3 ניסיונות: ${lastErr}`);
