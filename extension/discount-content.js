@@ -299,6 +299,38 @@ let best=[];for(const g of groups){const rows=g.map(el=>({el,leaves:leavesOf(el)
 if(rows.length>best.length)best=rows}
 return best}
 function rowsOf(){return txCandidates().map(x=>({row:x.el,cells:x.leaves}))}
+// ⚠⚠ 25.08.2026 — **סדר השורות בדף אינו קבוע, והקוד הניח שהוא כן.**
+// נמדד באחסון: חשבון 024844714 (שסונכרן היום) שמור **יורד** —
+// 25/08 → 21/08 → 17/08, ורק 2 מתוך 75 מעברי יתרה עקביים.
+// חשבון 514220276 (שדולג ונשארו בו נתונים ישנים) שמור **עולה**,
+// 32 מתוך 32 עקביים. **שני חשבונות בסדר הפוך זה מזה.**
+// הדשבורד שובר שוויון בתוך תאריך לפי אינדקס המקור (`b.i-a.i`,
+// תיקון 1.0.21), וזה **מניח סדר עולה** — ולכן על חשבון ששמור יורד
+// הוא הופך אותו דווקא לרעה. ⚠ **תיקון התצוגה לבדו לא יכול לעבוד
+// כשהקלט אינו עקבי.** לכן מנרמלים במקור.
+// ⚠ הכיוון **אינו נקבע לפי תאריכים** אלא לפי **שרשרת היתרה**, שמאמתת
+// את עצמה: בסדר הנכון מתקיים `balance[i]-balance[i-1] == credit-debit`.
+// סופרים את המעברים העקביים בשני הכיוונים ובוחרים את הטוב. כך זה עובד
+// גם כשכל השורות באותו תאריך, וגם אם הדף ישנה סדר שוב.
+function chainScore(rows){
+  let good=0;
+  for(let i=1;i<rows.length;i++){
+    const p=rows[i-1],c=rows[i];
+    if(p.balance==null||c.balance==null)continue;
+    const delta=Math.round((Number(c.balance)-Number(p.balance))*100)/100;
+    const move=Math.round(((Number(c.credit)||0)-(Number(c.debit)||0))*100)/100;
+    if(Math.abs(delta-move)<0.011)good++;
+  }
+  return good;
+}
+function orderedAscending(rows){
+  if(!Array.isArray(rows)||rows.length<3)return rows;
+  const rev=rows.slice().reverse();
+  const f=chainScore(rows),r=chainScore(rev);
+  try{chrome.storage.local.set({discountRowOrder:{forward:f,reversed:r,
+    n:rows.length,chose:r>f?'הפוך':'כמות שהוא',at:new Date().toISOString()}})}catch(e){}
+  return r>f?rev:rows;
+}
 function transactions(){return txCandidates().map(({leaves})=>{
 const date=leaves.find(v=>TXDATE.test(v));
 const amounts=leaves.filter(v=>/^-?[\d,]+\.\d{2}$/.test(v.replace(/₪/g,'').trim()));
@@ -633,7 +665,7 @@ if(!isPrivate)await applyCollectSince();phase('אחרי החלת הטווח');
 const owner=isPrivate?'':text(entityButton()).replace(/\b\d{9}\b/,'').replace(/\s{2,}/g,' ').trim();phase('אחרי גלאי הזהות');const known=isPrivate?null:await knownAccountFor(id);
 // ⚠ המספר שהזיהוי קרא גובר על גריפה מטקסט הדף. נפילה-לאחור נשמרת
 // לדיסקונט פרטי ולכל מקרה שבו הישות אינה ברשימה.
-const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת'],balance),liabilities=valueAfter('התחייבויות'),rows=transactions();if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${bodyText().slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}phase('סיום הקריאה');await phaseSave(id);
+const account=known||activeAccount(),balance=currentBalance(),creditLimit=isPrivate?null:creditLimitValue(['מסגרת אשראי','מסגרת עו"ש','מסגרת מאושרת'],balance),liabilities=valueAfter('התחייבויות'),rows=orderedAscending(transactions());if(balance==null){lastTxProbe=txProbe();throw Error(`לא זוהתה יתרת עו״ש עבור ${owner} | דף ${location.hash} | שורות ${txCandidates().length} | ${bodyText().slice(0,150)}`)}if(!rows.length){lastTxProbe=txProbe();throw Error(`לא נקראו תנועות עבור ${owner} | דף ${location.hash} | טבלאות ${document.querySelectorAll('table').length}`)}phase('סיום הקריאה');await phaseSave(id);
 return{...account,entityId:id,nickname:owner||'דיסקונט פרטי',owner,balance,creditLimit,availableCredit:creditLimit==null?null:creditLimit+balance,liabilities,products:liabilities==null?[]:[{category:'התחייבויות',total:-Math.abs(liabilities),items:[]}],transactions:rows,loans:[],cards:[]}}
 async function sync(keys,isPrivate=false){const out=[];for(const key of keys)out.push(await extract(key,isPrivate));return out}
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='DISCOUNT_PING'){reply({ok:true});return}if(m?.type==='DISCOUNT_PRIVATE_DISCOVER'){discoverPrivate().then(accounts=>reply({ok:true,accounts})).catch(e=>reply({ok:false,error:e.message,probe:probe()}));return true}if(m?.type==='DISCOUNT_SELECT_PRIVATE_ACCOUNT'){reply({ok:true});selectPrivateAccount(m.key).catch(e=>note(`דיסקונט פרטי: ${e.message}`));return}if(m?.type==='DISCOUNT_READ_MORTGAGES'){reply({ok:true,loans:mortgages(),probe:loanProbe()});return}if(m?.type==='DISCOUNT_STATE'){const account=activeAccount();reply({ok:true,entity:entityId(text(entityButton())),owner:text(entityButton()).replace(ENTITY,'').replace(/\s{2,}/g,' ').trim(),branch:account.branch,accountNumber:account.accountNumber,url:location.hash,rows:txRowCount(),
