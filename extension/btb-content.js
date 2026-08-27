@@ -45,11 +45,20 @@ function readLoan(){
   const end=nearLabel(/^מועד סיום ההלוואה$/,DATE);
   const nextAmount=money(nearLabel(/^תשלום הבא$/,MONEY));
   const nextDate=nearLabel(/^תשלום הבא$/,DATE);
+  // ⚠⚠ 27.08.2026 — טל: „אין איזה תשלום שאתה מתעלם ממנו?" **כן, והוא מכריע:**
+  // „תשלום אחרון שהתקבל 300,000.00₪ · 23.08.2026" — פירעון חלקי חד-פעמי.
+  // בלעדיו המספרים אינם מסתדרים: 3,155.15 על 1,058,500 ל-360 חודשים משתמע
+  // כ-0.475% שנתי (לא קיים), ועל היתרה 685,057 ל-325 חודשים משתמע 3.2% — הגיוני.
+  // כלומר **התשלום החודשי הופחת אחרי הפירעון**, וקריאת „תשלום הבא" לבדה
+  // מתארת הלוואה אחרת מזו שהייתה. הסכום הזה נקרא ונשמר.
+  const lastAmount=money(nearLabel(/^תשלום אחרון שהתקבל$/,MONEY));
+  const lastDate=nearLabel(/^תשלום אחרון שהתקבל$/,DATE);
   const paid=(body.match(/(\d{1,3})\s*\/\s*(\d{2,4})/)||[]);
   const freq=/תדירות התשלום[^א-ת]*([א-ת]+)/.exec(body);
   const active=/פעילה/.test(body);
   return{number:num,balance,originalPrincipal:original,startDate:start,endDate:end,
     nextPayment:nextAmount,nextPaymentDate:nextDate,
+    lastPayment:lastAmount,lastPaymentDate:lastDate,
     paidInstallments:paid[1]?Number(paid[1]):null,totalInstallments:paid[2]?Number(paid[2]):null,
     frequency:freq?freq[1]:'',active,
     // ⚠ דוח: אם משהו לא נקרא, הריצה הבאה תאמר מה היה בדף ולא נצטרך סבב ניחוש.

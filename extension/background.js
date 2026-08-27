@@ -1534,6 +1534,9 @@ async function runBtb(tabId){
     const loan={type:`הלוואת BTB${d.number?` #${d.number}`:''}`,balance:d.balance,
       originalPrincipal:d.originalPrincipal,startDate:d.startDate,endDate:d.endDate,
       nextPayment:d.nextPayment,nextPaymentDate:d.nextPaymentDate,interest:'',
+      // ⚠ הפירעון החד-פעמי נשמר על ההלוואה — הוא מסביר את הפער בין הסכום
+      // המקורי ליתרה, ובלעדיו התשלום החודשי נראה בלתי אפשרי.
+      lastPayment:d.lastPayment,lastPaymentDate:d.lastPaymentDate,
       installments:d.totalInstallments||null,totalInstallments:d.totalInstallments||null,
       remainingInstallments:(d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null,
       accountKey:`BTB-${number}`};
