@@ -159,6 +159,15 @@ async function setRange(sinceMs){
   // בוויסות טיימרים. הרגע היחיד שחשוב הוא רגע השיגור, ולכן כותבים בו.
   wrote=writeDates();
   const fromAtClick=val('fromDate');
+  // ⚠⚠ 27.08 — `LinkForm077` נמדד **מלא ונכון ברגע הלחיצה**:
+  //   I-FROM 2026/01/01 · I-TILL 2026/08/27
+  // ובכל זאת הדף חזר לברירת מחדל וכל השדות לאפסים. כלומר **הערכים נכונים,
+  // והשיגור הוא שמאפס אותם.** החשוד היחיד שנשאר הוא הכפתור עצמו:
+  //   onclick="submitLinkForm('077','1','','','','','','','','','')"
+  // **אחת-עשרה ארגומנטים, תשעה מהם ריקים.** בטפסי IBM Portal הדפוס הוא
+  // שהפונקציה **כותבת את הארגומנטים לתוך שדות הטופס** ואז משגרת — כלומר
+  // היא מוחקת את מה שמילאנו רגע לפני ה-POST.
+  // **לכן: לא לוחצים. משגרים את הטופס ישירות עם מה שכתבנו בו.**
   // ⚠⚠ 27.08 — הדוח הקודם הכריע: `fromAtClick` היה 01/01/2026, תשעת השדות
   // נכתבו, הכפתור הנכון נלחץ — **ואחרי הלחיצה כל השדות חזרו לברירת המחדל**
   // (`I_FROM_YY=0000`, `FromdateValue=""`, `fromDate=01/08/2026`) והשורות
@@ -193,7 +202,15 @@ async function setRange(sinceMs){
     submitFns:(()=>{const w=fdoc()?.defaultView;if(!w)return[];
       return ['submitLinkForm','showDateFilterTab','goToBackasha','doSubmit']
         .filter(k=>{try{return typeof w[k]==='function'}catch(e){return false}})})()};
-  if(show)show.el.click();
+  let submitPath='none';
+  const lf=linkForm();
+  if(lf&&typeof lf.submit==='function'){
+    try{lf.submit();submitPath='form.submit'}
+    catch(e){submitPath='form.submit נכשל: '+String(e&&e.message||e).slice(0,60)}
+  }
+  // ⚠ נפילה ללחיצה רק אם השיגור הישיר לא היה אפשרי — היא המסלול שכבר הוכח
+  // כמי שמאפס את השדות, ולכן היא מוצא אחרון ולא ברירת מחדל.
+  if(submitPath!=='form.submit'&&show){show.el.click();submitPath+=' → לחיצה'}
   // ⚠ ההמתנה נשענת על **שני** סימנים ולא על אחד: התאריך המוקדם השתנה, **או**
   // מספר השורות השתנה. בבדיקה `earliest()` חזר ריק בסביבה מלאכותית, וקריאה
   // שנשענת רק עליו הייתה מתנוונת להמתנה קבועה בלי להודיע. שינוי שורות הוא
@@ -207,7 +224,7 @@ async function setRange(sinceMs){
   await nap(800);
   // ⚠ צילום של **כל** שדות התאריך אחרי השיגור — כך הריצה הבאה תאמר מי נשמר
   // ומי נדרס, בלי עוד סבב השערות.
-  return{applied:true,tab:tab.t,wrote,rewrites,fromAfterWrite,fromAtClick,scoped:!!scoped,submitInfo,from:fromStr,till:tillStr,
+  return{applied:true,tab:tab.t,wrote,rewrites,fromAfterWrite,fromAtClick,submitPath,formAction:String(lf?.getAttribute('action')||'').slice(0,80),formMethod:String(lf?.getAttribute('method')||''),scoped:!!scoped,submitInfo,from:fromStr,till:tillStr,
     fields:[...(fdoc()?.querySelectorAll('input')||[])].map(el=>({id:el.id||'',name:el.name||'',v:String(el.value||'').slice(0,12)}))
       .filter(x=>/date|FROM|TO|from|till/i.test(x.id+' '+x.name)).slice(0,14),
     clicked:show?show.t:'',buttons:cands.map(x=>x.t).filter(Boolean).slice(0,14),
