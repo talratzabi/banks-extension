@@ -94,6 +94,18 @@ async function setRange(sinceMs){
   const dd2=d=>String(d.getDate()).padStart(2,'0'),mm2=d=>String(d.getMonth()+1).padStart(2,'0');
   const fromD=new Date(sinceMs),tillD=new Date();
   const byName=(nm)=>fdoc()?.querySelector(`[name="${nm}"]`);
+  // ⚠ `submitLinkForm('077',…)` משגר את `LinkForm077`. שם יושבים שדות התאריך
+  // המפוצלים שהשרת קורא בפועל — ולכן כותבים לתוכו, לפי שם ובתוך הטופס.
+  const linkForm=()=>fdoc()?.querySelector('form[name^="LinkForm"]')||null;
+  const inForm=(nm)=>{const f=linkForm();return f?f.querySelector(`[name="${nm}"]`):byName(nm)};
+  const linkFormDates=()=>({
+    fromYY:set(inForm('I-FROM-YY'),String(fromD.getFullYear())),
+    fromMM:set(inForm('I-FROM-MM'),mm2(fromD)),
+    fromDD:set(inForm('I-FROM-DD'),dd2(fromD)),
+    tillYY:set(inForm('I-TILL-YY'),String(tillD.getFullYear())),
+    tillMM:set(inForm('I-TILL-MM'),mm2(tillD)),
+    tillDD:set(inForm('I-TILL-DD'),dd2(tillD)),
+    formFound:!!linkForm()});
   // ⚠⚠ 27.08 — הריצה עם הכפתור הנכון עדיין החזירה יוני. השערה שנבדקת כאן:
   // **הטופס אינו קורא את `#fromDate` אלא את השדות המפוצלים.** בגשש נמדדו
   // `I_FROM_YY/MM/DD` עם `0000/00/00` ו-`T20C0256-DATE-FROM/TO` ריקים —
@@ -105,9 +117,14 @@ async function setRange(sinceMs){
     tillDate:setDate('#tillDate',tillD,tillStr),
     hiddenFrom:set(d?.querySelector('#FromdateValue'),fromStr),
     hiddenTo:set(d?.querySelector('#toDateValue'),tillStr),
-    splitYY:set(d?.querySelector('#I_FROM_YY')||byName('I-FROM-YY'),String(fromD.getFullYear())),
-    splitMM:set(d?.querySelector('#I_FROM_MM')||byName('I-FROM-MM'),mm2(fromD)),
-    splitDD:set(d?.querySelector('#I_FROM_DD')||byName('I-FROM-DD'),dd2(fromD)),
+    // ⚠⚠ 27.08 — הדוח הראה את `LinkForm077`, הטופס שבאמת משוגר, ובתוכו:
+    //   I-FROM-YY=2026  I-FROM-MM=01  I-FROM-DD=01   ← הכתיבה שלנו **כן** נחתה
+    //   I-TILL-YY=0000  I-TILL-MM=00  I-TILL-DD=00   ← **לא מולאו מעולם**
+    // תאריך התחלה בלי תאריך סיום = „הטווח לא תקין", והשרת חוזר לתצוגת ברירת
+    // המחדל. גיליתי את קיום `I-TILL-*` בדוח של 1.18.2 **ולא מילאתי אותם** —
+    // זה הפער היחיד שנשאר, והוא שלי.
+    // ⚠ הכתיבה מכוונת אל הטופס המשוגר ולפי **שם**, ולא לפי id בדף כולו.
+    ...linkFormDates(),
     tFrom:set(byName('T20C0256-DATE-FROM'),fromStr),
     tTo:set(byName('T20C0256-DATE-TO'),tillStr)}};
   // ⚠⚠ נמדד בריצה החיה 27.08: נכתב 01/01/2026, וב-`after.from` חזר **01/08/2026**.
