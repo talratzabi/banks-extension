@@ -61,11 +61,28 @@ async function setRange(sinceMs){
   const tab=tabs.find(x=>/תנועות\s*בטווח\s*תאריכים/.test(x.t));
   if(!tab)return{applied:false,why:'לשונית טווח התאריכים לא נמצאה',
     tabs:tabs.map(x=>x.t).filter(Boolean).slice(0,12),before};
+  // ⚠⚠ 27.08 — טל שלח צילום מסך: **„תנועות אחרונות" נשארה הלשונית הפעילה.**
+  // זו האבחנה שסוגרת שבעה סבבים. כל הזמן מילאתי שדות בפאנל **שלא הופעל**
+  // ואז שיגרתי — ולכן השרת החזיר „טווח לא תקין" וחזר לתצוגת ברירת המחדל.
+  // ⚠ הבדיקה הקודמת „האם `#fromDate` קיים" הייתה חסרת ערך: הוא קיים בדף
+  // **גם כשהפאנל מוסתר**. הסימן הנכון הוא **נראוּת**, לא קיום.
+  const visible=el=>!!(el&&(el.offsetParent||el.getClientRects?.().length));
+  const tabsState=()=>[...(fdoc()?.querySelectorAll('a')||[])]
+    .map(a=>({t:clean(a.textContent),cls:clean(a.className||''),
+      li:clean(a.parentElement?.className||''),sel:a.getAttribute('aria-selected')||''}))
+    .filter(x=>/תנועות/.test(x.t)).slice(0,8);
+  const before_tabs=tabsState();
   tab.a.click();
   // ⚠ גבול שעון־קיר ולא תקרת סבבים — הלקח מ-1.12.1.
   const ready=Date.now()+10000;
-  while(Date.now()<ready&&!fdoc()?.querySelector('#fromDate'))await nap(300);
+  while(Date.now()<ready&&!visible(fdoc()?.querySelector('#fromDate')))await nap(300);
   await nap(600);
+  const panelOpen=visible(fdoc()?.querySelector('#fromDate'));
+  // ⚠ **אם הפאנל לא נפתח — לא משגרים.** שיגור מלשונית לא נכונה הוא בדיוק מה
+  // שקרה שבעה סבבים, והוא גם מבזבז ריצה חיה של טל. עדיף לחזור עם הסיבה.
+  if(!panelOpen)return{applied:false,why:'לשונית טווח התאריכים לא הופעלה — הפאנל נשאר מוסתר',
+    tabsBefore:before_tabs,tabsAfter:tabsState(),tabHref:tab.a.getAttribute('href')||'',
+    tabId:tab.a.id||'',before};
   // ⚠ האירוע נוצר בחלון העליון ולא במסגרת: אותו מקור, והדיספאץ' תקף גם אחרי
   // שהמסגרת נוּוטה.
   const set=(el,v)=>{if(!el)return false;el.value=v;
@@ -224,7 +241,7 @@ async function setRange(sinceMs){
   await nap(800);
   // ⚠ צילום של **כל** שדות התאריך אחרי השיגור — כך הריצה הבאה תאמר מי נשמר
   // ומי נדרס, בלי עוד סבב השערות.
-  return{applied:true,tab:tab.t,wrote,rewrites,fromAfterWrite,fromAtClick,submitPath,formAction:String(lf?.getAttribute('action')||'').slice(0,80),formMethod:String(lf?.getAttribute('method')||''),scoped:!!scoped,submitInfo,from:fromStr,till:tillStr,
+  return{applied:true,tab:tab.t,panelOpen,tabsAfter:tabsState(),wrote,rewrites,fromAfterWrite,fromAtClick,submitPath,formAction:String(lf?.getAttribute('action')||'').slice(0,80),formMethod:String(lf?.getAttribute('method')||''),scoped:!!scoped,submitInfo,from:fromStr,till:tillStr,
     fields:[...(fdoc()?.querySelectorAll('input')||[])].map(el=>({id:el.id||'',name:el.name||'',v:String(el.value||'').slice(0,12)}))
       .filter(x=>/date|FROM|TO|from|till/i.test(x.id+' '+x.name)).slice(0,14),
     clicked:show?show.t:'',buttons:cands.map(x=>x.t).filter(Boolean).slice(0,14),
