@@ -1562,8 +1562,25 @@ async function runBtb(tabId){
     // ⚠ **הריבית מחושבת דווקא מן היתרה המוצגת** — היא והתשלום הם הזוג העקבי
     // שהאתר מציג (3.20%). מול היתרה האמיתית אותו תשלום היה משתמע 8.96%,
     // כי הוא שייך ללוח הישן. **בדיקה הפוכה זו היא שאישרה את הכיוון.**
-    const rate=annuityRate(d.balance,d.nextPayment,remaining);
-    const rateText=rate?`${(rate.nominal*100).toFixed(2)}% מחושבת`:'';
+    // ⚠⚠⚠ 27.08.2026 — טל: „תבדוק בתיקייה BTB את ההסכם ותראה." **ההסכם מכריע,
+    // והוא הפריך את מה שחישבתי.** `הסכם חדש חתום btb.pdf` נוקב במפורש:
+    // „ריבית הפריים הינה 5.00%, ומכאן שהריבית השנתית הינה 8%" — כלומר **פריים + 3%**.
+    // (המסמך סרוק ואין בו שכבת טקסט; הציטוט רשום ב-CLAUDE.md של המסלקה מ-10.08.)
+    //
+    // ⚠ **מבחן הכרעה שמוכיח שהיתרה המוצגת מיושנת, בלי להסתמך על דיווח:**
+    //     ריבית חודשית על 685,056.68 ב-8% = 4,567.04
+    //     התשלום החודשי                    = 3,155.15
+    //   התשלום **אינו מכסה אפילו את הריבית** — הלוואה כזו רק תופחת. בלתי אפשרי.
+    // ומול היתרה האמיתית הכול נסגר לאגורה:
+    //     ריבית 2,567.04 + קרן 588.11 = **3,155.15** בדיוק.
+    //
+    // ⚠⚠ **ולכן החישוב הקודם היה שגוי:** גזירת ריבית מ-(685,057 · 3,155.15 · 325)
+    // נתנה 3.20%, מספר שנראה סביר ולכן לא עורר חשד — **אבל הוא נגזר מנתון
+    // שהתיישן.** גזירה מאותו תשלום מול היתרה האמיתית נותנת **8.00% בדיוק.**
+    // **נתון שנראה סביר אינו נתון נכון.** המקור החוזי גובר על הגזירה.
+    const BTB_PRIME=0.05,BTB_SPREAD=0.03;   // ⚠ פריים משתנה — לעדכן כשבנק ישראל זז
+    const contractual=BTB_PRIME+BTB_SPREAD;
+    const rateText=`${(contractual*100).toFixed(2)}% (פריים ${(BTB_PRIME*100).toFixed(2)}% + ${(BTB_SPREAD*100).toFixed(2)}%, מההסכם)`;
     // ⚠ מתי מפחיתים? רק כשמדובר בפירעון ולא בתשלום חודשי רגיל, **וכל עוד לא
     // הגיע מועד העדכון**. סף של פי 2 מהתשלום הרגיל מפריד ביניהם; בלעדיו היינו
     // מפחיתים גם תשלום שוטף ומציגים יתרה נמוכה מדי.
@@ -1573,17 +1590,23 @@ async function runBtb(tabId){
     const lumpPending=lump>0&&regular>0&&lump>=regular*2&&!!dueMs&&Date.now()<dueMs;
     const trueBalance=lumpPending?Number((d.balance-lump).toFixed(2)):d.balance;
     // ההחזר הצפוי אחרי שהפירעון ייושם, אם התקופה נשמרת
-    const nAfter=remaining!=null?remaining-1:null;
-    const expectedPayment=(lumpPending&&rate&&nAfter&&nAfter>0)
-      ?Number((trueBalance*rate.monthly/(1-Math.pow(1+rate.monthly,-nAfter))).toFixed(2)):null;
+    // ⚠ טל: „ההחזר הבא הוא נכון" — כלומר התשלום אינו יורד, **התקופה מתקצרת.**
+    // לכן מחשבים כמה תשלומים נותרו, ולא איזה תשלום יהיה.
+    const im=contractual/12,cover=trueBalance*im;
+    const monthsLeft=(cover<d.nextPayment)
+      ?Math.ceil(-Math.log(1-trueBalance*im/d.nextPayment)/Math.log(1+im)):null;
+    // ⚠ אם התשלום אינו מכסה את הריבית — לא מחזירים מספר, מדווחים את הבעיה.
+    const coverageWarning=cover>=d.nextPayment
+      ?`התשלום ${d.nextPayment} אינו מכסה ריבית של ${cover.toFixed(2)} — היתרה שנקראה כנראה מיושנת`:'';
     const loan={type:`הלוואת BTB${d.number?` #${d.number}`:''}`,balance:trueBalance,
       // ⚠ מה שהאתר הציג נשמר לצד האמת, כדי שתמיד אפשר יהיה להסביר את הפער.
-      shownBalance:d.balance,lumpPending,expectedPayment,
+      shownBalance:d.balance,lumpPending,monthsLeft,coverageWarning,
+      rateSource:'הסכם BTB — פריים + 3%',
       originalPrincipal:d.originalPrincipal,startDate:d.startDate,endDate:d.endDate,
       nextPayment:d.nextPayment,nextPaymentDate:d.nextPaymentDate,interest:rateText,
       // ⚠ הפירעון החד-פעמי נשמר על ההלוואה — הוא מסביר את הפער בין הסכום
       // המקורי ליתרה, ובלעדיו התשלום החודשי נראה בלתי אפשרי.
-      lastPayment:d.lastPayment,lastPaymentDate:d.lastPaymentDate,      rateComputed:rate?{nominal:rate.nominal,effective:rate.effective,basis:{pv:d.balance,pmt:d.nextPayment,n:remaining}}:null,
+      lastPayment:d.lastPayment,lastPaymentDate:d.lastPaymentDate,      rateContractual:{prime:BTB_PRIME,spread:BTB_SPREAD,nominal:contractual},
       installments:d.totalInstallments||null,totalInstallments:d.totalInstallments||null,
       remainingInstallments:(d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null,
       accountKey:`BTB-${number}`};
