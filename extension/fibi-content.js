@@ -70,6 +70,26 @@ async function setRange(sinceMs){
   // שהמסגרת נוּוטה.
   const set=(el,v)=>{if(!el)return false;el.value=v;
     for(const ev of ['input','change','blur'])el.dispatchEvent(new Event(ev,{bubbles:true}));return true};
+  // ⚠⚠ 27.08 — `submitInfo` הכריע: `#fromDate` **אינו בתוך שום טופס**
+  // (`form:null`, `formFieldCount:0`), והכפתור הוא `type=button` שקורא
+  // `submitLinkForm('077','1',…)` — כלומר משוגר `LinkForm077`, טופס אחר לגמרי.
+  // לכן השמה ישירה ל-`#fromDate` אינה מגיעה לשרת לעולם. השדה נושא
+  // `class="hasDatepicker"`, כלומר **jQuery UI**, וזה מעדכן מצב פנימי ומריץ
+  // מטפלים שמעתיקים את הערך לטופס המשוגר. השמה ל-`.value` עוקפת את שניהם.
+  const setDate=(sel,d,txt)=>{const w=fdoc()?.defaultView,el=fdoc()?.querySelector(sel);
+    if(!el)return 'אין שדה';
+    // ⚠ הסימן הקובע הוא **המחלקה `hasDatepicker`** — זה מה שנמדד בדף. לא
+    // מתנים ב-`data('datepicker')`: גרסאות jQuery UI שומרות את המצב במפתחות
+    // שונים, ובדיקה צרה מדי הייתה מפילה אותנו חזרה להשמה הישירה שכבר הוכחה
+    // כמי שאינה מגיעה לשרת.
+    try{const $=w&&(w.jQuery||w.$);
+      if($&&/hasDatepicker/.test(el.className||'')){
+        $(el).datepicker('setDate',d);
+        try{$(el).trigger('change')}catch(e2){}
+        if(el.value)return 'datepicker';
+      }
+    }catch(e){}
+    set(el,txt);return 'value';};
   const fromStr=dmy(new Date(sinceMs)),tillStr=dmy(new Date());
   const dd2=d=>String(d.getDate()).padStart(2,'0'),mm2=d=>String(d.getMonth()+1).padStart(2,'0');
   const fromD=new Date(sinceMs),tillD=new Date();
@@ -81,8 +101,8 @@ async function setRange(sinceMs){
   // מילוי שדה שאינו בשימוש אינו מזיק; אי-מילוי שדה שכן בשימוש מסביר בדיוק
   // את מה שראינו. **לכן ממלאים את כולם ומדווחים מה נשאר אחרי השיגור.**
   const writeDates=()=>{const d=fdoc();return{
-    fromDate:set(d?.querySelector('#fromDate'),fromStr),
-    tillDate:set(d?.querySelector('#tillDate'),tillStr),
+    fromDate:setDate('#fromDate',fromD,fromStr),
+    tillDate:setDate('#tillDate',tillD,tillStr),
     hiddenFrom:set(d?.querySelector('#FromdateValue'),fromStr),
     hiddenTo:set(d?.querySelector('#toDateValue'),tillStr),
     splitYY:set(d?.querySelector('#I_FROM_YY')||byName('I-FROM-YY'),String(fromD.getFullYear())),
@@ -146,7 +166,16 @@ async function setRange(sinceMs){
     globals:(()=>{const w=fdoc()?.defaultView;if(!w)return[];
       return ['doSubmit','submitForm','Search','doSearch','showTnuot','SubmitForm','goSubmit']
         .filter(k=>{try{return typeof w[k]==='function'}catch(e){return false}})})(),
-    formsInDoc:[...(fdoc()?.querySelectorAll('form')||[])].map(f=>({name:f.getAttribute('name')||'',action:String(f.getAttribute('action')||'').slice(0,120)})).slice(0,8)};
+    // ⚠ שדות **כל** הטפסים: `submitLinkForm('077',…)` משגר את `LinkForm077`,
+    // ושם — ולא ב-`#fromDate` — יושבים הערכים שמגיעים לשרת.
+    formsInDoc:[...(fdoc()?.querySelectorAll('form')||[])].map(f=>({name:f.getAttribute('name')||'',
+      action:String(f.getAttribute('action')||'').slice(0,60),
+      fields:[...f.querySelectorAll('input,select')].map(el=>({n:el.name||el.id||'',v:String(el.value||'').slice(0,12)}))
+        .filter(x=>x.n).slice(0,24)})).slice(0,8),
+    hasJQuery:(()=>{try{const w=fdoc()?.defaultView;return !!(w&&(w.jQuery||w.$))}catch(e){return false}})(),
+    submitFns:(()=>{const w=fdoc()?.defaultView;if(!w)return[];
+      return ['submitLinkForm','showDateFilterTab','goToBackasha','doSubmit']
+        .filter(k=>{try{return typeof w[k]==='function'}catch(e){return false}})})()};
   if(show)show.el.click();
   // ⚠ ההמתנה נשענת על **שני** סימנים ולא על אחד: התאריך המוקדם השתנה, **או**
   // מספר השורות השתנה. בבדיקה `earliest()` חזר ריק בסביבה מלאכותית, וקריאה
