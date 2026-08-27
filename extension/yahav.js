@@ -73,13 +73,19 @@ async function runYahav(tabId){
     // אינו מוצא דבר, ולכן נקראת רק התקופה שהדף מציג (10 תנועות מ-04/06).
     // ⚠ אין לנחש סלקטור חדש. אותו גשש שסגר את פועלים בסבב אחד מוזרק כאן,
     // ו-dateControls() יחזיר את בורר התאריכים האמיתי. **מדידה בלבד.**
+    // ⚠⚠ 27.08 — הגשש הזה נוסף ב-1.16.1 **ומעולם לא כתב דבר**: `yahavTxProbe`
+    // אינו באחסון אף שהריצה עברה כאן. הסיבה אינה ידועה — וה-`catch(e){}` הריק
+    // בלע אותה. **גשש שנכשל בשקט גרוע מגשש שאינו קיים**, כי הוא מייצר אשליה
+    // שנמדד. שתי מסקנות מיושמות כאן:
+    //   1. אותו מנגנון שהצליח פעמיים היום — `probeAllFrames`: הזרקה **לכל
+    //      מסגרת** ומסירה לפי `frameId`, במקום הזרקה יחידה שמסתמכת על כך
+    //      שהמאזין הראשון שיענה הוא הנכון (ל-`yahav-content.js` יש מאזין משלו).
+    //   2. **השגיאה נשמרת** ולא נבלעת.
     try{
-      await chrome.scripting.executeScript({target:{tabId},files:['probe-content.js']});
-      await delay(400);
-      const pr=await chrome.tabs.sendMessage(tabId,{type:'BANK_PROBE'});
-      // ⚠ נשמר לפני הניסיון — הלקח מ-1.8.0, שם הרשומה אבדה כשהשלב הבא נפל.
-      if(pr?.ok)await chrome.storage.local.set({yahavTxProbe:{at:new Date().toISOString(),...pr.probe}});
-    }catch(e){}
+      const frames=await probeAllFrames(tabId);
+      await chrome.storage.local.set({yahavTxProbe:{at:new Date().toISOString(),frames}});
+    }catch(e){try{await chrome.storage.local.set({yahavTxProbe:{at:new Date().toISOString(),
+      error:String(e?.message||e).slice(0,140)}})}catch(e2){}}
     let range=null;
     try{range=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'YAHAV_SET_3_MONTHS'}),30000,'הגדרת טווח התאריכים')}catch(e){range={ok:false,error:e.message}}
     {
