@@ -343,7 +343,15 @@ function renderSelection(){const box=$('#discoveredAccounts'),tab=$('#selectionT
 // ⚠ הפאנל כבר לא מסתתר מעצמו — הלשונית שולטת בהצגה. קודם הוא נעלם כשלא היו חשבונות
 // שזוהו, ולכן לא היה שום מקום קבוע לחפש בו את הבחירה.
 if(tab)tab.textContent=discovered.length?`בחירה וסנכרון (${discovered.length})`:'בחירה וסנכרון';
-if(!discovered.length){box.innerHTML='<div class="empty">אין חשבונות שממתינים לבחירה. התחבר לבנק מלשונית "חשבונות", ובסיום ההתחברות החשבונות שזוהו יופיעו כאן לבחירה — הסנכרון לא מתחיל לפני שתאשר.</div>';const tools=$('#selectionTools');if(tools)tools.remove();return}
+if(!discovered.length){box.innerHTML='<div class="empty">אין חשבונות שממתינים לבחירה. התחבר לבנק מלשונית "חשבונות", ובסיום ההתחברות החשבונות שזוהו יופיעו כאן לבחירה — הסנכרון לא מתחיל לפני שתאשר.</div>';
+  // ⚠⚠ 27.08.2026 — טל אמר פעמיים „בפנים" ומדידה לא הגיעה. **נמדד: הכפתור
+  // „מדוד לשונית פעילה" יושב ב-`#selectionTools`, והשורה הזו הסירה את כל
+  // הסרגל כשאין חשבונות שממתינים לבחירה.** ב-BTB אין מתאם ולכן אין „חשבונות
+  // שזוהו" — כלומר **בדיוק במקרה שבו צריך למדוד, הכלי נעלם מהמסך.**
+  // ⚠ המדידה היא כלי אבחון ואינה חלק מבחירת חשבונות; היא נשארת תמיד.
+  const tools=$('#selectionTools');
+  if(tools)tools.innerHTML='<button type="button" class="button" id="probeTab" title="קורא את מבנה הדף בלשונית הפעילה. קריאה בלבד — בלי לחיצות ובלי ניווט.">מדוד לשונית פעילה</button>';
+  return}
 // ⚠ הרשימה נמחקת בכל התחברות, ולכן כל מה שבה הוא תוצר של הזיהוי הנוכחי — והכול מסומן
 // כברירת מחדל. קודם רק חשבון שסונכרן בעבר הגיע מסומן, וחשבונות חדשים נשמטו בשקט.
 if(!$('#selectionTools')){const tools=document.createElement('div');tools.id='selectionTools';tools.style.cssText='display:flex;gap:8px;margin-bottom:10px';
