@@ -1007,6 +1007,27 @@ async function syncFibi(tabId){
       await delay(1500);
     }catch(e){try{await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),ok:false,error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
     const t=await fibiRead(tabId,'FIBI_TRANSACTIONS','קריאת תנועות הבינלאומי');
+    // ⚠⚠ דפדוף: התוצאה מחולקת לעמודים („עמוד - 3" בצילום), וקריאת עמוד אחד
+    // מחזירה טווח חלקי. ⚠ **הקורא נשאר `FIBI_TRANSACTIONS`** — אין עותק שני
+    // של הפרסר; העולם הראשי רק מתקדם עמוד, וכל עמוד נקרא במסלול הקיים.
+    {const pages=[{n:1,count:(t.data?.transactions||[]).length}];
+     const seen=new Set((t.data?.transactions||[]).map(x=>`${x.date}|${x.reference||''}|${x.debit??''}|${x.credit??''}|${x.description||x.action||''}`));
+     let guard=0;
+     while(guard++<40){
+       const step=await fibiPager(tabId,'next');
+       if(!step?.ok||!step.advanced)break;
+       await chrome.storage.local.set({syncStatus:`הבינלאומי: קורא עמוד ${guard+1}`});
+       let more=null;
+       try{more=await fibiRead(tabId,'FIBI_TRANSACTIONS',`קריאת עמוד ${guard+1} בבינלאומי`)}catch(e){break}
+       const rows=more?.data?.transactions||[];
+       let added=0;
+       for(const x of rows){const k=`${x.date}|${x.reference||''}|${x.debit??''}|${x.credit??''}|${x.description||x.action||''}`;
+         if(seen.has(k))continue;seen.add(k);t.data.transactions.push(x);added++}
+       pages.push({n:guard+1,count:rows.length,added});
+       if(!added)break;   // ⚠ עמוד שלא הוסיף דבר = סוף, גם אם הדפדוף טוען אחרת
+     }
+     const scan=await fibiPager(tabId,'scan');
+     try{await chrome.storage.local.set({fibiPages:{at:new Date().toISOString(),pages,total:(t.data?.transactions||[]).length,lastScan:scan}})}catch(e){}}
     const now=new Date().toISOString(),source=state.pendingFibiSlot,label=`הבינלאומי — ${owner.firstName||t.data.accountNumber}`;
     const bankNumber=v=>String(v??'').replace(/\D/g,'').replace(/^0+(?=\d)/,'');
     if(bankNumber(s.data.branch)!==bankNumber(t.data.branch)||bankNumber(s.data.accountNumber)!==bankNumber(t.data.accountNumber))throw Error(`החשבון השתנה במהלך הסנכרון (${s.data.branch}-${s.data.accountNumber} לעומת ${t.data.branch}-${t.data.accountNumber})`);
@@ -1233,6 +1254,58 @@ async function fibiSetRangeMain(tabId,sinceMs){
     await new Promise(r=>setTimeout(r,1200));waited+=1200;
   }
   return{ok:false,error:'מסגרת התנועות לא נטענה בזמן',attempts,waitedMs:waited};
+}
+// ⚠⚠ 27.08.2026 — טל: „תשים לב לכמות הדפים ולפי זה להתקדם." בצילום מופיע
+// **„עמוד - 3"**: הטווח כבר נקבע נכון (01/01/2026 → 27/08/2026, גם בכותרת),
+// אבל התוצאה **מחולקת לדפים** ואנחנו קוראים אחד. מכאן „הטווח לא תקין".
+// ⚠ הדפדוף נעשה בעולם הראשי מאותה סיבה בדיוק כמו הלשונית.
+// `action:'scan'` מדווח מה קיים; `action:'next'` מתקדם דף. **הסריקה מדווחת
+// תמיד**, כך שגם כישלון ייסגר בקריאה אחת ולא בעוד סבב.
+async function fibiPager(tabId,action){
+  let results=[];
+  try{
+    results=await chrome.scripting.executeScript({
+      target:{tabId,allFrames:true},world:'MAIN',args:[action],
+      func:async(act)=>{
+        const nap=ms=>new Promise(r=>setTimeout(r,ms));
+        const clean=v=>String(v||'').replace(/\s+/g,' ').trim();
+        // ⚠ נתפס בבדיקה: `pageAfter` דיווח את הערך **לפני** הלחיצה, כי הטקסט
+        // נלכד פעם אחת בראש הפונקציה. הזרימה הייתה תקינה (`advanced` נמדד
+        // מתוכן השורות החי), אבל **דוח שמשקר מייצר סבב מיותר.** נקרא חי.
+        const bodyText=()=>clean(document.body&&document.body.textContent);
+        const body=bodyText();
+        if(!/עמוד/.test(body)&&!document.querySelector('form[name^="LinkForm"]'))return null;
+        const rowsText=()=>[...document.querySelectorAll('table tr')].map(r=>clean(r.textContent)).join('|');
+        const pageLabel=()=>{const m=bodyText().match(/עמוד\s*-?\s*(\s*[\s0-9]{1,4})/);return m?clean(m[1]):''};
+        const cands=[...document.querySelectorAll('a,input[type="button"],input[type="submit"],button')]
+          .map(el=>({el,t:clean(el.value||el.textContent),
+            oc:clean(el.getAttribute&&el.getAttribute('onclick')||'').slice(0,120),
+            hr:clean(el.getAttribute&&el.getAttribute('href')||'').slice(0,120)}));
+        const NEXT=/^(הבא|הבאה|הדף הבא|עמוד הבא|>|>>|»|›)$/;
+        const nextEl=cands.find(c=>NEXT.test(c.t))
+          ||cands.find(c=>/הבא/.test(c.t)&&!/הצג|קודם/.test(c.t))
+          ||cands.find(c=>/next|nextPage|pageDown/i.test(c.oc+' '+c.hr));
+        const scan={page:pageLabel(),
+          controls:cands.filter(c=>c.t&&c.t.length<=14).map(c=>({t:c.t,oc:c.oc,hr:c.hr})).slice(0,20),
+          rows:document.querySelectorAll('table tr').length,
+          hasNext:!!nextEl,nextText:nextEl?nextEl.t:''};
+        if(act!=='next')return{ok:true,...scan};
+        if(!nextEl)return{ok:true,advanced:false,...scan};
+        const before=rowsText(),beforePage=pageLabel();
+        try{nextEl.el.click()}catch(e){return{ok:false,error:'לחיצה נכשלה: '+e.message,...scan}}
+        // ⚠ גבול שעון־קיר; „הדף התחלף" נמדד בתוכן השורות **או** במספר העמוד.
+        const dl=Date.now()+12000;
+        while(Date.now()<dl){
+          if(rowsText()!==before||pageLabel()!==beforePage)break;
+          await nap(400);
+        }
+        await nap(800);
+        return{ok:true,advanced:rowsText()!==before||pageLabel()!==beforePage,
+          pageBefore:beforePage,pageAfter:pageLabel(),rows:document.querySelectorAll('table tr').length,
+          hasNext:scan.hasNext,nextText:scan.nextText,controls:scan.controls};
+      }});
+  }catch(e){return{ok:false,error:String(e&&e.message||e).slice(0,140)}}
+  return results.map(r=>r&&r.result).find(Boolean)||{ok:false,error:'לא נמצאה מסגרת עם דפדוף'};
 }
 async function probeAllFrames(tabId){
   let frames=[];
