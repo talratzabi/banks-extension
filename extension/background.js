@@ -1345,7 +1345,16 @@ async function probeActiveTab(){
   await delay(400);
   const r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'BANK_PROBE'}),20000,'המדידה');
   if(!r?.ok)throw Error(r?.error||'המדידה לא החזירה דבר');
-  await chrome.storage.local.set({bankProbe:r.probe,syncStatus:`נמדד: ${r.probe.host} · ${r.probe.grid?.datedRows||0} שורות עם תאריך · ${r.probe.accounts?.length||0} מספרי חשבון`});
+  // ⚠⚠ 27.08.2026 — טל מבקש לעבור למסך „תנועות בחשבון" **החדש** בבינלאומי:
+  // שם, אחרי בחירת הטווח, **כל התנועות בעמוד אחד** — בלי מסגרת לגסי, בלי
+  // `LinkForm077` ובלי דפדוף. **המסך הזה לא נמדד מעולם.**
+  // כדי לכתוב לו מתאם צריך את ה-DOM שלו, ולכן כפתור „מדוד לשונית פעילה"
+  // אוסף עכשיו **את כל המסגרות** ולא את העליונה בלבד, ובעולם הראשי גם את
+  // הכתובת המדויקת. ⚠ קריאה בלבד — בלי לחיצות ובלי ניווט.
+  let frames=[];
+  try{frames=await probeAllFrames(tab.id)}catch(e){frames=[]}
+  await chrome.storage.local.set({bankProbe:r.probe,bankProbeFrames:{at:new Date().toISOString(),url:tab.url,frames},
+    syncStatus:`נמדד: ${r.probe.host} · ${r.probe.grid?.datedRows||0} שורות עם תאריך · ${frames.length} מסגרות`});
   return{ok:true,host:r.probe.host};
 }
 async function leumiSnapshot(tabId){try{const s=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_SNAPSHOT'}),20000,'צילום דף לאומי');return s?.debug||null}catch{return null}}
