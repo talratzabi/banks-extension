@@ -987,15 +987,22 @@ async function syncFibi(tabId){
     // ⚠ קביעת הטווח לפני הקריאה. הלשונית הפעילה היא „תנועות אחרונות" ולכן
     // נשמרו 30 תנועות מ-01/06 בלבד. הדוח נשמר תמיד — גם כשלא הוחל — כדי
     // שכשל יהיה ניתן לאבחון בקריאה אחת.
-    try{const rng=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'FIBI_SET_RANGE',since:await collectSinceMs()}),45000,'טווח התאריכים בבינלאומי');
+    try{const since=await collectSinceMs();
+      // ⚠ המסלול הראשי הוא `world:'MAIN'`; מסלול קובץ התוכן נשאר כנפילה בלבד,
+      // אחרי שהוכח שהוא אינו יכול להפעיל את הלשונית.
+      let rng=await fibiSetRangeMain(tabId,since);
+      if(!rng||rng.ok===false||!rng.panelOpen)
+        {const alt=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'FIBI_SET_RANGE',since}),45000,'טווח התאריכים בבינלאומי').catch(e=>({applied:false,why:String(e?.message||e).slice(0,80)}));
+         rng={...alt,main:rng};}
       await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),...(rng||{})}});
       // ⚠⚠ 27.08 — האחסון עבר דחיסה (`.ldb` דחוס ב-Snappy) ו-`fibiRangeApplied`
       // לא היה קריא לי אחרי הריצה. **אבחון שאי אפשר לקרוא אינו אבחון.**
       // שורה אחת קריאה נכנסת ל-`bankDiagnostics`, שהדשבורד כבר מציג.
       {const dg=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
-       dg.fibi=rng?.applied
-         ?`הבינלאומי: טווח ${rng.from||''} · כפתור ${rng.scoped?'הטווח':'גורף'} · שורות ${rng.before?.rows??'?'}→${rng.after?.rows??'?'} · מוקדם ${rng.after?.earliest||'?'}`
-         :`הבינלאומי: הטווח לא הוחל — ${rng?.why||rng?.error||'סיבה לא ידועה'}`;
+       const m=rng?.main||rng;
+       dg.fibi=(rng?.panelOpen||rng?.applied)
+         ?`הבינלאומי: לשונית ${m?.after?.active||'?'} · ${m?.how||''} · שיגור ${m?.submitted||rng?.submitPath||'?'} · שורות ${m?.before?.rows??rng?.before?.rows??'?'}→${m?.after?.rows??rng?.after?.rows??'?'}`
+         :`הבינלאומי: הטווח לא הוחל — ${rng?.why||rng?.error||m?.error||'סיבה לא ידועה'}`;
        await chrome.storage.local.set({bankDiagnostics:dg});}
       await delay(1500);
     }catch(e){try{await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),ok:false,error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
@@ -1135,6 +1142,63 @@ function leumiTab(tabs){return tabs.find(t=>t.url?.includes('/digitalfront/'))||
 // ⚠ אין דרך למסר מסגרת אחת עם `sendMessage` רגיל: כמה מסגרות עונות ורק
 // הראשונה נספרת. לכן מונים מסגרות ב-`webNavigation` וממסרים לכל אחת לפי
 // `frameId`. הגשש עצמו לא שונה — הוא כבר מוגן בשומר הזרקה.
+// ⚠⚠ 27.08.2026 — טל: „תתקן את הטווח, תפעיל את הלשונית המתאימה."
+// **השורש שנמדד:** קובץ תוכן רץ ב-isolated world, ולכן `showDateFilterTab`
+// ו-`submitLinkForm` **אינן נראות לו** — `submitFns:[]` אמר זאת פעמיים.
+// הלחיצה על `<a href="javascript:showDateFilterTab()">` לא שינתה את הלשונית
+// הפעילה (`tabsBefore == tabsAfter`), ולכן כל שיגור יצא מ„תנועות אחרונות".
+// ⚠ **הפתרון אינו סלקטור נוסף אלא `world:'MAIN'`** — שם פונקציות הדף חיות.
+// זה יכול לצאת רק מכאן; קובץ תוכן לא יוכל לעשות זאת לעולם.
+// ⚠ רץ על **כל המסגרות**, והמסגרת שאין בה לשונית טווח מחזירה null — כך אין
+// צורך לנחש מזהה מסגרת, והתוצאה נבחרת לפי מי שבאמת פעל.
+async function fibiSetRangeMain(tabId,sinceMs){
+  if(!sinceMs)return{ok:false,error:'לא הוגדרה תחילת איסוף'};
+  const f=new Date(sinceMs),t=new Date(),p=n=>String(n).padStart(2,'0');
+  let results=[];
+  try{
+    results=await chrome.scripting.executeScript({
+      target:{tabId,allFrames:true},world:'MAIN',
+      args:[String(f.getFullYear()),p(f.getMonth()+1),p(f.getDate()),
+            String(t.getFullYear()),p(t.getMonth()+1),p(t.getDate())],
+      func:async(fy,fm,fd,ty,tm,td)=>{
+        const nap=ms=>new Promise(r=>setTimeout(r,ms));
+        const clean=v=>String(v||'').replace(/\s+/g,' ').trim();
+        const tabEl=[...document.querySelectorAll('a')]
+          .find(a=>/תנועות\s*בטווח\s*תאריכים/.test(clean(a.textContent)));
+        if(!tabEl)return null;                       // אין לשונית — לא המסגרת הזו
+        const vis=el=>!!(el&&(el.offsetParent||el.getClientRects().length));
+        const activeTab=()=>clean((document.querySelector('a.active')||{}).textContent);
+        const rows=()=>document.querySelectorAll('table tr').length;
+        const before={active:activeTab(),rows:rows()};
+        // ⚠ קודם קריאה ישירה לפונקציית הדף; `typeof` על מזהה לא מוגדר אינו זורק.
+        let how='';
+        try{if(typeof showDateFilterTab==='function'){showDateFilterTab();how='showDateFilterTab()'}}catch(e){how='שגיאה: '+e.message}
+        if(!how){tabEl.click();how='click'}
+        const dl=Date.now()+8000;
+        while(Date.now()<dl&&!vis(document.querySelector('#fromDate')))await nap(300);
+        const panelOpen=vis(document.querySelector('#fromDate'));
+        const form=document.querySelector('form[name^="LinkForm"]');
+        const set=(n,v)=>{const el=form&&form.querySelector('[name="'+n+'"]');if(!el)return false;el.value=v;return true};
+        const wrote={fromYY:set('I-FROM-YY',fy),fromMM:set('I-FROM-MM',fm),fromDD:set('I-FROM-DD',fd),
+                     tillYY:set('I-TILL-YY',ty),tillMM:set('I-TILL-MM',tm),tillDD:set('I-TILL-DD',td),
+                     formFound:!!form};
+        // ⚠ הפאנל חייב להיות פתוח לפני שיגור — הלקח מ-1.19.3. אחרת מדווחים ולא משגרים.
+        let submitted='';
+        if(panelOpen){
+          try{if(typeof submitLinkForm==='function'){
+            submitLinkForm('077','1','','','','','','','','','');submitted='submitLinkForm()'}}catch(e){submitted='שגיאה: '+e.message}
+          if(!submitted&&form){try{form.submit();submitted='form.submit'}catch(e){submitted='שגיאה: '+e.message}}
+        }
+        await nap(2000);
+        return{ok:true,how,panelOpen,wrote,submitted,before,
+          after:{active:activeTab(),rows:rows(),
+            from:document.querySelector('#fromDate')?.value||'',till:document.querySelector('#tillDate')?.value||''},
+          url:String(location.href).slice(0,110)};
+      }});
+  }catch(e){return{ok:false,error:String(e&&e.message||e).slice(0,140)}}
+  const hit=results.map(r=>r&&r.result).find(Boolean);
+  return hit||{ok:false,error:'לא נמצאה מסגרת עם לשונית טווח התאריכים'};
+}
 async function probeAllFrames(tabId){
   let frames=[];
   try{frames=await chrome.webNavigation.getAllFrames({tabId})||[]}catch(e){frames=[]}
