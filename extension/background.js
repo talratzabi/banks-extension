@@ -1004,35 +1004,41 @@ async function syncFibi(tabId){
       const dg=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
       delete dg.fibi;await chrome.storage.local.set({bankDiagnostics:dg});
     }
-    await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnAccountMngment/OnBalanceTrans/PrivateAccountFlow'});await delay(2200);
-    // ⚠ מדידה בלבד, לפני הקריאה. `fibi-content.js` אינו מזכיר `collectSince`
-    // אף פעם (grep → 0), כלומר לבינלאומי אין טווח תאריכים בכלל — אותו מחדל
-    // שהיה בפועלים. **לא נכתב כאן שום סלקטור** לפני שנדע מה יש בדף ובמסגרת.
-    try{const frames=await probeAllFrames(tabId);
-      await chrome.storage.local.set({fibiTxProbe:{at:new Date().toISOString(),frames}})}catch(e){}
-    // ⚠ קביעת הטווח לפני הקריאה. הלשונית הפעילה היא „תנועות אחרונות" ולכן
-    // נשמרו 30 תנועות מ-01/06 בלבד. הדוח נשמר תמיד — גם כשלא הוחל — כדי
-    // שכשל יהיה ניתן לאבחון בקריאה אחת.
-    try{const since=await collectSinceMs();
-      // ⚠ המסלול הראשי הוא `world:'MAIN'`; מסלול קובץ התוכן נשאר כנפילה בלבד,
-      // אחרי שהוכח שהוא אינו יכול להפעיל את הלשונית.
-      let rng=await fibiSetRangeMain(tabId,since);
-      if(!rng||rng.ok===false||!rng.panelOpen)
-        {const alt=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'FIBI_SET_RANGE',since}),45000,'טווח התאריכים בבינלאומי').catch(e=>({applied:false,why:String(e?.message||e).slice(0,80)}));
-         rng={...alt,main:rng};}
-      await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),...(rng||{})}});
-      // ⚠⚠ 27.08 — האחסון עבר דחיסה (`.ldb` דחוס ב-Snappy) ו-`fibiRangeApplied`
-      // לא היה קריא לי אחרי הריצה. **אבחון שאי אפשר לקרוא אינו אבחון.**
-      // שורה אחת קריאה נכנסת ל-`bankDiagnostics`, שהדשבורד כבר מציג.
-      {const dg=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
-       const m=rng?.main||rng;
-       dg.fibi=(rng?.panelOpen||rng?.applied)
-         ?`הבינלאומי: לשונית ${m?.after?.active||'?'} · ${m?.how||''} · שיגור ${m?.submitted||rng?.submitPath||'?'} · שורות ${m?.before?.rows??rng?.before?.rows??'?'}→${m?.after?.rows??rng?.after?.rows??'?'}`
-         :`הבינלאומי: הטווח לא הוחל — ${rng?.why||rng?.error||m?.error||'סיבה לא ידועה'}`;
-       await chrome.storage.local.set({bankDiagnostics:dg});}
-      await delay(1500);
-    }catch(e){try{await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),ok:false,error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
-    // ⚠ אם המסך החדש כבר סיפק תנועות, לא נוגעים במסך הישן בכלל.
+    // ⚠⚠ 27.08 — טל: „הוא עדיין פונה גם ללשונית עם התנועות הישנות ומבזבז
+    // זמן סנכרון." צודק: הניווט ל-`PrivateAccountFlow`, הגשש, ו-`fibiSetRangeMain`
+    // רצו **תמיד** — גם כשהמסך החדש כבר החזיר תנועות. זה ניווט מיותר, קביעת
+    // טווח מיותרת, וכ-10 שניות לחינם. **כל מסלול המסך הישן מותנה עכשיו.**
+    if(!newTx){
+      await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnAccountMngment/OnBalanceTrans/PrivateAccountFlow'});await delay(2200);
+      // ⚠ מדידה בלבד, לפני הקריאה. `fibi-content.js` אינו מזכיר `collectSince`
+      // אף פעם (grep → 0), כלומר לבינלאומי אין טווח תאריכים בכלל — אותו מחדל
+      // שהיה בפועלים. **לא נכתב כאן שום סלקטור** לפני שנדע מה יש בדף ובמסגרת.
+      try{const frames=await probeAllFrames(tabId);
+        await chrome.storage.local.set({fibiTxProbe:{at:new Date().toISOString(),frames}})}catch(e){}
+      // ⚠ קביעת הטווח לפני הקריאה. הלשונית הפעילה היא „תנועות אחרונות" ולכן
+      // נשמרו 30 תנועות מ-01/06 בלבד. הדוח נשמר תמיד — גם כשלא הוחל — כדי
+      // שכשל יהיה ניתן לאבחון בקריאה אחת.
+      try{const since=await collectSinceMs();
+        // ⚠ המסלול הראשי הוא `world:'MAIN'`; מסלול קובץ התוכן נשאר כנפילה בלבד,
+        // אחרי שהוכח שהוא אינו יכול להפעיל את הלשונית.
+        let rng=await fibiSetRangeMain(tabId,since);
+        if(!rng||rng.ok===false||!rng.panelOpen)
+          {const alt=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'FIBI_SET_RANGE',since}),45000,'טווח התאריכים בבינלאומי').catch(e=>({applied:false,why:String(e?.message||e).slice(0,80)}));
+           rng={...alt,main:rng};}
+        await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),...(rng||{})}});
+        // ⚠⚠ 27.08 — האחסון עבר דחיסה (`.ldb` דחוס ב-Snappy) ו-`fibiRangeApplied`
+        // לא היה קריא לי אחרי הריצה. **אבחון שאי אפשר לקרוא אינו אבחון.**
+        // שורה אחת קריאה נכנסת ל-`bankDiagnostics`, שהדשבורד כבר מציג.
+        {const dg=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
+         const m=rng?.main||rng;
+         dg.fibi=(rng?.panelOpen||rng?.applied)
+           ?`הבינלאומי: לשונית ${m?.after?.active||'?'} · ${m?.how||''} · שיגור ${m?.submitted||rng?.submitPath||'?'} · שורות ${m?.before?.rows??rng?.before?.rows??'?'}→${m?.after?.rows??rng?.after?.rows??'?'}`
+           :`הבינלאומי: הטווח לא הוחל — ${rng?.why||rng?.error||m?.error||'סיבה לא ידועה'}`;
+         await chrome.storage.local.set({bankDiagnostics:dg});}
+        await delay(1500);
+      }catch(e){try{await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),ok:false,error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
+      // ⚠ אם המסך החדש כבר סיפק תנועות, לא נוגעים במסך הישן בכלל.
+    }
     const t=newTx?{ok:true,data:{...newTx}}:await fibiRead(tabId,'FIBI_TRANSACTIONS','קריאת תנועות הבינלאומי');
     if(newTx)await chrome.storage.local.set({syncStatus:`הבינלאומי: ${newTx.transactions.length} תנועות מהמסך החדש`});
     // ⚠⚠ דפדוף: התוצאה מחולקת לעמודים („עמוד - 3" בצילום), וקריאת עמוד אחד
