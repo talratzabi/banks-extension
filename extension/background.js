@@ -884,9 +884,20 @@ async function syncSource(source,keys){
   const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);const skippedParts=[];
   let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`,'מזהה בעל חשבון');await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
   await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');
-  // ⚠ מדידה בלבד, לפני הקריאה: אילו פקדי טווח קיימים בדף התנועות של פועלים.
-  // הוא **אינו** משנה דבר בריצה — ראה את ההערה ב-`rangeProbe`.
-  try{const pr=await chrome.tabs.sendMessage(tab.id,{type:'POALIM_RANGE_PROBE'});if(pr?.ok)await chrome.storage.local.set({poalimRangeProbe:{at:new Date().toISOString(),source,...pr.probe}})}catch{}
+  // ⚠⚠ 27.08.2026 — טל: „יש בעיה עם הבורר תנועות" ⇐ „מעט תנועות". נמדד:
+  // ל-`poalim-content.js` **אין שום טיפול בטווח תאריכים** (`grep collectSince` → 0),
+  // ולכן נקרא רק מה שהדף מציג כברירת מחדל: 4 תנועות ב-645-690309 ו-6 ב-645-690300,
+  // מול `collectSince=2026-01-01`. **ה-DOM של דף התנועות בפועלים לא נמדד מעולם.**
+  // ⚠ כתבתי כאן גשש חדש ומחקתי אותו: `probe-content.js` כבר עושה את זה, וה-
+  // `dateControls()` שבו נכתב **בדיוק** לשאלה הזו. גשש רביעי לאותו רעיון הוא בדיוק
+  // הכשל שנרשם על שלושת העותקים ביהב. **לבדוק יכולת קיימת לפני שכותבים חדשה.**
+  try{
+    await chrome.scripting.executeScript({target:{tabId:tab.id},files:['probe-content.js']});
+    await delay(400);
+    const pr=await chrome.tabs.sendMessage(tab.id,{type:'BANK_PROBE'});
+    // ⚠ נשמר **לפני** הקריאה — הלקח מ-1.8.0, שם הרשומה אבדה כשהשלב הבא נפל.
+    if(pr?.ok)await chrome.storage.local.set({poalimTxProbe:{at:new Date().toISOString(),source,...pr.probe}});
+  }catch{}
   const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});
   // אבחון: אילו חשבונות לא נקראה להם יתרה בדף התנועות. דף ריכוז היתרות עוד עשוי למלא.
   await chrome.storage.local.set({poalimNoBalance:(tx.accounts||[]).filter(a=>a.balanceMissing).map(a=>`${source}|${a.branch}-${a.accountNumber}`)});
