@@ -39,8 +39,12 @@ function dateControls(){
   const inputs=[...document.querySelectorAll('input')].map(el=>({
     type:el.type||'',id:el.id||'',name:el.name||'',placeholder:el.placeholder||'',
     aria:flat(el.getAttribute('aria-label')),value:String(el.value||'').slice(0,20),
+    // ⚠ 27.08.2026 — ה-class לא נכלל בהתאמה, והסלקטור המוכר של יהב הוא
+    // בדיוק class: `input.date-picker-input`. גשש שאינו רואה class היה
+    // מחזיר „אין שדות תאריך" על דף שיש בו אחד, ומחזיר אותנו לניחוש.
+    cls:flat(typeof el.className==='string'?el.className:'').slice(0,60),
     readOnly:!!el.readOnly,path:chain(el)}))
-    .filter(x=>x.type==='date'||RANGE.test(deCamel(`${x.id} ${x.name} ${x.placeholder} ${x.aria} ${x.value}`)))
+    .filter(x=>x.type==='date'||RANGE.test(deCamel(`${x.id} ${x.name} ${x.placeholder} ${x.aria} ${x.value} ${x.cls}`)))
     .slice(0,20);
   const selects=[...document.querySelectorAll('select')].map(el=>({
     id:el.id||'',name:el.name||'',aria:flat(el.getAttribute('aria-label')),

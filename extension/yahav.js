@@ -66,6 +66,20 @@ async function runYahav(tabId){
     // טווח שלא נקבע אינו מוחק סנכרון שלם — קוראים את מה שהדף מציג, ומדווחים
     // שהתקופה מקוצרת כדי שהמשתמש לא יחשוב שקיבל שלושה חודשים. אותו עיקרון
     // שכבר יושם ביתרה חסרה (0.64.0) ובהלוואות פועלים (0.67.0).
+    // ⚠⚠ 27.08.2026 — נמדד באחסון, שלוש ריצות ברציפות:
+    //   yahavRangeApplied {ok:false, why:"שדה התאריך לא נמצא", monthsBack:7}
+    // הכוונה נכונה — 7 חודשים נגזרים מ-collectSince — אבל הסלקטור
+    //   input.date-picker-input , input[placeholder="dd/MM/y"]
+    // אינו מוצא דבר, ולכן נקראת רק התקופה שהדף מציג (10 תנועות מ-04/06).
+    // ⚠ אין לנחש סלקטור חדש. אותו גשש שסגר את פועלים בסבב אחד מוזרק כאן,
+    // ו-dateControls() יחזיר את בורר התאריכים האמיתי. **מדידה בלבד.**
+    try{
+      await chrome.scripting.executeScript({target:{tabId},files:['probe-content.js']});
+      await delay(400);
+      const pr=await chrome.tabs.sendMessage(tabId,{type:'BANK_PROBE'});
+      // ⚠ נשמר לפני הניסיון — הלקח מ-1.8.0, שם הרשומה אבדה כשהשלב הבא נפל.
+      if(pr?.ok)await chrome.storage.local.set({yahavTxProbe:{at:new Date().toISOString(),...pr.probe}});
+    }catch(e){}
     let range=null;
     try{range=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'YAHAV_SET_3_MONTHS'}),30000,'הגדרת טווח התאריכים')}catch(e){range={ok:false,error:e.message}}
     {
