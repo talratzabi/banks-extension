@@ -303,9 +303,6 @@ function normalize(value) { return String(value || '').replace(/[\s,\-]/g, '').r
 function parseMoney(value) { let text=String(value||'').replace(/[−–]/g,'-');const negative=text.includes('-');const clean=text.replace(/[₪\s,]/g,'').replace(/[^0-9.\-]/g,'');if(!clean||clean==='-')return null;const n=Number(clean.replace(/-/g,''));return Number.isFinite(n)?(negative?-n:n):null; }
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 async function waitFor(test, timeout, message) { const start=Date.now(); while(Date.now()-start<timeout){if(test())return;await wait(250)}throw new Error(message); }
-})();
-
-
 // ⚠⚠ 27.08.2026 — טל: „יש בעיה עם הבורר תנועות" ⇐ „מעט תנועות". **נמדד
 // בגשש `poalimTxProbe` על הדף החי, ולא נוחש:** בורר התקופה בדף התנועות עמד על
 // **„תקופה: 3 ימי עסקים אחרונים"**. משם 4 תנועות ב-645-690309 ו-6 ב-645-690300
@@ -374,3 +371,4 @@ async function setPeriod(sinceMs){
     before,after:clean(triggerOf()?.textContent),rowsBefore,rowsAfter:rowCount(),
     opened,boxes:boxes.length,submitted:!!submit,buttons,options:present.map(o=>o.id)};
 }
+})();
