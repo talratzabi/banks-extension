@@ -318,32 +318,52 @@ async function waitFor(test, timeout, message) { const start=Date.now(); while(D
 //   period-filter-period-last-2-years00   שנתיים  ⚠ בלי מקף לפני 00, כך במקור
 async function setPeriod(sinceMs){
   const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
-  const box=document.querySelector('.period-filter')||document;
-  const triggerOf=()=>box.querySelector('button[role="combobox"],button.dropdown-toggle');
+  const shown=el=>!!(el&&(el.offsetParent||el.getClientRects().length));
+  // ⚠ יותר מ-`.period-filter` אחד יכול להיות בדף; נבחר זה שיש בו מפעיל „תקופה",
+  // ומעדיפים נראה. `document` כמוצא אחרון בלבד — **לא** גורף, כי יש גם `.sum-filter`.
+  const boxes=[...document.querySelectorAll('.period-filter')];
+  const box=boxes.find(b=>shown(b)&&/תקופה/.test(clean(b.textContent)))||boxes.find(b=>shown(b))||boxes[0]||null;
+  const triggerOf=()=>box&&box.querySelector('button[role="combobox"],button.dropdown-toggle');
   const before=clean(triggerOf()?.textContent);
-  const OPTIONS=[{id:'period-filter-last-30-days-00',months:1},
-                 {id:'period-filter-last-3-months-00',months:3},
-                 {id:'period-filter-last-6-months-00',months:6},
-                 {id:'period-filter-period-last-2-years00',months:24}];
+  // ⚠⚠ 27.08.2026 — הריצה הקודמת החזירה „לא נמצא אף רדיו תקופה" בעוד הכותרת
+  // כן נקראה („תקופה: 3 ימי עסקים אחרונים"). שתי טעויות שלי, ושתיהן כאן:
+  //   1. חיפשתי את הרדיו **לפני** שפתחתי את הבורר. תפריט נפתח יכול להתרנדר
+  //      רק בפתיחה — ואז getElementById מחזיר null בדיוק כפי שקרה.
+  //   2. חיפשתי **מזהה מדויק** עם הסיומת `00`. הסיומת נראית כאינדקס מופע
+  //      (`period-filter-range-0-min` מראה ספרה באמצע), והיא משתנה בין מופעים.
+  // לכן: פותחים קודם, ומתאימים **לפי דפוס במזהה** ולא לפי מחרוזת שלמה.
+  const trigger=triggerOf();
+  let opened=false;
+  if(trigger&&trigger.getAttribute('aria-expanded')!=='true'){trigger.click();opened=true;await wait(500)}
+  const scope=box||document;
+  const radios=()=>[...scope.querySelectorAll('input[type="radio"][id]')];
+  const PATTERNS=[{re:/last-30-days/,months:1},{re:/last-3-months/,months:3},
+                  {re:/last-6-months/,months:6},{re:/last-2-years/,months:24}];
+  const collect=()=>{const out=[];
+    for(const el of radios()){
+      const hit=PATTERNS.find(x=>x.re.test(el.id));
+      if(hit)out.push({id:el.id,months:hit.months,el});
+    }
+    return out};
+  // ⚠ גבול שעון־קיר, לא תקרת סבבים — הלקח מ-1.12.1.
+  let present=collect(),deadline=Date.now()+6000;
+  while(!present.length&&Date.now()<deadline){await wait(300);present=collect()}
+  const foundIds=radios().map(el=>el.id).slice(0,20);
+  if(!present.length)return{clicked:false,need:sinceMs?Math.max(1,Math.ceil((Date.now()-sinceMs)/(30.4375*864e5))):3,
+    before,opened,boxes:boxes.length,foundIds,reason:'לא נמצא אף רדיו תקופה'};
   const need=sinceMs?Math.max(1,Math.ceil((Date.now()-sinceMs)/(30.4375*864e5))):3;
-  const present=OPTIONS.map(o=>({...o,el:document.getElementById(o.id)})).filter(o=>o.el);
-  if(!present.length)return{clicked:false,need,before,reason:'לא נמצא אף רדיו תקופה'};
   const covering=present.filter(o=>o.months>=need).sort((a,b)=>a.months-b.months);
-  // ⚠ הקטן ביותר שעדיין מכסה; אם אין כיסוי — הגדול ביותר, ומסומן covered:false.
+  // ⚠ הקטן ביותר שעדיין מכסה; אם אין כיסוי — הגדול הקיים, ומסומן covered:false.
   const chosen=covering[0]||present.slice().sort((a,b)=>b.months-a.months)[0];
   const rowCount=()=>document.querySelectorAll('table tbody tr').length;
   const rowsBefore=rowCount();
-  const trigger=triggerOf();
-  if(trigger&&trigger.getAttribute('aria-expanded')==='false'){trigger.click();await wait(400)}
   chosen.el.click();
   await wait(300);
-  // ⚠ לא ידוע אם נדרש כפתור אישור — הגשש לא תפס אחד. לכן: לוחצים רק על טקסט
-  // מובהק, **ומדווחים את כל הכפתורים במכל** כדי שהסבב הבא לא יהיה ניחוש.
-  const buttons=[...box.querySelectorAll('button')].map(b=>clean(b.textContent).slice(0,24)).filter(Boolean).slice(0,12);
-  const submit=[...box.querySelectorAll('button')].find(b=>/^(הצג|חפש|אישור|החל|עדכן|סנן)$/.test(clean(b.textContent)));
+  // ⚠ לא ידוע אם נדרש כפתור אישור. נלחץ רק טקסט מובהק, **וכל הכפתורים מדווחים.**
+  const buttons=[...scope.querySelectorAll('button')].map(b=>clean(b.textContent).slice(0,24)).filter(Boolean).slice(0,12);
+  const submit=[...scope.querySelectorAll('button')].find(b=>/^(הצג|חפש|אישור|החל|עדכן|סנן)$/.test(clean(b.textContent)));
   if(submit){submit.click();await wait(400)}
-  // ⚠ גבול שעון־קיר ולא תקרת סבבים — הלקח מ-1.12.1.
-  const deadline=Date.now()+12000;
+  deadline=Date.now()+12000;
   while(Date.now()<deadline){
     const t=clean(triggerOf()?.textContent);
     if(t&&t!==before&&rowCount()>0)break;
@@ -352,5 +372,5 @@ async function setPeriod(sinceMs){
   await wait(600);
   return{clicked:true,id:chosen.id,months:chosen.months,need,covered:!!covering.length,
     before,after:clean(triggerOf()?.textContent),rowsBefore,rowsAfter:rowCount(),
-    submitted:!!submit,buttons,options:present.map(o=>o.id)};
+    opened,boxes:boxes.length,submitted:!!submit,buttons,options:present.map(o=>o.id)};
 }
