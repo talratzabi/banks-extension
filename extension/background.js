@@ -374,7 +374,11 @@ await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsr
   if(m?.type==='CARD_MONTH_DATA'){cardHistGetMonth(String(m.month||'')).then(rows=>reply({ok:true,rows})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='OPEN_DASHBOARD'){chrome.runtime.openOptionsPage();reply({ok:true});return}
 });
-async function handleAuthenticatedNavigation(d){if(d.frameId!==0)return;const source=sourceFromUrl(d.url);if(!source||!d.url.includes(SOURCES[source].portal))return;const s=await chrome.storage.local.get({pendingSources:[]});if(s.pendingSources.includes(source))queueDiscover(d.tabId,source);else{await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${SOURCES[source].label} — בודק עדכונים אוטומטיים`});maybeAutoSync(source,SOURCES[source].label,d.tabId).catch(()=>{})}}
+async function handleAuthenticatedNavigation(d){if(d.frameId!==0)return;const source=sourceFromUrl(d.url);if(!source||!d.url.includes(SOURCES[source].portal))return;const s=await chrome.storage.local.get({pendingSources:[]});if(s.pendingSources.includes(source))queueDiscover(d.tabId,source);else{
+  // ⚠ אותה הגנה: הודעה **אינפורמטיבית** לא דורסת תוצאה סופית שכבר על המסך.
+  const cur=(await chrome.storage.local.get({syncStatus:''})).syncStatus||'';
+  if(!TERMINAL_STATUS.test(cur))await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${SOURCES[source].label} — בודק עדכונים אוטומטיים`});
+  maybeAutoSync(source,SOURCES[source].label,d.tabId).catch(()=>{})}}
 chrome.webNavigation.onCompleted.addListener(handleAuthenticatedNavigation);
 chrome.webNavigation.onHistoryStateUpdated.addListener(handleAuthenticatedNavigation);
 // webNavigation אינו תמיד נורה כשנכנסים שוב ללשונית בנק שכבר הייתה פתוחה.
@@ -558,9 +562,19 @@ async function isracardOnAuth(tabId,fn){
 // והשאירה את המשתמש בלי שום רמז למה „אין חשבונות לבחירה". היא מופיעה בשני
 // מסלולי כניסה (autoSyncFromLogin ו-maybeAutoRun) ולכן אוחדה לכאן.
 // **הכלל: הודעה שגרתית אינה מוחקת שגיאה.**
+// ⚠⚠ 27.08.2026 — טל: „סונכרן, למה לא רושם הסנכרון הסתיים." נמדד ברצף
+// הסטטוסים: פועלים פרטי **כן** סונכרן (645-301975, 150 תנועות) ו**כן** נכתב
+// „הסתיים בהצלחה: סונכרנו 1 חשבון" — ומיד אחריו נדרס פעמיים:
+//   „זוהתה כניסה לפועלים פרטי — בודק עדכונים אוטומטיים"
+//   „זוהתה כניסה לפועלים פרטי, אך הסנכרון האוטומטי כבוי"
+// הניווטים שהסנכרון עצמו יוצר מדליקים את שער הסנכרון האוטומטי **אחרי**
+// שהוא הסתיים, והכתיבה האחרונה מנצחת. `statusBySource` נגזר מ-`syncStatus`
+// בדשבורד, ולכן גם האריח הראה „הסנכרון דולג".
+// ⚠ ההגנה כבר הייתה קיימת — **אבל רק לשגיאות.** הצלחה לא הוגנה. אסימטריה.
+const TERMINAL_STATUS=/הסתיים|סונכרנו|סונכרן|נשמרו|הושלם|שגיאה|נכשל/;
 async function noteAutoSyncOff(label){
   const cur=(await chrome.storage.local.get({syncStatus:''})).syncStatus||'';
-  if(/שגיאה|נכשל/.test(cur))return;
+  if(TERMINAL_STATUS.test(cur))return;
   await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});
 }
 async function maybeAutoRun(source,label,fn,tabId){
