@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "בנקים",
-  "version": "1.28.0",
+  "version": "1.29.0",
   "description": "דשבורד מקומי לסנכרון מאומת של בנקים וכרטיסי אשראי.",
   "icons": {
     "16": "icons/bank-16.png",
@@ -31,7 +31,8 @@
     "https://*.mizrahi-tefahot.co.il/*",
     "https://*.isracard.co.il/*",
     "https://*.cal-online.co.il/*",
-    "https://*.max.co.il/*"
+    "https://*.max.co.il/*",
+    "https://*.btbisrael.co.il/*"
   ],
   "background": {
     "service_worker": "background.js"

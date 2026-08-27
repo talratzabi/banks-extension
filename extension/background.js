@@ -1512,7 +1512,9 @@ async function probeActiveTab(){
   // ⚠ 18.08.2026 — lastAccessed אינו קיים בכל גרסאות Chrome, ואז המיון שרירותי
   // והמדידה נופלת על לשונית זרה. לכן קודם כל **מארחי בנק מוכרים** מתוך
   // host_permissions, ורק אחר כך כל https אחר.
-  const BANK_HOST=/(bankhapoalim|bankhapoalim\.biz|leumi|bankleumi|bank-yahav|yahav|discountbank|telebank|fibi|mizrahi-tefahot|isracard|cal-online|max)\./i;
+  // ⚠ 27.08.2026 — בלי `btbisrael` כאן, „מדוד לשונית פעילה" היה משיב
+// „הלשונית שנמצאה אינה אתר בנק מוכר" — כלומר לא היינו יכולים למדוד את BTB בכלל.
+const BANK_HOST=/(bankhapoalim|bankhapoalim\.biz|leumi|bankleumi|bank-yahav|yahav|discountbank|telebank|fibi|mizrahi-tefahot|isracard|cal-online|max|btbisrael)\./i;
   const open_=(await chrome.tabs.query({})).filter(t=>t?.id&&/^https:/.test(t.url||''));
   const rank=t=>(BANK_HOST.test(new URL(t.url).hostname)?0:1);
   open_.sort((a,b)=>rank(a)-rank(b)||(b.lastAccessed||0)-(a.lastAccessed||0)||(b.active?1:0)-(a.active?1:0));
