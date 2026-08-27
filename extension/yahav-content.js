@@ -74,20 +74,58 @@ const LABELS=['מסגרת אשראי','מסגרת עו״ש','מסגרת מאוש
     prev.click();
     await new Promise(r=>setTimeout(r,260));
   }
-  const cells=[...dialog.querySelectorAll('[role="gridcell"].selectable')]
-    .filter(c=>c.getAttribute('aria-disabled')!=='true');
-  // ⚠ היום המבוקש אינו קיים בהכרח (31 בפברואר). לוקחים את הקרוב ביותר
-  // שאינו מאוחר ממנו, ואם אין — את הראשון שיש.
-  let target=cells.find(c=>c.dataset.value===String(wantDay));
-  if(!target){
-    const nums=cells.map(c=>({c,v:Number(c.dataset.value)})).filter(x=>Number.isFinite(x.v));
-    const earlier=nums.filter(x=>x.v<=wantDay).sort((a,b)=>b.v-a.v)[0];
-    target=(earlier||nums[0])?.c;
+  // ⚠⚠ 27.08.2026 — הריצה הראשונה שבה הבורר בכלל נמצא החזירה:
+  //   {ok:true, why:"הוחל", monthsBack:7, day:1, chose:"27", value:"27/02/2026"}
+  // כלומר **הטווח הוחל — על התאריך הלא נכון.** ביקשנו 01/01/2026 וקיבלנו
+  // 27/02/2026: גם היום שגוי (27 במקום 1) וגם החודש (פברואר במקום ינואר).
+  // ⚠ שתי מסקנות:
+  //   1. ההשוואה הייתה **מחרוזתית** (`dataset.value===String(1)`), ולכן ערך
+  //      מרופד („01") לא נתפס, והנפילה בחרה את התא הראשון ברשת — שהוא לרוב
+  //      יום גורר מהחודש הקודם. **משווים מספרית.**
+  //   2. **לא נבדק מה יצא.** אחרי הלחיצה יש בשדה תאריך מלא — ואם החודש אינו
+  //      המבוקש, אפשר לתקן בלחיצות ולנסות שוב. **מאמתים את התוצאה, לא מניחים.**
+  const pick=async()=>{
+    const cells=[...dialog.querySelectorAll('[role="gridcell"].selectable')]
+      .filter(c=>c.getAttribute('aria-disabled')!=='true')
+      .map(c=>({c,v:Number(c.dataset.value)})).filter(x=>Number.isFinite(x.v));
+    if(!cells.length)return null;
+    // היום המבוקש אינו קיים בהכרח (31 בפברואר): הקרוב ביותר שאינו מאוחר ממנו,
+    // ואם אין — הקטן ביותר שיש, ולא „הראשון ברשת".
+    const exact=cells.find(x=>x.v===wantDay);
+    const earlier=cells.filter(x=>x.v<=wantDay).sort((a,b)=>b.v-a.v)[0];
+    const smallest=cells.slice().sort((a,b)=>a.v-b.v)[0];
+    const t=(exact||earlier||smallest);
+    t.c.click();
+    await new Promise(r=>setTimeout(r,700));
+    return{chose:String(t.v),sample:cells.slice(0,10).map(x=>x.v)};
+  };
+  const parse=v=>{const m=String(v||'').match(/(\d{1,2})[.@/-](\d{1,2})[.@/-](\d{2,4})/);
+    if(!m)return null;let y=Number(m[3]);if(y<100)y+=2000;return{d:Number(m[1]),m:Number(m[2]),y};};
+  const wantMonth=valid?want.getMonth()+1:null,wantYear=valid?want.getFullYear():null;
+  let res=await pick(),attempts=1,got=parse(input.value);
+  // ⚠ תיקון חודשים: אם נחתנו בחודש אחר, מחשבים את ההפרש ולוחצים קדימה/אחורה.
+  while(attempts<4&&res&&got&&wantMonth&&(got.m!==wantMonth||got.y!==wantYear)){
+    const diff=(got.y-wantYear)*12+(got.m-wantMonth);
+    if(!diff)break;
+    open.click();
+    await new Promise(r=>setTimeout(r,260));
+    const dlg=box.querySelector('[role="dialog"]')||dialog;
+    const sel=diff>0?'.datepicker-month-prev:not(.disabled)':'.datepicker-month-next:not(.disabled)';
+    let moved=0;
+    for(let k=0;k<Math.abs(diff);k++){
+      const btn=dlg.querySelector(sel);
+      if(!btn)break;
+      btn.click();moved++;
+      await new Promise(r=>setTimeout(r,260));
+    }
+    if(!moved)break;
+    res=await pick();attempts++;got=parse(input.value);
   }
-  if(!target){await report(false,'לא נמצא יום לבחירה');return false}
-  target.click();
-  await new Promise(r=>setTimeout(r,700));
-  await report(true,'הוחל',{chose:target.dataset.value,value:input.value||''});
+  if(!res){await report(false,'לא נמצא יום לבחירה');return false}
+  const exactHit=!!(got&&wantMonth&&got.d===wantDay&&got.m===wantMonth&&got.y===wantYear);
+  await report(true,exactHit?'הוחל':'הוחל בקירוב',
+    {chose:res.chose,value:input.value||'',attempts,cells:res.sample,
+     wanted:valid?`${String(wantDay).padStart(2,'0')}/${String(wantMonth).padStart(2,'0')}/${wantYear}`:''});
   return true};
   chrome.runtime.onMessage.addListener((m,s,r)=>{if(m?.type==='YAHAV_READ'){r({ok:true,account:account(),owner:owner(),transactions:transactions(),loans:loans(),detail:detail(),summary:summary(),text:body()});return}if(m?.type==='YAHAV_SET_3_MONTHS'){setRangeFrom().then(ok=>r({ok}));return true}if(m?.type==='PING')r({ok:true})});
   chrome.runtime.sendMessage({type:'YAHAV_AUTHENTICATED'}).catch(()=>{});
