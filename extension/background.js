@@ -321,6 +321,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(m?.type==='START_MIZRAHI'){startMizrahi().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='START_YAHAV'){startYahav().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='START_ISRACARD'){startIsracard().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
+  if(m?.type==='START_BTB'){startBtb().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='START_CAL'){startCal(m.suffix).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='START_MAX'){startMax(m.suffix).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='YAHAV_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingYahav:false}).then(x=>{if(x.pendingYahav)runYahav(t).catch(()=>{});else maybeAutoRun('yahav','יהב',runYahav,t).catch(()=>{})});reply({ok:true});return}
@@ -1489,6 +1490,67 @@ async function noteCardActiveSince(suffix,month){
     const ordOf=m=>{const v=String(m||'').replace(/\D/g,'');return v.length===6?Number(v.slice(2)+v.slice(0,2)):0};
     if(!all[k]||ordOf(month)<ordOf(all[k])){all[k]=month;await chrome.storage.local.set({cardActiveSince:all})}
   }catch(e){}
+}
+// ⚠⚠ 27.08.2026 — BTB: **הלוואה ללא עו״ש.** אין חשבון, אין יתרה, ואין תנועות —
+// ולכן נוצר „חשבון" סינתטי שכל תפקידו לשאת את ההלוואה אל מסך ההלוואות.
+// ⚠ `renderAllLoans` מסנן לפי `accountKey===`${branch}-${accountNumber}``, ולכן
+// שני אלה חייבים להיות עקביים, אחרת ההלוואה נקראת ולא מוצגת.
+// ⚠ `balance:null` במכוון: סכום ההלוואה **אינו** יתרת חשבון, וסיכום היתרות
+// בדשבורד לא יזייף בגללו (`Number(null)||0`).
+const BTB_LOGIN='https://auth.btbisrael.co.il/auth/signin/id?appType=borrower&callbackUrl=https%3A%2F%2Fborrowers.btbisrael.co.il%2Fdashboard';
+async function btbTab(){const tabs=await chrome.tabs.query({url:['https://*.btbisrael.co.il/*']});
+  return tabs.find(t=>String(t.url||'').includes('borrowers.'))||tabs[0]||null}
+async function startBtb(){
+  const tab=await btbTab();
+  if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל-BTB — הזן תעודת זהות וקוד לנייד במסך שנפתח'});
+    await chrome.windows.create({url:BTB_LOGIN,type:'popup',width:560,height:780,focused:true});
+    return{ok:true,status:'waiting_login'}}
+  await returnToDashboard(tab.id,true);
+  return runBtb(tab.id);
+}
+let btbBusy=false;
+async function runBtb(tabId){
+  if(btbBusy)return{ok:false,error:'סנכרון BTB כבר מתבצע'};
+  btbBusy=true;
+  try{
+    await chrome.storage.local.set({syncStatus:'BTB: קורא את פרטי ההלוואה'});
+    let tab=await chrome.tabs.get(tabId);
+    if(!String(tab.url||'').includes('borrowers.btbisrael.co.il')){
+      await chrome.tabs.update(tabId,{url:'https://borrowers.btbisrael.co.il/dashboard'});
+      await waitTab(tabId,'borrowers.btbisrael.co.il');
+    }
+    // ⚠ המתנה לתוכן ולא למספר שניות — הלקח מ-1.20.1.
+    let read=null;const deadline=Date.now()+25000;
+    while(Date.now()<deadline){
+      try{await chrome.scripting.executeScript({target:{tabId},files:['btb-content.js']})}catch(e){}
+      await delay(600);
+      try{read=await chrome.tabs.sendMessage(tabId,{type:'BTB_READ'})}catch(e){read=null}
+      if(read?.ok&&(read.data.balance!=null||read.data.number))break;
+      await delay(1200);
+    }
+    await chrome.storage.local.set({btbProbe:{at:new Date().toISOString(),data:read?.data||null,error:read?.error||''}});
+    if(!read?.ok||read.data.balance==null)throw Error(read?.error||'פרטי ההלוואה לא נקראו מדף BTB');
+    const d=read.data,number=d.number||'BTB';
+    const loan={type:`הלוואת BTB${d.number?` #${d.number}`:''}`,balance:d.balance,
+      originalPrincipal:d.originalPrincipal,startDate:d.startDate,endDate:d.endDate,
+      nextPayment:d.nextPayment,nextPaymentDate:d.nextPaymentDate,interest:'',
+      installments:d.totalInstallments||null,totalInstallments:d.totalInstallments||null,
+      remainingInstallments:(d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null,
+      accountKey:`BTB-${number}`};
+    const now=new Date().toISOString();
+    const account={source:'btb',sourceLabel:'BTB',branch:'BTB',accountNumber:number,
+      id:`btb-${number}`,selectionKey:`btb|BTB-${number}`,nickname:`BTB — הלוואה ${number}`,
+      owner:'',balance:null,creditLimit:null,availableCredit:null,transactions:[],cards:[],
+      loans:[loan],lastSync:now,status:d.active?'מסונכרן':'מסונכרן — ההלוואה אינה פעילה'};
+    const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});
+    const accounts=[...state.accounts.filter(a=>a.source!=='btb'),account];
+    const selectedAccountKeys=[...new Set([...state.selectedAccountKeys,account.selectionKey])];
+    await chrome.storage.local.set({accounts,selectedAccountKeys,lastAutoSync:now,
+      syncStatus:`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${d.balance}`});
+    if(!autoBusy)await chrome.runtime.openOptionsPage();
+    return{ok:true,balance:d.balance,number};
+  }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה ב-BTB: ${e.message}`});throw e}
+  finally{btbBusy=false;await restoreSyncTabs()}
 }
 async function probeAllFrames(tabId){
   let frames=[];
