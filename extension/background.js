@@ -883,7 +883,11 @@ function markNewTransactions(previous,next,syncedSources){
 async function syncSource(source,keys){
   const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);const skippedParts=[];
   let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`,'מזהה בעל חשבון');await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
-  await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});
+  await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');
+  // ⚠ מדידה בלבד, לפני הקריאה: אילו פקדי טווח קיימים בדף התנועות של פועלים.
+  // הוא **אינו** משנה דבר בריצה — ראה את ההערה ב-`rangeProbe`.
+  try{const pr=await chrome.tabs.sendMessage(tab.id,{type:'POALIM_RANGE_PROBE'});if(pr?.ok)await chrome.storage.local.set({poalimRangeProbe:{at:new Date().toISOString(),source,...pr.probe}})}catch{}
+  const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});
   // אבחון: אילו חשבונות לא נקראה להם יתרה בדף התנועות. דף ריכוז היתרות עוד עשוי למלא.
   await chrome.storage.local.set({poalimNoBalance:(tx.accounts||[]).filter(a=>a.balanceMissing).map(a=>`${source}|${a.branch}-${a.accountNumber}`)});
   // אבחון: חשבון בלי ולו תנועה אחת. טביעת האצבע המבנית מוצגת על אריח הבנק,

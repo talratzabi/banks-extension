@@ -15,6 +15,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   else if(message?.type==='EXTRACT_BALANCE_SUMMARIES')extractBalanceSummaries(message.keys||[]).then(accounts=>sendResponse({ok:true,accounts})).catch(error=>sendResponse({ok:false,error:error.message}));
   else if(message?.type==='EXTRACT_PRODUCT_DETAILS')extractProductDetails(message.keys||[],message.kind).then(accounts=>sendResponse({ok:true,accounts})).catch(error=>sendResponse({ok:false,error:error.message}));
   else if(message?.type==='EXTRACT_OWNER'){sendResponse({ok:true,owner:extractOwnerName()});return}
+  else if(message?.type==='POALIM_RANGE_PROBE'){sendResponse({ok:true,probe:rangeProbe()});return}
   else return;
   return true;
 });
@@ -301,3 +302,30 @@ function parseMoney(value) { let text=String(value||'').replace(/[−–]/g,'-')
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 async function waitFor(test, timeout, message) { const start=Date.now(); while(Date.now()-start<timeout){if(test())return;await wait(250)}throw new Error(message); }
 })();
+
+
+// ⚠⚠ 27.08.2026 — טל: „יש בעיה עם הבורר תנועות. הזיהוי תקין של החשבונות."
+// **נמדד לפני שנכתב סלקטור אחד:** בקובץ הזה אין שום טיפול בטווח תאריכים
+// (`grep collectSince poalim-content.js` → **0**), ולכן `extractTransactions`
+// קוראת רק את מה שהדף מציג כברירת מחדל. באחסון: 645-690309 עם **4 תנועות**
+// (24–26/08) ו-645-690300 עם **6** (17–23/08), מול `collectSince=2026-01-01`.
+// הפרוב מדווח אילו פקדי טווח **באמת** קיימים בדף — זה מה שחסך במזרחי
+// סבב ניחושים שלם, ואין סיבה לשלם אותו כאן.
+function rangeProbe(){
+  const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
+  /* ⚠ עלים בלבד — הלקח מבורר דיסקונט: סלקטור שמאחד רמות סופר מכל וכפתור פעמיים. */
+  const leafish=el=>!el.querySelector('button,[role="button"],a,option,input');
+  const controls=[];
+  for(const el of document.querySelectorAll('button,[role="button"],[role="tab"],[role="option"],[role="radio"],a,label,li,option')){
+    const t=clean(el.textContent);
+    if(!t||t.length>40||!leafish(el))continue;
+    if(!/תארי|טווח|חודש|שנה|תקופה|סינון|חיפוש|הצג|אחרונ|מתחילת/.test(t))continue;
+    controls.push({t,tag:el.tagName.toLowerCase(),role:el.getAttribute('role')||'',cls:clean(el.className).slice(0,60)});
+    if(controls.length>=40)break;
+  }
+  const inputs=[...document.querySelectorAll('input')].slice(0,25).map(i=>({type:i.type||'',name:i.name||'',id:i.id||'',ph:clean(i.placeholder),aria:clean(i.getAttribute('aria-label')),val:clean(i.value).slice(0,24)}));
+  const selects=[...document.querySelectorAll('select')].slice(0,10).map(x=>({name:x.name||'',id:x.id||'',options:[...x.options].slice(0,15).map(o=>clean(o.textContent))}));
+  const dates=(clean(document.body.innerText).match(/\d{1,2}\/\d{1,2}\/\d{2,4}/g)||[]);
+  return{href:String(location.href).slice(0,140),rows:document.querySelectorAll('[role="row"],tbody tr').length,
+    controls,inputs,selects,firstDates:dates.slice(0,3),lastDates:dates.slice(-3),dateCount:dates.length};
+}
