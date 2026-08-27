@@ -87,7 +87,11 @@ function snapshot(){
       grid:gridShape(),pickers:pickers(),dateControls:dateControls(),accounts:accountLike(),
       frames:[...document.querySelectorAll('iframe')].map(f=>{let d=null;try{d=f.contentDocument}catch{}
         return{id:f.id||'',src:String(f.src||'').slice(0,120),sameOrigin:!!d,innerRows:d?d.querySelectorAll('tr,[role="row"]').length:-1}}),
-      nav:[...document.querySelectorAll('a,[role="menuitem"],[role="tab"],nav button')].map(own).filter(t=>t&&t.length<40).slice(0,40),
+      // ⚠ 27.08 — לתפריט נדרשת גם הכתובת ולא רק הטקסט: בלעדיה אי אפשר
+      // לנווט אל מסך „תנועות בחשבון" החדש בלי לנחש נתיב.
+      nav:[...document.querySelectorAll('a,[role="menuitem"],[role="tab"],nav button')]
+        .map(el=>({t:own(el),href:String(el.getAttribute&&el.getAttribute('href')||'').slice(0,120)}))
+        .filter(x=>x.t&&x.t.length<40).slice(0,40),
       head:flat(document.body.innerText).slice(0,700)};
   }catch(e){return{probeError:e.message,url:location.href}}
 }

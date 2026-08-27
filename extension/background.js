@@ -978,6 +978,15 @@ async function syncFibi(tabId){
     await chrome.storage.local.set({syncStatus:'הבינלאומי: קורא פירוט הלוואות ומשכנתאות'});
     await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnLoansMortgageMenu/OnLoans/AuthLoansDetails'});await delay(2200);
     const loanResult=await fibiRead(tabId,'FIBI_LOANS','קריאת פירוט ההלוואות');loanResult.data.loans=await enrichFibiInstallments(tabId,loanResult.data.loans||[]);
+    // ⚠⚠ קודם מנסים את המסך החדש („תנועות בחשבון"), לפי בקשת טל: שם הטווח
+    // נבחר בחלונית רגילה **וכל התנועות בעמוד אחד**. ⚠ הנתיב אינו ידוע ולכן
+    // אינו מנוחש — נלחץ פריט התפריט, והמדידה נשמרת כדי שייכתב לו מתאם.
+    // המסך הישן נשאר המסלול הפעיל עד שהחדש נכתב ואומת.
+    try{const opened=await fibiOpenNewScreen(tabId);
+      let frames=[];
+      if(opened?.navigated){await delay(2500);frames=await probeAllFrames(tabId).catch(()=>[])}
+      await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),opened,frames}});
+    }catch(e){try{await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
     await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnAccountMngment/OnBalanceTrans/PrivateAccountFlow'});await delay(2200);
     // ⚠ מדידה בלבד, לפני הקריאה. `fibi-content.js` אינו מזכיר `collectSince`
     // אף פעם (grep → 0), כלומר לבינלאומי אין טווח תאריכים בכלל — אותו מחדל
@@ -1306,6 +1315,40 @@ async function fibiPager(tabId,action){
       }});
   }catch(e){return{ok:false,error:String(e&&e.message||e).slice(0,140)}}
   return results.map(r=>r&&r.result).find(Boolean)||{ok:false,error:'לא נמצאה מסגרת עם דפדוף'};
+}
+// ⚠⚠ 27.08.2026 — טל: „הוא לא נכנס מלשונית תנועות בחשבון חדש." נכון:
+// `syncFibi` מנווט **בכוח** ל-`OnBalanceTrans/PrivateAccountFlow`, המסך הישן,
+// גם כשטל עומד על החדש. ⚠ **את הנתיב של המסך החדש איני יודע**, ולכן לא
+// מנחשים אותו: מאתרים את פריט התפריט „תנועות בחשבון" ולוחצים עליו, בדיוק
+// כמו משתמש. הפונקציה מדווחת מה נמצא ומה נבחר.
+async function fibiOpenNewScreen(tabId){
+  let results=[];
+  try{
+    results=await chrome.scripting.executeScript({
+      target:{tabId,allFrames:true},world:'MAIN',
+      func:async()=>{
+        const nap=ms=>new Promise(r=>setTimeout(r,ms));
+        const clean=v=>String(v||'').replace(/\s+/g,' ').trim();
+        const items=[...document.querySelectorAll('a,[role="menuitem"],button')]
+          .map(el=>({el,t:clean(el.textContent),href:String(el.getAttribute&&el.getAttribute('href')||'').slice(0,140)}))
+          .filter(x=>/תנועות\s*בחשבון/.test(x.t));
+        if(!items.length)return null;
+        // ⚠ בתפריט של טל מופיע „תנועות בחשבון" **פעמיים**, ורק לאחד תג „חדש".
+        // מעדיפים את זה שהטקסט שלו כולל „חדש"; אחרת הראשון, ומדווחים הכל.
+        const pick=items.find(x=>/חדש/.test(x.t))||items[0];
+        const before=String(location.href);
+        try{pick.el.click()}catch(e){return{ok:false,error:'לחיצה נכשלה: '+e.message,
+          candidates:items.map(x=>({t:x.t,href:x.href}))}}
+        const dl=Date.now()+12000;
+        while(Date.now()<dl&&String(location.href)===before)await nap(400);
+        await nap(1500);
+        return{ok:true,chosen:{t:pick.t,href:pick.href},
+          candidates:items.map(x=>({t:x.t,href:x.href})),
+          before,after:String(location.href).slice(0,140),
+          navigated:String(location.href)!==before};
+      }});
+  }catch(e){return{ok:false,error:String(e&&e.message||e).slice(0,140)}}
+  return results.map(r=>r&&r.result).find(Boolean)||{ok:false,error:'פריט התפריט „תנועות בחשבון" לא נמצא'};
 }
 async function probeAllFrames(tabId){
   let frames=[];
