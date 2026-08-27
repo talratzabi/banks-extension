@@ -11,7 +11,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'EXTRACT_ACCOUNT') extractAccount(message.account).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
   else if(message?.type==='EXTRACT_ALL_ACCOUNTS')extractAllAccounts().then(sendResponse).catch(error=>sendResponse({ok:false,error:error.message}));
   else if(message?.type==='DISCOVER_ACCOUNTS')discoverAccounts().then(accounts=>sendResponse({ok:true,accounts})).catch(error=>sendResponse({ok:false,error:error.message}));
-  else if(message?.type==='EXTRACT_SELECTED')extractSelected(message.keys||[]).then(accounts=>sendResponse({ok:true,accounts})).catch(error=>sendResponse({ok:false,error:error.message}));
+  else if(message?.type==='EXTRACT_SELECTED')extractSelected(message.keys||[],message.since||0).then(accounts=>sendResponse({ok:true,accounts})).catch(error=>sendResponse({ok:false,error:error.message}));
   else if(message?.type==='EXTRACT_BALANCE_SUMMARIES')extractBalanceSummaries(message.keys||[]).then(accounts=>sendResponse({ok:true,accounts})).catch(error=>sendResponse({ok:false,error:error.message}));
   else if(message?.type==='EXTRACT_PRODUCT_DETAILS')extractProductDetails(message.keys||[],message.kind).then(accounts=>sendResponse({ok:true,accounts})).catch(error=>sendResponse({ok:false,error:error.message}));
   else if(message?.type==='EXTRACT_OWNER'){sendResponse({ok:true,owner:extractOwnerName()});return}
@@ -48,7 +48,7 @@ async function discoverAccounts(){
   const labels=[...document.querySelectorAll('[role="option"], [role="listbox"] li')].map(el=>el.textContent.replace(/\s+/g,' ').trim()).filter(label=>/\d+\s*-\s*\d+/.test(label));
   document.body.click();if(!labels.length)throw new Error('לא נמצאו חשבונות זמינים למשתמש.');return[...new Set(labels)].map(label=>{const m=label.match(/(\d+)\s*-\s*(\d+)/);return m?{key:`${m[1]}-${m[2]}`,branch:m[1],accountNumber:m[2],nickname:label.replace(m[0],'').replace(/^[\s,]+/,'')||`חשבון ${m[2]}`} : null}).filter(Boolean);
 }
-async function extractSelected(keys){
+async function extractSelected(keys,sinceMs){
   if(!findAccountChooser())throw new Error('לא נמצא בורר החשבונות');const accounts=[];
   for(const key of keys){
     const match=String(key).match(/(\d+)\s*-\s*(\d+)/);if(!match)continue;const branch=match[1],accountNumber=match[2],expected=normalize(`${branch}-${accountNumber}`);
@@ -58,8 +58,11 @@ async function extractSelected(keys){
 // החשבון נשמר עם balance:null ומסומן; דף ריכוז היתרות ממלא אותה בהמשך ב-syncSource.
     let balance=extractBalance();
     if(balance===null){try{await waitFor(()=>extractBalance()!==null,3000,'')}catch{}balance=extractBalance()}
+    // ⚠ בתוך הלולאה ולא לפניה: מעבר חשבון טוען את הטבלה מחדש, ולא ידוע
+    // אם התקופה נשמרת בין חשבונות. קביעה לכל חשבון נכונה בשני המקרים.
+    const period=await setPeriod(sinceMs);
     const rows=extractTransactions();
-    const label=chooser.textContent.replace(/\s+/g,' ').trim();accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,balanceMissing:balance===null,transactions:rows,txProbe:rows.length?'':txFingerprint()});
+    const label=chooser.textContent.replace(/\s+/g,' ').trim();accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,balanceMissing:balance===null,transactions:rows,txProbe:rows.length?'':txFingerprint(),periodProbe:period});
   }
   return accounts;
 }
@@ -301,3 +304,53 @@ function parseMoney(value) { let text=String(value||'').replace(/[−–]/g,'-')
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 async function waitFor(test, timeout, message) { const start=Date.now(); while(Date.now()-start<timeout){if(test())return;await wait(250)}throw new Error(message); }
 })();
+
+
+// ⚠⚠ 27.08.2026 — טל: „יש בעיה עם הבורר תנועות" ⇐ „מעט תנועות". **נמדד
+// בגשש `poalimTxProbe` על הדף החי, ולא נוחש:** בורר התקופה בדף התנועות עמד על
+// **„תקופה: 3 ימי עסקים אחרונים"**. משם 4 תנועות ב-645-690309 ו-6 ב-645-690300
+// מול `collectSince=2026-01-01` — ולא בגלל שהקריאה שבורה.
+// מזהי הרדיו נלקחו מן הגשש **כלשונם**:
+//   period-osh-last-x-days-00        3 ימי עסקים
+//   period-filter-last-30-days-00    30 יום
+//   period-filter-last-3-months-00   3 חודשים
+//   period-filter-last-6-months-00   6 חודשים
+//   period-filter-period-last-2-years00   שנתיים  ⚠ בלי מקף לפני 00, כך במקור
+async function setPeriod(sinceMs){
+  const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
+  const box=document.querySelector('.period-filter')||document;
+  const triggerOf=()=>box.querySelector('button[role="combobox"],button.dropdown-toggle');
+  const before=clean(triggerOf()?.textContent);
+  const OPTIONS=[{id:'period-filter-last-30-days-00',months:1},
+                 {id:'period-filter-last-3-months-00',months:3},
+                 {id:'period-filter-last-6-months-00',months:6},
+                 {id:'period-filter-period-last-2-years00',months:24}];
+  const need=sinceMs?Math.max(1,Math.ceil((Date.now()-sinceMs)/(30.4375*864e5))):3;
+  const present=OPTIONS.map(o=>({...o,el:document.getElementById(o.id)})).filter(o=>o.el);
+  if(!present.length)return{clicked:false,need,before,reason:'לא נמצא אף רדיו תקופה'};
+  const covering=present.filter(o=>o.months>=need).sort((a,b)=>a.months-b.months);
+  // ⚠ הקטן ביותר שעדיין מכסה; אם אין כיסוי — הגדול ביותר, ומסומן covered:false.
+  const chosen=covering[0]||present.slice().sort((a,b)=>b.months-a.months)[0];
+  const rowCount=()=>document.querySelectorAll('table tbody tr').length;
+  const rowsBefore=rowCount();
+  const trigger=triggerOf();
+  if(trigger&&trigger.getAttribute('aria-expanded')==='false'){trigger.click();await wait(400)}
+  chosen.el.click();
+  await wait(300);
+  // ⚠ לא ידוע אם נדרש כפתור אישור — הגשש לא תפס אחד. לכן: לוחצים רק על טקסט
+  // מובהק, **ומדווחים את כל הכפתורים במכל** כדי שהסבב הבא לא יהיה ניחוש.
+  const buttons=[...box.querySelectorAll('button')].map(b=>clean(b.textContent).slice(0,24)).filter(Boolean).slice(0,12);
+  const submit=[...box.querySelectorAll('button')].find(b=>/^(הצג|חפש|אישור|החל|עדכן|סנן)$/.test(clean(b.textContent)));
+  if(submit){submit.click();await wait(400)}
+  // ⚠ גבול שעון־קיר ולא תקרת סבבים — הלקח מ-1.12.1.
+  const deadline=Date.now()+12000;
+  while(Date.now()<deadline){
+    const t=clean(triggerOf()?.textContent);
+    if(t&&t!==before&&rowCount()>0)break;
+    await wait(300);
+  }
+  await wait(600);
+  return{clicked:true,id:chosen.id,months:chosen.months,need,covered:!!covering.length,
+    before,after:clean(triggerOf()?.textContent),rowsBefore,rowsAfter:rowCount(),
+    submitted:!!submit,buttons,options:present.map(o=>o.id)};
+}

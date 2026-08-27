@@ -898,7 +898,10 @@ async function syncSource(source,keys){
     // ⚠ נשמר **לפני** הקריאה — הלקח מ-1.8.0, שם הרשומה אבדה כשהשלב הבא נפל.
     if(pr?.ok)await chrome.storage.local.set({poalimTxProbe:{at:new Date().toISOString(),source,...pr.probe}});
   }catch{}
-  const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys});
+  // ⚠ גבול האיסוף נשלח לקובץ התוכן — שם נקבעת התקופה, בתוך לולאת החשבונות.
+  const tx=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_SELECTED',keys,since:await collectSinceMs()});
+  try{const reports=(tx?.accounts||[]).map(a=>({key:`${a.branch}-${a.accountNumber}`,...(a.periodProbe||{})}));
+    if(reports.length)await chrome.storage.local.set({poalimPeriodProbe:{at:new Date().toISOString(),reports}})}catch{}
   // אבחון: אילו חשבונות לא נקראה להם יתרה בדף התנועות. דף ריכוז היתרות עוד עשוי למלא.
   await chrome.storage.local.set({poalimNoBalance:(tx.accounts||[]).filter(a=>a.balanceMissing).map(a=>`${source}|${a.branch}-${a.accountNumber}`)});
   // אבחון: חשבון בלי ולו תנועה אחת. טביעת האצבע המבנית מוצגת על אריח הבנק,
