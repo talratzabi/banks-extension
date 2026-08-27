@@ -1402,14 +1402,31 @@ async function fibiNewRange(tabId,sinceMs){
         pill.el.click();
         // ⚠ ממתינים שהחלונית תופיע — נראוּת, לא קיום. הלקח מ-1.19.3.
         const vis=el=>!!(el&&(el.offsetParent||el.getClientRects().length));
+        // ⚠⚠ 27.08 — בחיבור „בינלאומי 2" הדוח החזיר „שדות התאריך בחלונית לא
+        // נמצאו", בעוד בחיבור 1 זה עבד. ההבדל: בחיבור 1 הטווח כבר היה מוגדר
+        // ולכן **בשדות היו ערכי תאריך**; בחלונית טרייה הם **ריקים**, והתווית
+        // „מ-תאריך" היא אלמנט נפרד ולא `aria-label` על ה-input.
+        // כלומר סיננתי לפי ערך או aria בלבד — ופסלתי בדיוק את המקרה הנפוץ.
+        // עכשיו נבדקת גם התווית המשויכת וגם המכל שסביב השדה.
+        const labelOf=el=>{const bits=[el.getAttribute('aria-label')||'',el.placeholder||'',
+            el.id||'',el.name||'',(typeof el.className==='string'?el.className:'')];
+          if(el.id){const l=document.querySelector('label[for="'+el.id+'"]');if(l)bits.push(l.textContent||'')}
+          const lab=el.closest&&el.closest('label');if(lab)bits.push(lab.textContent||'');
+          let p=el.parentElement;for(let i=0;i<3&&p;i++,p=p.parentElement)bits.push(clean(p.textContent||'').slice(0,60));
+          return clean(bits.join(' '))};
         const dateInputs=()=>[...document.querySelectorAll('input')]
-          .filter(el=>vis(el)&&(/\d{2}[.@/]\d{2}[.@/]\d{4}/.test(el.value||'')||
-            /תארי/.test(clean(el.getAttribute('aria-label')||el.getAttribute('placeholder')||''))));
+          .filter(el=>vis(el)&&el.type!=='checkbox'&&el.type!=='radio'&&
+            (/\d{2}[.@/]\d{2}[.@/]\d{4}/.test(el.value||'')||/תארי|date/i.test(labelOf(el))));
         let dl=Date.now()+10000;
         while(Date.now()<dl&&dateInputs().length<2)await nap(300);
         const ins=dateInputs();
         if(ins.length<2)return{ok:false,error:'שדות התאריך בחלונית לא נמצאו',
-          found:ins.map(el=>({v:el.value,al:clean(el.getAttribute('aria-label')||''),ph:el.placeholder||''})),before};
+          found:ins.map(el=>({v:el.value,al:clean(el.getAttribute('aria-label')||''),ph:el.placeholder||''})),
+          // ⚠ בכישלון מדווחים **כל** שדות הקלט הנראים — כך הסבב הבא אינו ניחוש.
+          allVisible:[...document.querySelectorAll('input')].filter(vis).slice(0,12)
+            .map(el=>({t:el.type||'',id:el.id||'',cls:clean(typeof el.className==='string'?el.className:'').slice(0,40),
+              ph:el.placeholder||'',al:clean(el.getAttribute('aria-label')||''),v:String(el.value||'').slice(0,12),
+              lab:labelOf(el).slice(0,60)})),before};
         // ⚠ סדר: הראשון „מ-תאריך", השני „עד תאריך" — כפי שנראה בצילום.
         const set=(el,v)=>{el.focus&&el.focus();el.value=v;
           for(const ev of ['input','change','blur'])el.dispatchEvent(new Event(ev,{bubbles:true}));};
