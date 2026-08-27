@@ -1185,6 +1185,23 @@ async function fibiSetRangeMain(tabId,sinceMs){
         const dl=Date.now()+8000;
         while(Date.now()<dl&&!vis(document.querySelector('#fromDate')))await nap(300);
         const panelOpen=vis(document.querySelector('#fromDate'));
+        // ⚠⚠ 27.08 — צילום מסך של טל: הלשונית פעילה, הפאנל פתוח, **ו„מ" עדיין
+        // 01/08/2026**. כתבתי רק ל-`LinkForm077`, ולא לשדות שהמשתמש רואה —
+        // והאתר קורא מהם. ⚠ **ובעולם הראשי jQuery כן זמין**: המדידה
+        // `hasJQuery:false` נעשתה מן העולם המבודד, ולכן הייתה מטעה.
+        const fromStr=fd+'/'+fm+'/'+fy,tillStr=td+'/'+tm+'/'+ty;
+        const setVisible=(sel,y,m,d,txt)=>{const el=document.querySelector(sel);if(!el)return 'אין שדה';
+          try{const $=window.jQuery||window.$;
+            if($&&/hasDatepicker/.test(el.className||'')){
+              $(el).datepicker('setDate',new Date(Number(y),Number(m)-1,Number(d)));
+              try{$(el).trigger('change')}catch(e){}
+              if(el.value)return 'datepicker';}
+          }catch(e){}
+          el.value=txt;
+          for(const ev of ['input','change','blur'])el.dispatchEvent(new Event(ev,{bubbles:true}));
+          return 'value';};
+        const visible={from:setVisible('#fromDate',fy,fm,fd,fromStr),
+                       till:setVisible('#tillDate',ty,tm,td,tillStr)};
         const form=document.querySelector('form[name^="LinkForm"]');
         const set=(n,v)=>{const el=form&&form.querySelector('[name="'+n+'"]');if(!el)return false;el.value=v;return true};
         const wrote={fromYY:set('I-FROM-YY',fy),fromMM:set('I-FROM-MM',fm),fromDD:set('I-FROM-DD',fd),
@@ -1198,7 +1215,9 @@ async function fibiSetRangeMain(tabId,sinceMs){
           if(!submitted&&form){try{form.submit();submitted='form.submit'}catch(e){submitted='שגיאה: '+e.message}}
         }
         await nap(2000);
-        return{ok:true,how,panelOpen,wrote,submitted,before,
+        return{ok:true,how,panelOpen,wrote,submitted,before,visible,
+          jq:!!(window.jQuery||window.$),
+          shown:{from:document.querySelector('#fromDate')?.value||'',till:document.querySelector('#tillDate')?.value||''},
           after:{active:activeTab(),rows:rows(),
             from:document.querySelector('#fromDate')?.value||'',till:document.querySelector('#tillDate')?.value||''},
           url:String(location.href).slice(0,110)};
