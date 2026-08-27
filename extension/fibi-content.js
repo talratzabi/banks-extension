@@ -71,10 +71,25 @@ async function setRange(sinceMs){
   const set=(el,v)=>{if(!el)return false;el.value=v;
     for(const ev of ['input','change','blur'])el.dispatchEvent(new Event(ev,{bubbles:true}));return true};
   const fromStr=dmy(new Date(sinceMs)),tillStr=dmy(new Date());
-  const writeDates=()=>{const d=fdoc();return{fromDate:set(d?.querySelector('#fromDate'),fromStr),
+  const dd2=d=>String(d.getDate()).padStart(2,'0'),mm2=d=>String(d.getMonth()+1).padStart(2,'0');
+  const fromD=new Date(sinceMs),tillD=new Date();
+  const byName=(nm)=>fdoc()?.querySelector(`[name="${nm}"]`);
+  // ⚠⚠ 27.08 — הריצה עם הכפתור הנכון עדיין החזירה יוני. השערה שנבדקת כאן:
+  // **הטופס אינו קורא את `#fromDate` אלא את השדות המפוצלים.** בגשש נמדדו
+  // `I_FROM_YY/MM/DD` עם `0000/00/00` ו-`T20C0256-DATE-FROM/TO` ריקים —
+  // ערכי ברירת מחדל שאיש לא מילא. זהו טופס IBM Portal ותיק, ושם זה הדפוס.
+  // מילוי שדה שאינו בשימוש אינו מזיק; אי-מילוי שדה שכן בשימוש מסביר בדיוק
+  // את מה שראינו. **לכן ממלאים את כולם ומדווחים מה נשאר אחרי השיגור.**
+  const writeDates=()=>{const d=fdoc();return{
+    fromDate:set(d?.querySelector('#fromDate'),fromStr),
     tillDate:set(d?.querySelector('#tillDate'),tillStr),
     hiddenFrom:set(d?.querySelector('#FromdateValue'),fromStr),
-    hiddenTo:set(d?.querySelector('#toDateValue'),tillStr)}};
+    hiddenTo:set(d?.querySelector('#toDateValue'),tillStr),
+    splitYY:set(d?.querySelector('#I_FROM_YY')||byName('I-FROM-YY'),String(fromD.getFullYear())),
+    splitMM:set(d?.querySelector('#I_FROM_MM')||byName('I-FROM-MM'),mm2(fromD)),
+    splitDD:set(d?.querySelector('#I_FROM_DD')||byName('I-FROM-DD'),dd2(fromD)),
+    tFrom:set(byName('T20C0256-DATE-FROM'),fromStr),
+    tTo:set(byName('T20C0256-DATE-TO'),tillStr)}};
   // ⚠⚠ נמדד בריצה החיה 27.08: נכתב 01/01/2026, וב-`after.from` חזר **01/08/2026**.
   // כלומר הלשונית מאתחלת את השדה לתחילת החודש **אחרי** הכתיבה — הלולאה
   // הקודמת יצאה מיד כי `#fromDate` היה בדף עוד לפני הלחיצה, ולכן לא המתינה
@@ -119,7 +134,11 @@ async function setRange(sinceMs){
     await nap(400);
   }
   await nap(800);
+  // ⚠ צילום של **כל** שדות התאריך אחרי השיגור — כך הריצה הבאה תאמר מי נשמר
+  // ומי נדרס, בלי עוד סבב השערות.
   return{applied:true,tab:tab.t,wrote,rewrites,fromAfterWrite,fromAtClick,scoped:!!scoped,from:fromStr,till:tillStr,
+    fields:[...(fdoc()?.querySelectorAll('input')||[])].map(el=>({id:el.id||'',name:el.name||'',v:String(el.value||'').slice(0,12)}))
+      .filter(x=>/date|FROM|TO|from|till/i.test(x.id+' '+x.name)).slice(0,14),
     clicked:show?show.t:'',buttons:cands.map(x=>x.t).filter(Boolean).slice(0,14),
     before,after:{rows:rowsNow(),earliest:earliest(),from:val('fromDate'),till:val('tillDate')}};
 }

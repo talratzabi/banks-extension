@@ -989,6 +989,14 @@ async function syncFibi(tabId){
     // שכשל יהיה ניתן לאבחון בקריאה אחת.
     try{const rng=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'FIBI_SET_RANGE',since:await collectSinceMs()}),45000,'טווח התאריכים בבינלאומי');
       await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),...(rng||{})}});
+      // ⚠⚠ 27.08 — האחסון עבר דחיסה (`.ldb` דחוס ב-Snappy) ו-`fibiRangeApplied`
+      // לא היה קריא לי אחרי הריצה. **אבחון שאי אפשר לקרוא אינו אבחון.**
+      // שורה אחת קריאה נכנסת ל-`bankDiagnostics`, שהדשבורד כבר מציג.
+      {const dg=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
+       dg.fibi=rng?.applied
+         ?`הבינלאומי: טווח ${rng.from||''} · כפתור ${rng.scoped?'הטווח':'גורף'} · שורות ${rng.before?.rows??'?'}→${rng.after?.rows??'?'} · מוקדם ${rng.after?.earliest||'?'}`
+         :`הבינלאומי: הטווח לא הוחל — ${rng?.why||rng?.error||'סיבה לא ידועה'}`;
+       await chrome.storage.local.set({bankDiagnostics:dg});}
       await delay(1500);
     }catch(e){try{await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),ok:false,error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
     const t=await fibiRead(tabId,'FIBI_TRANSACTIONS','קריאת תנועות הבינלאומי');
