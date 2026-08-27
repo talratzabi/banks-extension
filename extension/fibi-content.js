@@ -291,7 +291,31 @@ function newTransactions(){
     }
     out.push({date:(dateCell.match(DATE)||[dateCell])[0],action,details:'',reference,debit,credit,balance,isNew:false});
   }
-  const a=account();
-  return{...a,transactions:out,headers:heads,rawSample:raw,rowCount:rows.length,aligned:aligned&&(rows[0]?[...rows[0].querySelectorAll('td')].length===heads.length:false)};
+  // ⚠⚠ נמדד: המסך החדש מחזיר סניף **`062`** בעוד המסלול הישן החזיר **`62`**.
+  // ה-`id` וה-`selectionKey` נגזרים מן הסניף (`fibi-1-62-206601`), ולכן שינוי
+  // כזה **מנתק שיוכי כרטיסים והיסטוריה** בשקט. מנרמלים לצורה הישנה.
+  const a0=account();
+  const a={...a0,branch:String(a0.branch||'').replace(/^0+(?=\d)/,'')};
+  // ⚠⚠ 27.08 — טל: „יפה עובד, אבל נעלמה המסגרת." נמדד באחסון:
+  //   לפני (מסלול ישן):  creditLimit 3000 · availableCredit 13610.19
+  //   אחרי (מסך חדש):    שניהם null
+  // שני השדות הגיעו מן המסלול הישן שדילגתי עליו. **החלפת מסלול חייבת
+  // לקחת איתה את כל מה שהיה** — אותו כשל בדיוק שקרה ב-1.20.2 עם שדות
+  // התאריך הנראים, ובלבוש אחר.
+  // ⚠ במסך החדש שני הערכים גלויים בכותרת ונמדדו בגשש:
+  //   „יתרה עדכנית 10,610.19₪  יתרה למשיכה 13,610.19₪"
+  const head=T(document.body).slice(0,600);
+  const num=re=>{const m=head.match(re);if(!m)return null;
+    const v=Number(String(m[1]).replace(/,/g,''));return Number.isFinite(v)?v:null};
+  const balance=num(/יתרה\s*עדכנית\s*(-?[\d,]+\.?\d*)/);
+  const available=num(/יתרה\s*למשיכה\s*(-?[\d,]+\.?\d*)/);
+  const creditLimit=(balance!=null&&available!=null)?Number((available-balance).toFixed(2)):null;
+  return{...a,transactions:out,
+    ...(balance!=null?{balance}:{}),
+    ...(available!=null?{availableCredit:available}:{}),
+    ...(creditLimit!=null?{creditLimit}:{}),
+    // ⚠ שדות האבחון **אינם** חלק מן החשבון — הם נמסרים בנפרד ולא נשמרים בו.
+    __diag:{headers:heads,rawSample:raw,rowCount:rows.length,
+      aligned:aligned&&(rows[0]?[...rows[0].querySelectorAll('td')].length===heads.length:false)}};
 }
 })();

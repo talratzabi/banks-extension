@@ -992,9 +992,11 @@ async function syncFibi(tabId){
         await delay(1200);
         let read=null;try{read=await fibiRead(tabId,'FIBI_NEW_TX','קריאת תנועות מהמסך החדש',8)}catch(e){}
         const rows=read?.data?.transactions||[];
-        newReport={opened,rng,rows:rows.length,headers:read?.data?.headers||[],
-          aligned:read?.data?.aligned,rawSample:read?.data?.rawSample||[]};
-        if(rows.length)newTx=read.data;
+        const dg=read?.data?.__diag||{};
+        newReport={opened,rng,rows:rows.length,headers:dg.headers||[],aligned:dg.aligned,rawSample:dg.rawSample||[]};
+        // ⚠ האבחון נשאר בדוח ואינו נכנס לחשבון; קודם נשמרו בו
+        // `headers`/`rawSample`/`rowCount` כשדות זרים.
+        if(rows.length){newTx={...read.data};delete newTx.__diag;}
       }else newReport={opened};
       await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),...newReport}});
     }catch(e){try{await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
