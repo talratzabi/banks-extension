@@ -9,3 +9,17 @@
 
 /* ⚠ 23.08.2026 — אריח בנק: הגנה שנייה, בלתי תלויה בקיצור שב-JS. */
 .bank-button small{overflow-wrap:anywhere;word-break:break-word;display:block;max-height:4.5em;overflow:hidden}
+
+/* ⚠ 27.08.2026 — טל: „כל הבוררים הללו שיהיו בשורה אחת מעוצבת ופחות מלל."
+   קודם היו ארבעה בלוקים נפרדים, כל אחד עם תיאור ארוך ועוד פסקת הסבר מתחתיו.
+   ההסברים עברו ל-title (ריחוף), והפקדים לשורה אחת שנשברת במסכים צרים. */
+.control-row{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;justify-content:flex-end;margin:14px 0 6px}
+.control{display:inline-flex;align-items:center;gap:8px;background:#eef2ff;border:1px solid #dbe3ff;
+  border-radius:999px;padding:6px 14px;font-size:14px;font-weight:600;color:#152a63;cursor:default}
+.control>span{white-space:nowrap;opacity:.85;font-weight:700}
+.control select{border:1px solid #c9d4f7;border-radius:999px;background:#fff;color:#152a63;
+  font:inherit;font-weight:600;padding:4px 10px;cursor:pointer}
+.control select:focus-visible{outline:2px solid #3157d5;outline-offset:1px}
+.control-check{cursor:pointer}
+.control-check input{width:16px;height:16px;accent-color:#3157d5;cursor:pointer}
+@media(max-width:640px){.control-row{justify-content:stretch}.control{flex:1 1 100%;justify-content:space-between}}
