@@ -1555,9 +1555,30 @@ async function runBtb(tabId){
     const d=read.data,number=d.number||'BTB';
     // ⚠ שארית התקופה = סך התשלומים פחות ששולמו; אם המונה חסר — אין על מה לחשב.
     const remaining=(d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null;
+    // ⚠⚠ 27.08.2026 — טל: „BTB לא מעדכנים במועד התשלום אלא רק אחרי מועד התשלום
+    // הבא. מכיוון שה-300 אלף נכנס אחרי התשלום החודשי, הוא יעודכן רק ב-17/9/26."
+    // כלומר **היתרה שמוצגת מפגרת אחרי המציאות**: 685,056.68 עדיין אינה מכילה
+    // את הפירעון, והיתרה האמיתית היא 385,056.68.
+    // ⚠ **הריבית מחושבת דווקא מן היתרה המוצגת** — היא והתשלום הם הזוג העקבי
+    // שהאתר מציג (3.20%). מול היתרה האמיתית אותו תשלום היה משתמע 8.96%,
+    // כי הוא שייך ללוח הישן. **בדיקה הפוכה זו היא שאישרה את הכיוון.**
     const rate=annuityRate(d.balance,d.nextPayment,remaining);
     const rateText=rate?`${(rate.nominal*100).toFixed(2)}% מחושבת`:'';
-    const loan={type:`הלוואת BTB${d.number?` #${d.number}`:''}`,balance:d.balance,
+    // ⚠ מתי מפחיתים? רק כשמדובר בפירעון ולא בתשלום חודשי רגיל, **וכל עוד לא
+    // הגיע מועד העדכון**. סף של פי 2 מהתשלום הרגיל מפריד ביניהם; בלעדיו היינו
+    // מפחיתים גם תשלום שוטף ומציגים יתרה נמוכה מדי.
+    const dmy=v=>{const m=String(v||'').match(/(\d{2})[.\/](\d{2})[.\/](\d{4})/);
+      return m?Date.UTC(+m[3],+m[2]-1,+m[1]):null};
+    const lump=Number(d.lastPayment)||0,regular=Number(d.nextPayment)||0,dueMs=dmy(d.nextPaymentDate);
+    const lumpPending=lump>0&&regular>0&&lump>=regular*2&&!!dueMs&&Date.now()<dueMs;
+    const trueBalance=lumpPending?Number((d.balance-lump).toFixed(2)):d.balance;
+    // ההחזר הצפוי אחרי שהפירעון ייושם, אם התקופה נשמרת
+    const nAfter=remaining!=null?remaining-1:null;
+    const expectedPayment=(lumpPending&&rate&&nAfter&&nAfter>0)
+      ?Number((trueBalance*rate.monthly/(1-Math.pow(1+rate.monthly,-nAfter))).toFixed(2)):null;
+    const loan={type:`הלוואת BTB${d.number?` #${d.number}`:''}`,balance:trueBalance,
+      // ⚠ מה שהאתר הציג נשמר לצד האמת, כדי שתמיד אפשר יהיה להסביר את הפער.
+      shownBalance:d.balance,lumpPending,expectedPayment,
       originalPrincipal:d.originalPrincipal,startDate:d.startDate,endDate:d.endDate,
       nextPayment:d.nextPayment,nextPaymentDate:d.nextPaymentDate,interest:rateText,
       // ⚠ הפירעון החד-פעמי נשמר על ההלוואה — הוא מסביר את הפער בין הסכום
@@ -1575,7 +1596,9 @@ async function runBtb(tabId){
     const accounts=[...state.accounts.filter(a=>a.source!=='btb'),account];
     const selectedAccountKeys=[...new Set([...state.selectedAccountKeys,account.selectionKey])];
     await chrome.storage.local.set({accounts,selectedAccountKeys,lastAutoSync:now,
-      syncStatus:`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${d.balance}`});
+      syncStatus:lumpPending
+        ?`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${trueBalance} (פירעון ${lump} טרם עודכן באתר)`
+        :`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${trueBalance}`});
     if(!autoBusy)await chrome.runtime.openOptionsPage();
     return{ok:true,balance:d.balance,number};
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה ב-BTB: ${e.message}`});throw e}
