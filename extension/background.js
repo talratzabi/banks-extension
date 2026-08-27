@@ -982,11 +982,26 @@ async function syncFibi(tabId){
     // נבחר בחלונית רגילה **וכל התנועות בעמוד אחד**. ⚠ הנתיב אינו ידוע ולכן
     // אינו מנוחש — נלחץ פריט התפריט, והמדידה נשמרת כדי שייכתב לו מתאם.
     // המסך הישן נשאר המסלול הפעיל עד שהחדש נכתב ואומת.
+    // ⚠⚠ המסלול המועדף: המסך החדש. אם הוא מספק תנועות — **דילוג מוחלט על
+    // המסך הישן**, על `LinkForm077` ועל הדפדוף. אם לא — נופלים לישן, שעדיין עובד.
+    let newTx=null,newReport=null;
     try{const opened=await fibiOpenNewScreen(tabId);
-      let frames=[];
-      if(opened?.navigated){await delay(2500);frames=await probeAllFrames(tabId).catch(()=>[])}
-      await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),opened,frames}});
+      if(opened?.navigated){
+        await delay(2500);
+        const rng=await fibiNewRange(tabId,await collectSinceMs());
+        await delay(1200);
+        let read=null;try{read=await fibiRead(tabId,'FIBI_NEW_TX','קריאת תנועות מהמסך החדש',8)}catch(e){}
+        const rows=read?.data?.transactions||[];
+        newReport={opened,rng,rows:rows.length,headers:read?.data?.headers||[],
+          aligned:read?.data?.aligned,rawSample:read?.data?.rawSample||[]};
+        if(rows.length)newTx=read.data;
+      }else newReport={opened};
+      await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),...newReport}});
     }catch(e){try{await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
+    if(newTx){
+      const dg=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
+      delete dg.fibi;await chrome.storage.local.set({bankDiagnostics:dg});
+    }
     await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnAccountMngment/OnBalanceTrans/PrivateAccountFlow'});await delay(2200);
     // ⚠ מדידה בלבד, לפני הקריאה. `fibi-content.js` אינו מזכיר `collectSince`
     // אף פעם (grep → 0), כלומר לבינלאומי אין טווח תאריכים בכלל — אותו מחדל
@@ -1015,11 +1030,13 @@ async function syncFibi(tabId){
        await chrome.storage.local.set({bankDiagnostics:dg});}
       await delay(1500);
     }catch(e){try{await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),ok:false,error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
-    const t=await fibiRead(tabId,'FIBI_TRANSACTIONS','קריאת תנועות הבינלאומי');
+    // ⚠ אם המסך החדש כבר סיפק תנועות, לא נוגעים במסך הישן בכלל.
+    const t=newTx?{ok:true,data:{...newTx}}:await fibiRead(tabId,'FIBI_TRANSACTIONS','קריאת תנועות הבינלאומי');
+    if(newTx)await chrome.storage.local.set({syncStatus:`הבינלאומי: ${newTx.transactions.length} תנועות מהמסך החדש`});
     // ⚠⚠ דפדוף: התוצאה מחולקת לעמודים („עמוד - 3" בצילום), וקריאת עמוד אחד
     // מחזירה טווח חלקי. ⚠ **הקורא נשאר `FIBI_TRANSACTIONS`** — אין עותק שני
     // של הפרסר; העולם הראשי רק מתקדם עמוד, וכל עמוד נקרא במסלול הקיים.
-    {const pages=[{n:1,count:(t.data?.transactions||[]).length}];
+    if(!newTx){const pages=[{n:1,count:(t.data?.transactions||[]).length}];
      const seen=new Set((t.data?.transactions||[]).map(x=>`${x.date}|${x.reference||''}|${x.debit??''}|${x.credit??''}|${x.description||x.action||''}`));
      let guard=0;
      while(guard++<40){
@@ -1349,6 +1366,59 @@ async function fibiOpenNewScreen(tabId){
       }});
   }catch(e){return{ok:false,error:String(e&&e.message||e).slice(0,140)}}
   return results.map(r=>r&&r.result).find(Boolean)||{ok:false,error:'פריט התפריט „תנועות בחשבון" לא נמצא'};
+}
+// ⚠⚠ 27.08.2026 — המסך החדש נמדד: `#/accountTransactions`, הכול במסמך העליון.
+// הפילים הם `button[role="tab"].filter-button` בתוך `q077-filters-list`,
+// ו„טווח תאריכים" נושא `aria-expanded` — כלומר הוא פותח חלונית.
+// ⚠ החלונית עצמה **לא נמדדה** (היא נפתחת בלחיצה), ולכן שדותיה מאותרים
+// בזמן ריצה לפי תבנית תאריך ולפי התוויות „מ-תאריך"/„עד תאריך" שבצילום,
+// **וכל מה שנמצא מדווח** כדי שכשל ייסגר בקריאה אחת.
+async function fibiNewRange(tabId,sinceMs){
+  if(!sinceMs)return{ok:false,error:'לא הוגדרה תחילת איסוף'};
+  const f=new Date(sinceMs),t=new Date(),p=n=>String(n).padStart(2,'0');
+  let results=[];
+  try{
+    results=await chrome.scripting.executeScript({
+      target:{tabId,allFrames:true},world:'MAIN',
+      args:[`${p(f.getDate())}/${p(f.getMonth()+1)}/${f.getFullYear()}`,
+            `${p(t.getDate())}/${p(t.getMonth()+1)}/${t.getFullYear()}`],
+      func:async(fromStr,tillStr)=>{
+        const nap=ms=>new Promise(r=>setTimeout(r,ms));
+        const clean=v=>String(v||'').replace(/\s+/g,' ').trim();
+        const pills=[...document.querySelectorAll('button[role="tab"],button.filter-button')]
+          .map(el=>({el,t:clean(el.textContent)}));
+        const pill=pills.find(x=>/טווח\s*תאריכים/.test(x.t));
+        if(!pill)return null;                       // לא המסמך הזה
+        const rowsNow=()=>document.querySelectorAll('q077-table tbody tr,table tbody tr').length;
+        const before={rows:rowsNow(),pills:pills.map(x=>x.t).slice(0,8)};
+        pill.el.click();
+        // ⚠ ממתינים שהחלונית תופיע — נראוּת, לא קיום. הלקח מ-1.19.3.
+        const vis=el=>!!(el&&(el.offsetParent||el.getClientRects().length));
+        const dateInputs=()=>[...document.querySelectorAll('input')]
+          .filter(el=>vis(el)&&(/\d{2}[.@/]\d{2}[.@/]\d{4}/.test(el.value||'')||
+            /תארי/.test(clean(el.getAttribute('aria-label')||el.getAttribute('placeholder')||''))));
+        let dl=Date.now()+10000;
+        while(Date.now()<dl&&dateInputs().length<2)await nap(300);
+        const ins=dateInputs();
+        if(ins.length<2)return{ok:false,error:'שדות התאריך בחלונית לא נמצאו',
+          found:ins.map(el=>({v:el.value,al:clean(el.getAttribute('aria-label')||''),ph:el.placeholder||''})),before};
+        // ⚠ סדר: הראשון „מ-תאריך", השני „עד תאריך" — כפי שנראה בצילום.
+        const set=(el,v)=>{el.focus&&el.focus();el.value=v;
+          for(const ev of ['input','change','blur'])el.dispatchEvent(new Event(ev,{bubbles:true}));};
+        set(ins[0],fromStr);set(ins[1],tillStr);
+        await nap(400);
+        const ok=[...document.querySelectorAll('button')].map(el=>({el,t:clean(el.textContent)}))
+          .find(x=>/^אישור$/.test(x.t))||null;
+        if(ok)ok.el.click();
+        const beforeRows=before.rows;
+        dl=Date.now()+15000;
+        while(Date.now()<dl&&rowsNow()===beforeRows)await nap(400);
+        await nap(1200);
+        return{ok:true,pill:pill.t,confirmed:!!ok,wrote:{from:ins[0].value,till:ins[1].value},
+          before,after:{rows:rowsNow()},url:String(location.href).slice(0,110)};
+      }});
+  }catch(e){return{ok:false,error:String(e&&e.message||e).slice(0,140)}}
+  return results.map(r=>r&&r.result).find(Boolean)||{ok:false,error:'לא נמצא פיל „טווח תאריכים"'};
 }
 async function probeAllFrames(tabId){
   let frames=[];

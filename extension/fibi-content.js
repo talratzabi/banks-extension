@@ -13,6 +13,7 @@ chrome.runtime.onMessage.addListener((m,_s,reply)=>{
   if(m?.type==='FIBI_SET_RANGE'){setRange(m.since||0).then(r=>reply({ok:true,...r})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='FIBI_OWNER'){try{reply({ok:true,data:owner()})}catch(e){reply({ok:false,error:e.message})}return}
   if(m?.type==='FIBI_LOANS'){try{reply({ok:true,data:loans()})}catch(e){reply({ok:false,error:e.message})}return}
+  if(m?.type==='FIBI_NEW_TX'){try{reply({ok:true,data:newTransactions()})}catch(e){reply({ok:false,error:e.message})}return}
 });
 let reported='';function report(){if(location.hostname==='online.fibi.co.il'&&location.hash&&location.hash!==reported){reported=location.hash;chrome.runtime.sendMessage({type:'FIBI_AUTHENTICATED'}).catch(()=>{})}}report();setInterval(report,1000);
 function text(el){return(el?.innerText||el?.textContent||'').replace(/\s+/g,' ').trim()}
@@ -246,5 +247,51 @@ async function setRange(sinceMs){
       .filter(x=>/date|FROM|TO|from|till/i.test(x.id+' '+x.name)).slice(0,14),
     clicked:show?show.t:'',buttons:cands.map(x=>x.t).filter(Boolean).slice(0,14),
     before,after:{rows:rowsNow(),earliest:earliest(),from:val('fromDate'),till:val('tillDate')}};
+}
+// ⚠⚠ 27.08.2026 — המסך החדש („תנועות בחשבון חדש", `#/accountTransactions`)
+// **נמדד**: הטבלה יושבת **במסמך העליון** ולא במסגרת לגסי —
+//   q077-table.table > table.mat-sort > tbody > tr.ng-star-inserted
+//   כותרות: תאריך · תיאור · אסמכתא · זכות · חובה · יתרה
+//   תאריכים בנקודות („01.01.2026"), סכומים עם ₪.
+// ⚠ **המיפוי נגזר מן הכותרות בזמן ריצה ולא מקובע**: במדידה נספרו 8 תאים
+// מול 6 כותרות, וקיבוע אינדקסים היה ניחוש. אם הספירות אינן תואמות —
+// נופלים להיוריסטיקה **ומדווחים את השורות הגולמיות**, כדי שתיקון ייקח סבב אחד.
+function newTransactions(){
+  const T=el=>String(el?.textContent||'').replace(/\s+/g,' ').trim();
+  const table=document.querySelector('q077-table table')||
+    [...document.querySelectorAll('table')].find(t=>/תאריך/.test(T(t))&&/(יתרה|אסמכתא)/.test(T(t)));
+  if(!table)throw Error('טבלת התנועות של המסך החדש לא נמצאה');
+  const heads=[...table.querySelectorAll('thead th')].map(T);
+  const idx=n=>heads.findIndex(h=>h.includes(n));
+  const rows=[...table.querySelectorAll('tbody tr')];
+  const DATE=/\d{1,2}[.@/-]\d{1,2}[.@/-]\d{2,4}/;
+  const money=v=>{const m=String(v||'').replace(/[^0-9.,-]/g,'').replace(/,/g,'');
+    if(!m||m==='-')return null;const n=Number(m);return Number.isFinite(n)?n:null};
+  const aligned=heads.length>0;
+  const out=[],raw=[];
+  for(const r of rows){
+    const cells=[...r.querySelectorAll('td')].map(T);
+    if(!cells.length)continue;
+    const dateCell=cells.find(c=>DATE.test(c));
+    if(!dateCell)continue;
+    if(raw.length<3)raw.push(cells);
+    const at=n=>{const i=idx(n);return i>=0&&i<cells.length?cells[i]:''};
+    let credit=null,debit=null,balance=null,action='',reference='';
+    if(aligned&&cells.length===heads.length){
+      action=at('תיאור');reference=at('אסמכתא');
+      credit=money(at('זכות'));debit=money(at('חובה'));balance=money(at('יתרה'));
+    }else{
+      // ⚠ נפילה מדודה: התיאור הוא התא הראשון שאינו תאריך ואינו סכום;
+      // הסכומים הם התאים שנושאים ₪, והאחרון שבהם הוא היתרה.
+      const moneyCells=cells.filter(c=>/₪/.test(c));
+      action=cells.find(c=>c&&!DATE.test(c)&&!/₪/.test(c)&&!/^\d+$/.test(c))||'';
+      reference=cells.find(c=>/^\d{2,}$/.test(c))||'';
+      balance=moneyCells.length?money(moneyCells[moneyCells.length-1]):null;
+      if(moneyCells.length>1)debit=money(moneyCells[moneyCells.length-2]);
+    }
+    out.push({date:(dateCell.match(DATE)||[dateCell])[0],action,details:'',reference,debit,credit,balance,isNew:false});
+  }
+  const a=account();
+  return{...a,transactions:out,headers:heads,rawSample:raw,rowCount:rows.length,aligned:aligned&&(rows[0]?[...rows[0].querySelectorAll('td')].length===heads.length:false)};
 }
 })();
