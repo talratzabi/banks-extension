@@ -10,6 +10,7 @@ chrome.runtime.onMessage.addListener((m,_s,reply)=>{
   if(m?.type==='FIBI_PING'){reply({ok:true});return}
   if(m?.type==='FIBI_SUMMARY'){try{reply({ok:true,data:summary()})}catch(e){reply({ok:false,error:e.message})}return}
   if(m?.type==='FIBI_TRANSACTIONS'){try{reply({ok:true,data:transactions()})}catch(e){reply({ok:false,error:e.message})}return}
+  if(m?.type==='FIBI_SET_RANGE'){setRange(m.since||0).then(r=>reply({ok:true,...r})).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='FIBI_OWNER'){try{reply({ok:true,data:owner()})}catch(e){reply({ok:false,error:e.message})}return}
   if(m?.type==='FIBI_LOANS'){try{reply({ok:true,data:loans()})}catch(e){reply({ok:false,error:e.message})}return}
 });
@@ -30,4 +31,70 @@ for(const r of rows){const cells=[...r.children].filter(el=>el.tagName==='TD'),c
 // מחושב באופן כולל בין מועד התשלום הקרוב למועד הסופי, והסה"כ הוא ששולמו + נותרו.
 const schedule=cells[8]?.querySelector('a[href*="luachSilukin"]'),args=(schedule?.getAttribute('href')?.match(/luachSilukin\(([^)]+)\)/)||[])[1]?.split(',').map(v=>Number(String(v).trim()));if(args?.length===3)item.scheduleArgs=args;
 items.push(item)}return{loans:items,loansTotal:items.reduce((sum,x)=>sum+(x.balance||0),0)}}
+// ⚠⚠ 27.08.2026 — טל: „סינכרנתי, מוריד נתונים רק מיוני." נמדד: fibi-1 נשמר עם
+// 30 תנועות, 01/06/26 → 20/08/26, כי הלשונית הפעילה היא „תנועות אחרונות".
+// **כל מה שלהלן נלקח מ-`fibiTxProbe` — מסגרת 157, לא נוחש:**
+//   לשוניות (a): „תנועות אחרונות" · „מתחילת חודש נוכחי" · „מתחילת חודש קודם"
+//                · **„תנועות בטווח תאריכים"** ← זו שנדרשת
+//   שדות: #fromDate=01/08/2026 · #tillDate=27/08/2026  (jQuery UI datepicker)
+//   ⚠ ולצידם **שדות נסתרים** FromdateValue(name=fromDate) ו-toDateValue(name=toDate),
+//     שניהם ריקים — ייתכן שהם מה שנשלח בפועל. לכן נכתבים **גם** הם.
+//   כפתור „הצג" קיים בדף (נמדד בטקסט הראש).
+async function setRange(sinceMs){
+  const nap=ms=>new Promise(r=>setTimeout(r,ms));
+  // ⚠ נתפס בבדיקה: לחיצה על הלשונית מנווטת את מסגרת הלגסי, המסמך הישן מתנתק,
+  // וכל שימוש בהפניה שמורה זורק. לכן המסמך נקרא **מחדש בכל פעם**.
+  const fdoc=()=>document.querySelector('#iframe-old-pages')?.contentDocument||null;
+  if(!fdoc())return{applied:false,why:'מסגרת דפי הלגסי לא נטענה'};
+  const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
+  const dmy=d=>`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  const val=id=>fdoc()?.querySelector('#'+id)?.value||'';
+  const rowsNow=()=>fdoc()?.querySelectorAll('table tr').length||0;
+  // ⚠ הטקסט נקרא מ-textContent: הטקסט המרונדר תלוי בפריסה ומחזיר ריק במסגרת
+  // שאינה מוצגת — נתפס בבדיקה, והיה מייצר „הטווח לא השתנה" כוזב.
+  const earliest=()=>{const all=(clean(fdoc()?.body?.textContent).match(/\b\d{2}\/\d{2}\/\d{4}\b/g)||[])
+      .map(x=>{const q=x.split('/');return new Date(+q[2],+q[1]-1,+q[0]).getTime()}).filter(Number.isFinite);
+    return all.length?new Date(Math.min(...all)).toISOString().slice(0,10):''};
+  const before={rows:rowsNow(),earliest:earliest(),from:val('fromDate'),till:val('tillDate')};
+  if(!sinceMs)return{applied:false,why:'לא הוגדרה תחילת איסוף',before};
+  const tabs=[...fdoc().querySelectorAll('a')].map(a=>({a,t:clean(a.textContent)}));
+  const tab=tabs.find(x=>/תנועות\s*בטווח\s*תאריכים/.test(x.t));
+  if(!tab)return{applied:false,why:'לשונית טווח התאריכים לא נמצאה',
+    tabs:tabs.map(x=>x.t).filter(Boolean).slice(0,12),before};
+  tab.a.click();
+  // ⚠ גבול שעון־קיר ולא תקרת סבבים — הלקח מ-1.12.1.
+  const ready=Date.now()+10000;
+  while(Date.now()<ready&&!fdoc()?.querySelector('#fromDate'))await nap(300);
+  await nap(600);
+  // ⚠ האירוע נוצר בחלון העליון ולא במסגרת: אותו מקור, והדיספאץ' תקף גם אחרי
+  // שהמסגרת נוּוטה.
+  const set=(el,v)=>{if(!el)return false;el.value=v;
+    for(const ev of ['input','change','blur'])el.dispatchEvent(new Event(ev,{bubbles:true}));return true};
+  const fromStr=dmy(new Date(sinceMs)),tillStr=dmy(new Date()),d2=fdoc();
+  const wrote={fromDate:set(d2?.querySelector('#fromDate'),fromStr),
+    tillDate:set(d2?.querySelector('#tillDate'),tillStr),
+    // ⚠ הנסתרים נמדדו ריקים וייתכן שהם מה שנשלח בפועל, ולכן נכתבים גם הם.
+    hiddenFrom:set(d2?.querySelector('#FromdateValue'),fromStr),
+    hiddenTo:set(d2?.querySelector('#toDateValue'),tillStr)};
+  // ⚠ „הצג" נמדד כטקסט בלבד ולא כאלמנט. מחפשים בשלוש צורות, **ומדווחים כל
+  // מועמד** כדי שכשל ייסגר בקריאה אחת ולא בעוד סבב.
+  const cands=[...(d2?.querySelectorAll('input[type="submit"],input[type="button"],button,a')||[])]
+    .map(el=>({el,t:clean(el.value||el.textContent)}));
+  const show=cands.find(x=>/^הצג$/.test(x.t))||cands.find(x=>/^(הצג|חפש|אישור|עדכן)/.test(x.t));
+  if(show)show.el.click();
+  // ⚠ ההמתנה נשענת על **שני** סימנים ולא על אחד: התאריך המוקדם השתנה, **או**
+  // מספר השורות השתנה. בבדיקה `earliest()` חזר ריק בסביבה מלאכותית, וקריאה
+  // שנשענת רק עליו הייתה מתנוונת להמתנה קבועה בלי להודיע. שינוי שורות הוא
+  // סימן עצמאי, והדוח נושא את שניהם כדי שהריצה החיה תכריע מי מהם עבד.
+  const deadline=Date.now()+15000;
+  while(Date.now()<deadline){
+    const e=earliest();
+    if(rowsNow()>0&&((e&&e!==before.earliest)||rowsNow()!==before.rows))break;
+    await nap(400);
+  }
+  await nap(800);
+  return{applied:true,tab:tab.t,wrote,from:fromStr,till:tillStr,
+    clicked:show?show.t:'',buttons:cands.map(x=>x.t).filter(Boolean).slice(0,14),
+    before,after:{rows:rowsNow(),earliest:earliest(),from:val('fromDate'),till:val('tillDate')}};
+}
 })();

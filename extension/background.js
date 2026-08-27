@@ -984,6 +984,13 @@ async function syncFibi(tabId){
     // שהיה בפועלים. **לא נכתב כאן שום סלקטור** לפני שנדע מה יש בדף ובמסגרת.
     try{const frames=await probeAllFrames(tabId);
       await chrome.storage.local.set({fibiTxProbe:{at:new Date().toISOString(),frames}})}catch(e){}
+    // ⚠ קביעת הטווח לפני הקריאה. הלשונית הפעילה היא „תנועות אחרונות" ולכן
+    // נשמרו 30 תנועות מ-01/06 בלבד. הדוח נשמר תמיד — גם כשלא הוחל — כדי
+    // שכשל יהיה ניתן לאבחון בקריאה אחת.
+    try{const rng=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'FIBI_SET_RANGE',since:await collectSinceMs()}),45000,'טווח התאריכים בבינלאומי');
+      await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),...(rng||{})}});
+      await delay(1500);
+    }catch(e){try{await chrome.storage.local.set({fibiRangeApplied:{at:new Date().toISOString(),ok:false,error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
     const t=await fibiRead(tabId,'FIBI_TRANSACTIONS','קריאת תנועות הבינלאומי');
     const now=new Date().toISOString(),source=state.pendingFibiSlot,label=`הבינלאומי — ${owner.firstName||t.data.accountNumber}`;
     const bankNumber=v=>String(v??'').replace(/\D/g,'').replace(/^0+(?=\d)/,'');
