@@ -122,6 +122,31 @@ async function setRange(sinceMs){
   // בוויסות טיימרים. הרגע היחיד שחשוב הוא רגע השיגור, ולכן כותבים בו.
   wrote=writeDates();
   const fromAtClick=val('fromDate');
+  // ⚠⚠ 27.08 — הדוח הקודם הכריע: `fromAtClick` היה 01/01/2026, תשעת השדות
+  // נכתבו, הכפתור הנכון נלחץ — **ואחרי הלחיצה כל השדות חזרו לברירת המחדל**
+  // (`I_FROM_YY=0000`, `FromdateValue=""`, `fromDate=01/08/2026`) והשורות
+  // נשארו 37. זו חתימה של **טעינה מחדש של המסגרת**, לא של סינון שנכשל.
+  // כלומר הערכים אינם „נדרסים" — הטופס פשוט אינו זה שמשוגר.
+  // **לפני שנכתבת שורת קוד נוספת: מה המנגנון.** נאסף כאן, קריאה בלבד.
+  const attrs=el=>{if(!el)return null;const o={tag:el.tagName.toLowerCase()};
+    for(const a of ['id','name','href','onclick','type','value','action','method','target','class'])
+      {const v=el.getAttribute?.(a);if(v)o[a]=String(v).slice(0,180)}
+    return o};
+  const form=show?.el?.closest?.('form')||fdoc()?.querySelector('#fromDate')?.closest('form');
+  const submitInfo={
+    tabAnchor:attrs(tab.a),
+    button:attrs(show?.el),
+    // ⚠ יש בדף כמה טפסים; זה שמכיל את שדה התאריך הוא הרלוונטי.
+    form:attrs(form),
+    formFieldCount:form?form.querySelectorAll('input,select,textarea').length:0,
+    formFields:form?[...form.querySelectorAll('input,select,textarea')]
+      .map(el=>({n:el.name||el.id||'',t:el.type||el.tagName.toLowerCase(),v:String(el.value||'').slice(0,14)}))
+      .slice(0,40):[],
+    // פונקציות שיגור שהדף חושף — בטפסי IBM Portal השיגור הוא לרוב קריאה מפורשת
+    globals:(()=>{const w=fdoc()?.defaultView;if(!w)return[];
+      return ['doSubmit','submitForm','Search','doSearch','showTnuot','SubmitForm','goSubmit']
+        .filter(k=>{try{return typeof w[k]==='function'}catch(e){return false}})})(),
+    formsInDoc:[...(fdoc()?.querySelectorAll('form')||[])].map(f=>({name:f.getAttribute('name')||'',action:String(f.getAttribute('action')||'').slice(0,120)})).slice(0,8)};
   if(show)show.el.click();
   // ⚠ ההמתנה נשענת על **שני** סימנים ולא על אחד: התאריך המוקדם השתנה, **או**
   // מספר השורות השתנה. בבדיקה `earliest()` חזר ריק בסביבה מלאכותית, וקריאה
@@ -136,7 +161,7 @@ async function setRange(sinceMs){
   await nap(800);
   // ⚠ צילום של **כל** שדות התאריך אחרי השיגור — כך הריצה הבאה תאמר מי נשמר
   // ומי נדרס, בלי עוד סבב השערות.
-  return{applied:true,tab:tab.t,wrote,rewrites,fromAfterWrite,fromAtClick,scoped:!!scoped,from:fromStr,till:tillStr,
+  return{applied:true,tab:tab.t,wrote,rewrites,fromAfterWrite,fromAtClick,scoped:!!scoped,submitInfo,from:fromStr,till:tillStr,
     fields:[...(fdoc()?.querySelectorAll('input')||[])].map(el=>({id:el.id||'',name:el.name||'',v:String(el.value||'').slice(0,12)}))
       .filter(x=>/date|FROM|TO|from|till/i.test(x.id+' '+x.name)).slice(0,14),
     clicked:show?show.t:'',buttons:cands.map(x=>x.t).filter(Boolean).slice(0,14),
