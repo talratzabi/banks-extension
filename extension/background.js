@@ -773,7 +773,10 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   // שנכשלה בקריאת הרשימה מחקה את ההיסטוריה הקיימת ולא העמידה דבר במקומה.
   // cardHistPut משתמש ב-id של `suffix|month` ודורס ממילא, לכן המחיקה עברה לתוך הלולאה:
   // חודש נמחק רק ברגע שיש לו מחליף טרי. כישלון לא מוחק עוד שום דבר.
-  await chrome.storage.local.set({syncStatus:`ישראכרט: מתחיל קריאה של ${todo.length} חודשים עבור ${active.length} כרטיסים`});
+  {const already=Object.values(haveMonths).reduce((s,v)=>s+v.size,0);
+   await chrome.storage.local.set({syncStatus:already
+     ?`ישראכרט: ${already} צירופי כרטיס־חודש כבר שמורים ויידולגו — קורא ${todo.length} חודשים עבור ${active.length} כרטיסים`
+     :`ישראכרט: מתחיל קריאה של ${todo.length} חודשים עבור ${active.length} כרטיסים`});}
     // הגלגל גם בטעינת השנה, לא רק בסנכרון הרגיל. כל צעד = כרטיס בחודש.
   await beginProgress(todo.length*Math.max(1,active.length));
   // ⚠ 18.08.2026 — 8 כרטיסים × 12 חודשים = 96 דפים, וכל דף מחויב בשהייה של 4 שניות.
@@ -785,7 +788,12 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   // מחיר החודשים שאינם קיימים. עכשיו הידע הזה מזריע את הסריקה מראש.
   const knownSince=(await chrome.storage.local.get({isracardActiveSince:{}})).isracardActiveSince||{};
   const ord=m=>{const v=String(m||'').replace(/\D/g,'');return v.length===6?Number(v.slice(2)+v.slice(0,2)):0};
-  let done=0,failed=[],oldestLoaded={},inactiveBefore=new Set(),streak=0,disconnected=false,preSkipped=0;
+  let done=0,failed=[],oldestLoaded={},inactiveBefore=new Set(),streak=0,disconnected=false,preSkipped=0,cardSkipped=0;
+  // ⚠ נקרא **פעם אחת** לפני הלולאה: `cardHistStats` סורק את כל המסד, ובתוך
+  // לולאה של 12×8 זה היה 96 סריקות.
+  const haveMonths={};
+  if(onlyMissing){const stats=await cardHistStats().catch(()=>({}));
+    for(const c of active)haveMonths[String(c.suffix)]=new Set(stats[String(c.suffix)]?.months||[]);}
   for(const month of todo){
     const out=[];
     for(let i=0;i<active.length;i++){
@@ -796,6 +804,13 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
       if(inactiveBefore.has(String(card.suffix)))continue;
       // כרטיס שכבר ידוע כפעיל רק מחודש מסוים — אין טעם לבקש חודשים שקדמו לו.
       if(knownSince[String(card.suffix)]&&ord(month)<ord(knownSince[String(card.suffix)])){preSkipped++;continue}
+      // ⚠⚠ 27.08.2026 — טל: „עושה סנכרון לכל הכרטיסים, הוא אמור לדלג על כל
+      // הכרטיסים שכבר סונכרנו." **נמדד:** הצ׳קבוקס „השלם חסרים בלבד" כבר מסומן
+      // כברירת מחדל — אבל הדילוג היה **ברמת חודש בלבד**:
+      //   todo=wanted.filter(month=>!active.every(c=>…includes(month)))
+      // כלומר חודש שחסר **לכרטיס אחד** נקרא מחדש **לכל שמונת הכרטיסים**.
+      // מכאן „סורק הכול" למרות שכמעט הכול שמור. **הדילוג עובר לרמת כרטיס.**
+      if(onlyMissing&&(haveMonths[String(card.suffix)]||new Set()).has(month)){cardSkipped++;continue}
       const pageStarted=Date.now();let pageOk=false;
       await syncStep(`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`,`כרטיס ${card.suffix} · ${String(month).slice(0,2)}/${String(month).slice(2)}`);
       try{
@@ -834,7 +849,7 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   await chrome.storage.local.set({syncStatus:disconnected
     ?`ישראכרט ניתק את הסשן — נשמרו ${done} חודשים ונעצרנו. התחבר שוב ולחץ על טעינת השנה; מה שנשמר נשאר.`
     :`היסטוריית כרטיסים: נטענו ${done} חודשים${failed.length?`, נכשלו ${failed.join(', ')}`:''}`});
-  return{ok:true,loaded:done,failed,disconnected};
+  return{ok:true,loaded:done,failed,disconnected,cardSkipped,preSkipped};
   }finally{isracardHistoryBusy=false;await restoreSyncTabs()}
 }
 async function syncSelected(selectionKeys){

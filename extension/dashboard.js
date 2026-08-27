@@ -239,6 +239,8 @@ async function renderCardMonthPicker(){
         const r=await chrome.runtime.sendMessage({type:'LOAD_CARD_YEAR',months:12,suffixes:pick?[pick]:[],onlyMissing});
         y.disabled=false;y.textContent=yt;
         if(!r?.ok)return toast(r?.error||'טעינת השנה נכשלה');
+        // ⚠ „נטענו 3 חודשים" בלי להזכיר שדולגו 90 נראה כמו כישלון. אומרים את שניהם.
+        if(r.cardSkipped)toast(`נטענו ${r.loaded} חודשים · דולגו ${r.cardSkipped} צירופי כרטיס־חודש ששמורים כבר`);
         toast(r.disconnected?`ישראכרט ניתק את הסשן — נשמרו ${r.loaded} חודשים. התחבר ולחץ שוב.`:r.skipped?`כל ${r.skipped} החודשים כבר שמורים — לא נדרשה קריאה`:r.loaded?`נטענו ${r.loaded} חודשים`:'כל החודשים כבר היו שמורים');
         return renderAllCards()}
       const b=e.target.closest('#loadCardMonth');if(!b)return;
