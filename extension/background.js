@@ -102,6 +102,80 @@ chrome.storage.onChanged.addListener((changes,area)=>{
   paintBadge(changes.syncStatus.newValue);
 });
 chrome.storage.local.get({syncStatus:''}).then(x=>paintBadge(x.syncStatus));
+
+// ⚠⚠ 27.08.2026 — טל: „למה מופיעים כרטיסי אשראי לא מזוהים? אם יש סנכרון בבנק
+// עם הכרטיסים שלו הם צריכים להיות משויכים." **נמדד, לא נוחש:** השיוך רץ **רק
+// בתוך סנכרון המנפיק** (ישראכרט/כאל/MAX), ולכן הוא תלוי-סדר. ישראכרט רץ
+// 25.08 17:47Z, ודיסקונט פרטי **48 דקות אחריו** (18:35Z). שלושה חיובי
+// „ישראכרט חיוב" ב-10/08/26 — 2,535.32 · 2,585.28 · 853.98 — מזהים שלושה
+// כרטיסים חד-ערכית, אבל בזמן ריצת ישראכרט הם עוד לא היו באחסון,
+// **ואיש לא חזר לבדוק.** מכאן: השיוך חייב לרוץ גם אחרי סנכרון בנק.
+const cardDigits=v=>String(v||'').replace(/\D/g,'');
+// יום/חודש מתוך תאריך בנק, בשני הפורמטים שנמדדו: „10.08.2026" (לאומי) ו„10/08/26" (דיסקונט).
+function dayMonthOf(v){const m=String(v||'').match(/(\d{1,2})[.\/-](\d{1,2})/);return m?[Number(m[1]),Number(m[2])]:null}
+// ⚠ תאריך החיוב הקודם נגזר **מן הכרטיס** — `previousChargeMonth` („08.2026")
+// ו-`chargeDate` („10.9", היום בחודש). הקוד הישן חיפש `10[./-]0?8` **קבוע בקוד**,
+// כלומר היה מפסיק לעבוד ב-1 בספטמבר. זה נמדד: כל שבעת הכרטיסים chargeDate="10.9".
+function previousChargeDayMonth(card){
+  const day=Number((String(card.chargeDate||'').match(/^\s*(\d{1,2})/)||[])[1]||10);
+  const month=Number((String(card.previousChargeMonth||'').match(/^\s*(\d{1,2})/)||[])[1]||0);
+  return month?[day,month]:null;
+}
+// ארבעה מסלולי שיוך, מהחזק לחלש. **מקור אמת אחד** — הלקח על שלושת העותקים ביהב.
+function accountForCard(accounts,card,savedId){
+  const same=c=>cardDigits(c.suffix).endsWith(cardDigits(card.suffix));
+  let target=accounts.find(a=>(a.cards||[]).some(same));                       // הבנק כבר מכיר את הכרטיס
+  if(!target&&savedId)target=accounts.find(a=>a.id===savedId);                 // שיוך ידני שנשמר
+  if(!target&&card.debitAccount){                                             // חשבון החיוב שהמנפיק מדווח (כאל/MAX)
+    const wanted=cardDigits(card.debitAccount);
+    const m=accounts.filter(a=>wanted.endsWith(cardDigits(a.accountNumber))||cardDigits(a.accountNumber).endsWith(wanted));
+    if(m.length===1)target=m[0];
+  }
+  const when=previousChargeDayMonth(card);
+  if(!target&&when&&card.previousCharge>0){                                    // חיוב בסכום ובתאריך של הכרטיס
+    const m=accounts.filter(a=>(a.transactions||[]).some(t=>{
+      const dm=dayMonthOf(t.date||t.valueDate||t.transactionDate);
+      if(!dm||dm[0]!==when[0]||dm[1]!==when[1])return false;
+      const amount=Number(t.amount??t.debit??t.credit??0);
+      return Math.abs(Math.abs(amount)-card.previousCharge)<.02;
+    }));
+    if(m.length===1)target=m[0];                                              // ⚠ חד-ערכי בלבד; שניים = לא יודעים
+  }
+  return target||null;
+}
+let reconcileBusy=false;
+async function reconcileUnassignedCards(){
+  if(reconcileBusy)return 0;
+  reconcileBusy=true;
+  try{
+    const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{}});
+    const accounts=(st.accounts||[]).map(a=>({...a,cards:[...(a.cards||[])]}));
+    const patch={};let moved=0;
+    for(const key of ['isracardUnassigned','calUnassigned','maxUnassigned']){
+      const list=st[key]||[],left=[];
+      for(const card of list){
+        const savedId=key==='isracardUnassigned'?(st.isracardAssignments||{})[card.suffix]:null;
+        const target=accountForCard(accounts,card,savedId);
+        if(!target){left.push(card);continue}
+        const i=target.cards.findIndex(c=>cardDigits(c.suffix).endsWith(cardDigits(card.suffix)));
+        if(i>=0)target.cards[i]={...target.cards[i],...card};else target.cards.push(card);
+        moved++;
+      }
+      if(left.length!==list.length)patch[key]=left;
+    }
+    if(!moved)return 0;
+    patch.accounts=accounts;
+    await chrome.storage.local.set(patch);
+    return moved;
+  }finally{reconcileBusy=false}
+}
+chrome.storage.onChanged.addListener((changes,area)=>{
+  // ⚠ רק על `accounts`. הכתיבה שלנו מדליקה את המאזין שוב — וזה בסדר: בסבב
+  // השני אין מועמדים, `moved=0`, ואין כתיבה. ההתכנסות היא התנאי, לא הדגל.
+  if(area!=='local'||!changes.accounts)return;
+  reconcileUnassignedCards().catch(()=>{});
+});
+reconcileUnassignedCards().catch(()=>{});
 const SOURCES={
   business:{label:'פועלים עסקי',host:'biz2.bankhapoalim.co.il',root:'https://biz2.bankhapoalim.co.il/ng-portals/biz/he',login:'https://biz2.bankhapoalim.co.il/ng-portals/auth/he/biz-login/authenticate',portal:'/ng-portals/biz/'},
   private:{label:'פועלים פרטי',host:'login.bankhapoalim.co.il',root:'https://login.bankhapoalim.co.il/ng-portals/rb/he',login:'https://login.bankhapoalim.co.il/ng-portals/auth/he/',portal:'/ng-portals/rb/'}
@@ -1341,8 +1415,7 @@ const nowDate=new Date(),previous=new Date(nowDate.getFullYear(),nowDate.getMont
 await endProgress();
 const state=await chrome.storage.local.get({accounts:[],isracardAssignments:{}}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),assigned=[],unassigned=[];
 const normalized=v=>String(v||'').replace(/\D/g,'');
-for(const card of details){let target=accounts.find(a=>(a.cards||[]).some(c=>normalized(c.suffix).endsWith(card.suffix)));const savedId=state.isracardAssignments[card.suffix];if(!target&&savedId)target=accounts.find(a=>a.id===savedId);
-if(!target&&card.previousCharge>0){const candidates=accounts.filter(a=>(a.transactions||[]).some(t=>{const date=String(t.date||t.valueDate||t.transactionDate||''),bankAmount=Number(t.amount??t.debit??t.credit??0);return /(^|\D)10[.\/-]0?8(?:[.\/-]|$)/.test(date)&&Math.abs(Math.abs(bankAmount)-card.previousCharge)<.02}));if(candidates.length===1)target=candidates[0]}
+for(const card of details){const target=accountForCard(accounts,card,state.isracardAssignments[card.suffix]);
 if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>normalized(c.suffix).endsWith(card.suffix));if(index>=0){const old=target.cards[index];target.cards[index]={...old,...card,transactions:old.transactions?.length?old.transactions:card.transactions}}else target.cards.push(card);assigned.push({suffix:card.suffix,accountId:target.id})}
 const now=new Date().toISOString();// כל סנכרון רגיל נשמר גם כחודש בהיסטוריה — כך היא נבנית מעצמה מהיום ואילך.
 try{await storeCardMonth(mmYYYY(new Date()),details)}catch(e){}
