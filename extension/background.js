@@ -242,7 +242,11 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(m?.type==='START_CAL'){startCal(m.suffix).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='START_MAX'){startMax(m.suffix).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='YAHAV_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingYahav:false}).then(x=>{if(x.pendingYahav)runYahav(t).catch(()=>{});else maybeAutoRun('yahav','יהב',runYahav,t).catch(()=>{})});reply({ok:true});return}
-  if(m?.type==='MIZRAHI_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingMizrahi:false}).then(x=>{if(x.pendingMizrahi)runMizrahi(t).catch(()=>{});else maybeAutoRun('mizrahi','מזרחי־טפחות',runMizrahi,t).catch(()=>{})});reply({ok:true});return}
+  // ⚠ 27.08.2026 — „דף רגיל, לא מוקטן, לא מסתנכרן ברקע". המסלול הזה לא קרא ל-returnToDashboard,
+  // והקישור הגנרי של AUTHENTICATED מת עבור מזרחי: sourceFromUrl מכיר רק את
+  // פועלים ומחזיר null, ואז userAskedFor('') מחזיר false. startMizrahi כן קורא לו —
+  // אבל רק בענף „לשונית קיימת", וכניסה דרך התחברות אינה עוברת שם.
+  if(m?.type==='MIZRAHI_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;const bgRun=async id=>{await returnToDashboard(id,true);await runMizrahi(id)};chrome.storage.local.get({pendingMizrahi:false}).then(x=>{if(x.pendingMizrahi)bgRun(t).catch(()=>{});else maybeAutoRun('mizrahi','מזרחי־טפחות',bgRun,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='MIZRAHI_FRAME_REPORT'&&sender.tab?.id){const old=mizrahiFrameData.get(sender.tab.id)||{transactions:[],loans:[]};mizrahiFrameData.set(sender.tab.id,{transactions:Array.isArray(m.transactions)&&m.transactions.length?m.transactions:old.transactions,loans:Array.isArray(m.loans)&&m.loans.length?m.loans:old.loans});reply({ok:true});return}
   if(m?.type==='DISCOUNT_AUTHENTICATED'&&sender.tab?.id){const privateSite=String(sender.tab.url||'').includes('/retail3/'),source=privateSite?'discount-private':'discount-business',label=privateSite?'דיסקונט פרטי':'דיסקונט עסקי';chrome.storage.local.get({pendingDiscountBusiness:false,pendingDiscountPrivate:false}).then(x=>{if(privateSite?!x.pendingDiscountPrivate:!x.pendingDiscountBusiness)maybeAutoSync(source,label,sender.tab.id).catch(()=>{})});handleDiscountAuthenticated(sender.tab.id).catch(()=>{});reply({ok:true});return}
   // ⚠ 18.08.2026 — צילום שנשמר רק בסוף האצווה אבד כולו כשהאצווה חרגה מהתקרה.
@@ -1230,7 +1234,10 @@ async function setMizrahiRange(tabId){
     const monthsOf=t=>{const mm=t.match(/(\d{1,2})\s*חודשים/);if(mm)return Number(mm[1]);
       if(/חודש\s*אחרון/.test(t))return 1;
       if(/שנתיים/.test(t))return 24;
-      if(/(שנה|שנתי)\s*(אחרונה|אחרון)?/.test(t))return 12;return null};
+      /* ⚠ נמדד 27.08: „שנתי" תפס את הקישור „ת.ז בנקאית - דו''ח שנתי"
+         במסגרת legacy — ולחצנו על דוח שנתי במקום על בורר טווח.
+         האפשרויות האמיתיות שנמדדו: „3 חודשים אחרונים" ו„שנה אחורה". */
+      if(/(^|[^א-ת])[הבמלו]?שנה([^א-ת]|$)/.test(t))return 12;return null};
     const need=wantMs?Math.max(1,Math.ceil((Date.now()-wantMs)/(30.4375*864e5))):3;
     /* ⚠ עלים בלבד. הלקח מהבורר של דיסקונט: סלקטור שמאחד רמות
        תופס גם את המכל וגם את הכפתור שבתוכו, והתוצאה כפולה. */
