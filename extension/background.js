@@ -1155,8 +1155,16 @@ async function fibiSetRangeMain(tabId,sinceMs){
   if(!sinceMs)return{ok:false,error:'לא הוגדרה תחילת איסוף'};
   const f=new Date(sinceMs),t=new Date(),p=n=>String(n).padStart(2,'0');
   let results=[];
-  try{
-    results=await chrome.scripting.executeScript({
+  // ⚠⚠ 27.08 — הריצה הראשונה של 1.20.0 החזירה „לא נמצאה מסגרת עם לשונית
+  // טווח התאריכים", ומסלול הנפילה מדד `rows:0` — כלומר **מסגרת הלגסי הייתה
+  // ריקה**, לא חסרה. `syncFibi` ממתין `delay(2200)` **קבוע** אחרי הניווט,
+  // וזה ניחוש. טל דיווח שהלשונית כן נבחרה — כלומר הדף עלה, רק מאוחר יותר.
+  // ⚠ **ממתינים למה שצריך להיות שם, לא למספר שניות.** גבול שעון־קיר, וניסיון
+  // חוזר עד שמסגרת כלשהי מחזירה תשובה. אותו לקח שכבר נרשם ב-1.12.1.
+  const deadline=Date.now()+25000;let attempts=0,waited=0;
+  const runOnce=async()=>{
+    attempts++;
+    try{ return await chrome.scripting.executeScript({
       target:{tabId,allFrames:true},world:'MAIN',
       args:[String(f.getFullYear()),p(f.getMonth()+1),p(f.getDate()),
             String(t.getFullYear()),p(t.getMonth()+1),p(t.getDate())],
@@ -1195,9 +1203,17 @@ async function fibiSetRangeMain(tabId,sinceMs){
             from:document.querySelector('#fromDate')?.value||'',till:document.querySelector('#tillDate')?.value||''},
           url:String(location.href).slice(0,110)};
       }});
-  }catch(e){return{ok:false,error:String(e&&e.message||e).slice(0,140)}}
-  const hit=results.map(r=>r&&r.result).find(Boolean);
-  return hit||{ok:false,error:'לא נמצאה מסגרת עם לשונית טווח התאריכים'};
+    }catch(e){return[{result:{ok:false,error:String(e&&e.message||e).slice(0,140)}}]}
+  };
+  while(Date.now()<deadline){
+    results=await runOnce();
+    const hit=results.map(r=>r&&r.result).find(Boolean);
+    // ⚠ „נמצאה מסגרת ופעלנו" מול „המסגרת עדיין ריקה" — רק הראשון עוצר את הלולאה.
+    if(hit&&hit.ok!==false)return{...hit,attempts,waitedMs:waited};
+    if(hit&&hit.error&&!/לא נמצאה/.test(String(hit.error)))return{...hit,attempts,waitedMs:waited};
+    await new Promise(r=>setTimeout(r,1200));waited+=1200;
+  }
+  return{ok:false,error:'מסגרת התנועות לא נטענה בזמן',attempts,waitedMs:waited};
 }
 async function probeAllFrames(tabId){
   let frames=[];
