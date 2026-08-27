@@ -61,7 +61,7 @@ async function extractSelected(keys,sinceMs){
     // ⚠ בתוך הלולאה ולא לפניה: מעבר חשבון טוען את הטבלה מחדש, ולא ידוע
     // אם התקופה נשמרת בין חשבונות. קביעה לכל חשבון נכונה בשני המקרים.
     const period=await setPeriod(sinceMs);
-    const rows=extractTransactions();
+    const rows=extractTransactions(sinceMs);
     const label=chooser.textContent.replace(/\s+/g,' ').trim();accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,balanceMissing:balance===null,transactions:rows,txProbe:rows.length?'':txFingerprint(),periodProbe:period});
   }
   return accounts;
@@ -245,7 +245,7 @@ function txFingerprint(){
 // בעוד הדף מציג אותן. הכותרות נמדדו מצילום של הדף: תאריך | הפעולה | חובה | זכות | יתרה בש"ח.
 // ⚠ מיפוי לפי טקסט הכותרת ולא לפי היסט קבוע — הדפוס שכבר מוכח בלאומי. היסט קבוע
 // נשבר ברגע שהבנק מוסיף עמודת אייקון, וכאן יש כאלה.
-function gridTransactions(){
+function gridTransactions(sinceMs){
   const t=s=>String(s||'').replace(/[‎‏‪-‮]/g,'').replace(/\s+/g,' ').trim();
   const rows=[...document.querySelectorAll('[role="row"]')];
   const headRow=rows.find(r=>r.querySelector('[role="columnheader"]'));
@@ -265,9 +265,19 @@ function gridTransactions(){
       debit:iDebit<0?null:parseMoney(cells[iDebit]),credit:iCredit<0?null:parseMoney(cells[iCredit]),
       balance:parseMoney(cells[iBal])});
   }
-  return out.slice(0,100);
+  return capBySince(out,sinceMs);
 }
-function extractTransactions() {
+// ⚠⚠ 27.08.2026 — טל: לא ירדו כל התנועות מינואר; חשבון אחד ממאי והשני מיולי.
+// **נמדד:** בורר התקופה עבד — 648 שורות ב-645-690300 ו-1020 ב-645-690309 —
+// אבל שני המקומות שקוראים שורות חתכו ב-slice(0,100) **קבוע**. 100 השורות
+// האחרונות מגיעות עד 05/05 בחשבון הדליל ועד 03/07 בצפוף — בדיוק מה שטל ראה.
+// **מספר קבוע אינו טווח תאריכים.** הגבול נגזר מ-collectSince, כמו בשאר המתאמים,
+// והתקרה שנשארת היא רשת ביטחון בלבד ולא מדיניות.
+function capBySince(rows,sinceMs){
+  const keep=!sinceMs?rows:rows.filter(r=>{const n=toDateNumber(r.date);return !n||n>=sinceMs});
+  return keep.slice(0,5000);
+}
+function extractTransactions(sinceMs) {
   const table = [...document.querySelectorAll('table')].find(t => /תאריך/.test(t.innerText) && /(חובה|זכות)/.test(t.innerText));
   if (!table) return gridTransactions();
   const fromTable = [...table.querySelectorAll('tbody tr, [role="rowgroup"] [role="row"]')].map(row => {
@@ -283,9 +293,9 @@ function extractTransactions() {
       credit: parseMoney(cells[cells.length - 2]),
       balance: parseMoney(cells[cells.length - 1])
     };
-  }).filter(Boolean).slice(0, 100);
+  }).filter(Boolean);
   // טבלה שנמצאה אך לא הניבה שורות — עדיין ייתכן שהנתונים ברשת role שלצידה.
-  return fromTable.length ? fromTable : gridTransactions();
+  return fromTable.length ? capBySince(fromTable,sinceMs) : gridTransactions(sinceMs);
 }
 
 function findByTextOrAria(text, selector) {
