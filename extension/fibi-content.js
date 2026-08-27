@@ -70,17 +70,43 @@ async function setRange(sinceMs){
   // שהמסגרת נוּוטה.
   const set=(el,v)=>{if(!el)return false;el.value=v;
     for(const ev of ['input','change','blur'])el.dispatchEvent(new Event(ev,{bubbles:true}));return true};
-  const fromStr=dmy(new Date(sinceMs)),tillStr=dmy(new Date()),d2=fdoc();
-  const wrote={fromDate:set(d2?.querySelector('#fromDate'),fromStr),
-    tillDate:set(d2?.querySelector('#tillDate'),tillStr),
-    // ⚠ הנסתרים נמדדו ריקים וייתכן שהם מה שנשלח בפועל, ולכן נכתבים גם הם.
-    hiddenFrom:set(d2?.querySelector('#FromdateValue'),fromStr),
-    hiddenTo:set(d2?.querySelector('#toDateValue'),tillStr)};
-  // ⚠ „הצג" נמדד כטקסט בלבד ולא כאלמנט. מחפשים בשלוש צורות, **ומדווחים כל
-  // מועמד** כדי שכשל ייסגר בקריאה אחת ולא בעוד סבב.
-  const cands=[...(d2?.querySelectorAll('input[type="submit"],input[type="button"],button,a')||[])]
+  const fromStr=dmy(new Date(sinceMs)),tillStr=dmy(new Date());
+  const writeDates=()=>{const d=fdoc();return{fromDate:set(d?.querySelector('#fromDate'),fromStr),
+    tillDate:set(d?.querySelector('#tillDate'),tillStr),
+    hiddenFrom:set(d?.querySelector('#FromdateValue'),fromStr),
+    hiddenTo:set(d?.querySelector('#toDateValue'),tillStr)}};
+  // ⚠⚠ נמדד בריצה החיה 27.08: נכתב 01/01/2026, וב-`after.from` חזר **01/08/2026**.
+  // כלומר הלשונית מאתחלת את השדה לתחילת החודש **אחרי** הכתיבה — הלולאה
+  // הקודמת יצאה מיד כי `#fromDate` היה בדף עוד לפני הלחיצה, ולכן לא המתינה
+  // כלל. **כותבים, מוודאים שהערך נדבק, וכותבים שוב עד שהוא נדבק.**
+  let wrote=writeDates(),rewrites=0;
+  // ⚠ הלולאה **אינה** יוצאת ברגע שהערך נכון: נמדד שהאתחול מגיע מאוחר, ויציאה
+  // מוקדמת הייתה מחזירה „נכתב" בעוד הדף דורס אחר כך. לכן חלון קבוע שבו כל
+  // סטייה נכתבת מחדש — נתפס בבדיקה, שבה `rewrites` נשאר 0 והשדה נדרס.
+  const stick=Date.now()+3000;
+  while(Date.now()<stick){await nap(400);if(val('fromDate')!==fromStr){wrote=writeDates();rewrites++}}
+  const fromAfterWrite=val('fromDate');
+  // ⚠⚠ ובעיה שנייה מאותו דוח: **יש שני כפתורי „הצג"**. הרשימה שנמדדה מתחילה
+  // ב„הצג" **לפני** שמות הלשוניות — הוא שייך לבורר „סוג חשבון" בראש הדף —
+  // והשני, שאחרי הלשוניות, הוא של פאנל הטווח. `find` הראשון בחר את הלא נכון.
+  // לכן מחפשים כפתור **בתוך המכל שמכיל את `#fromDate`**, ורק אם אין — נופלים
+  // לחיפוש הגורף.
+  const scoped=(()=>{let n=fdoc()?.querySelector('#fromDate');
+    for(let i=0;i<8&&n;i++,n=n.parentElement){
+      const hit=[...(n.querySelectorAll?.('input[type="submit"],input[type="button"],button,a')||[])]
+        .map(el=>({el,t:clean(el.value||el.textContent)}))
+        .find(x=>/^(הצג|חפש|אישור|עדכן)$/.test(x.t));
+      if(hit)return hit;
+    }
+    return null})();
+  const cands=[...(fdoc()?.querySelectorAll('input[type="submit"],input[type="button"],button,a')||[])]
     .map(el=>({el,t:clean(el.value||el.textContent)}));
-  const show=cands.find(x=>/^הצג$/.test(x.t))||cands.find(x=>/^(הצג|חפש|אישור|עדכן)/.test(x.t));
+  const show=scoped||cands.find(x=>/^הצג$/.test(x.t))||cands.find(x=>/^(הצג|חפש|אישור|עדכן)/.test(x.t));
+  // ⚠⚠ הכרעה: **כותבים שוב מיד לפני הלחיצה.** לולאה מבוססת-זמן אינה אמינה —
+  // בבדיקה היא לא תפסה אתחול מאוחר (`rewrites:0` והשדה נדרס), והתזמון תלוי
+  // בוויסות טיימרים. הרגע היחיד שחשוב הוא רגע השיגור, ולכן כותבים בו.
+  wrote=writeDates();
+  const fromAtClick=val('fromDate');
   if(show)show.el.click();
   // ⚠ ההמתנה נשענת על **שני** סימנים ולא על אחד: התאריך המוקדם השתנה, **או**
   // מספר השורות השתנה. בבדיקה `earliest()` חזר ריק בסביבה מלאכותית, וקריאה
@@ -93,7 +119,7 @@ async function setRange(sinceMs){
     await nap(400);
   }
   await nap(800);
-  return{applied:true,tab:tab.t,wrote,from:fromStr,till:tillStr,
+  return{applied:true,tab:tab.t,wrote,rewrites,fromAfterWrite,fromAtClick,scoped:!!scoped,from:fromStr,till:tillStr,
     clicked:show?show.t:'',buttons:cands.map(x=>x.t).filter(Boolean).slice(0,14),
     before,after:{rows:rowsNow(),earliest:earliest(),from:val('fromDate'),till:val('tillDate')}};
 }
