@@ -123,8 +123,17 @@ const LABELS=['מסגרת אשראי','מסגרת עו״ש','מסגרת מאוש
   }
   if(!res){await report(false,'לא נמצא יום לבחירה');return false}
   const exactHit=!!(got&&wantMonth&&got.d===wantDay&&got.m===wantMonth&&got.y===wantYear);
-  await report(true,exactHit?'הוחל':'הוחל בקירוב',
-    {chose:res.chose,value:input.value||'',attempts,cells:res.sample,
+  // ⚠⚠ 27.08.2026 — הריצה החזירה `cells:[27,28]`, כלומר **בלוח כולו היו שני
+  // ימים בני-בחירה בלבד**, ונבחר המוקדם שבהם: 27/02/2026. זה מתיישב בדיוק
+  // עם מה שנמדד כבר ב-25.08 — **ביהב יש נתונים כחצי שנה אחורה בלבד** —
+  // ו-27/08 פחות שישה חודשים הוא 27/02. כלומר **זו מגבלת הבנק ולא באג:**
+  // ינואר אינו זמין ביהב, והבורר עצמו חוסם אותו.
+  // ⚠ ההבחנה חשובה: „לא הצלחנו" ו„אי אפשר" נראים אותו דבר בלוג ומחייבים
+  // טיפול הפוך. לכן מדווח `limited` מפורש, והדשבורד יאמר מה הגבול.
+  const limited=!!(got&&wantMonth&&!exactHit&&
+    (got.y*12+got.m)>(wantYear*12+wantMonth));
+  await report(true,exactHit?'הוחל':(limited?'הוחל — הבנק מגביל':'הוחל בקירוב'),
+    {chose:res.chose,value:input.value||'',attempts,cells:res.sample,limited,earliest:input.value||'',
      wanted:valid?`${String(wantDay).padStart(2,'0')}/${String(wantMonth).padStart(2,'0')}/${wantYear}`:''});
   return true};
   chrome.runtime.onMessage.addListener((m,s,r)=>{if(m?.type==='YAHAV_READ'){r({ok:true,account:account(),owner:owner(),transactions:transactions(),loans:loans(),detail:detail(),summary:summary(),text:body()});return}if(m?.type==='YAHAV_SET_3_MONTHS'){setRangeFrom().then(ok=>r({ok}));return true}if(m?.type==='PING')r({ok:true})});

@@ -90,7 +90,14 @@ async function runYahav(tabId){
     try{range=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'YAHAV_SET_3_MONTHS'}),30000,'הגדרת טווח התאריכים')}catch(e){range={ok:false,error:e.message}}
     {
       const diags=(await chrome.storage.local.get({bankDiagnostics:{}})).bankDiagnostics||{};
-      if(range?.ok)delete diags.yahav;else diags.yahav='טווח 3 חודשים לא נקבע — נקראה התקופה שהדף הציג';
+      // ⚠⚠ 27.08 — „הצליח" ביהב אינו בהכרח „הגיע לינואר": הבורר עצמו חוסם
+      // מעבר לכחצי שנה אחורה (נמדד `cells:[27,28]` — שני ימים בני-בחירה בלבד).
+      // **מגבלת בנק אינה תקלה, אבל היא כן צריכה להיאמר** — אחרת טל רואה
+      // „הסתיים בהצלחה" ותוהה למה אין ינואר.
+      const rep=(await chrome.storage.local.get({yahavRangeApplied:null})).yahavRangeApplied;
+      if(!range?.ok)diags.yahav='טווח 3 חודשים לא נקבע — נקראה התקופה שהדף הציג';
+      else if(rep&&rep.limited)diags.yahav=`יהב מאפשר לחזור עד ${rep.value||'?'} בלבד — התנועות נקראו מהתאריך הזה ולא מ-${rep.wanted||'?'}`;
+      else delete diags.yahav;
       await chrome.storage.local.set({bankDiagnostics:diags});
     }
     await delay(2800);
