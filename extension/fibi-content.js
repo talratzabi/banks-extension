@@ -304,7 +304,11 @@ function newTransactions(){
   // התאריך הנראים, ובלבוש אחר.
   // ⚠ במסך החדש שני הערכים גלויים בכותרת ונמדדו בגשש:
   //   „יתרה עדכנית 10,610.19₪  יתרה למשיכה 13,610.19₪"
-  const head=T(document.body).slice(0,600);
+  // ⚠⚠ 27.08 — הריצה החזירה `creditLimit:null` שוב. **הסיבה מדידה:** חיפשתי
+  // ב-600 התווים הראשונים, ושם יושב תפריט הנגישות והניווט —
+  //   „דלג לתפריט הנגישות … 062-206601 כ. אחרונה … החשבון שלי ניהול חשבון …"
+  // והיתרות מופיעות **אחריו**. סורקים את כל טקסט הדף, עם תקרה כרשת ביטחון.
+  const head=T(document.body).slice(0,20000);
   const num=re=>{const m=head.match(re);if(!m)return null;
     const v=Number(String(m[1]).replace(/,/g,''));return Number.isFinite(v)?v:null};
   const balance=num(/יתרה\s*עדכנית\s*(-?[\d,]+\.?\d*)/);
