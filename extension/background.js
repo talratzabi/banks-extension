@@ -979,6 +979,11 @@ async function syncFibi(tabId){
     await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnLoansMortgageMenu/OnLoans/AuthLoansDetails'});await delay(2200);
     const loanResult=await fibiRead(tabId,'FIBI_LOANS','קריאת פירוט ההלוואות');loanResult.data.loans=await enrichFibiInstallments(tabId,loanResult.data.loans||[]);
     await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnAccountMngment/OnBalanceTrans/PrivateAccountFlow'});await delay(2200);
+    // ⚠ מדידה בלבד, לפני הקריאה. `fibi-content.js` אינו מזכיר `collectSince`
+    // אף פעם (grep → 0), כלומר לבינלאומי אין טווח תאריכים בכלל — אותו מחדל
+    // שהיה בפועלים. **לא נכתב כאן שום סלקטור** לפני שנדע מה יש בדף ובמסגרת.
+    try{const frames=await probeAllFrames(tabId);
+      await chrome.storage.local.set({fibiTxProbe:{at:new Date().toISOString(),frames}})}catch(e){}
     const t=await fibiRead(tabId,'FIBI_TRANSACTIONS','קריאת תנועות הבינלאומי');
     const now=new Date().toISOString(),source=state.pendingFibiSlot,label=`הבינלאומי — ${owner.firstName||t.data.accountNumber}`;
     const bankNumber=v=>String(v??'').replace(/\D/g,'').replace(/^0+(?=\d)/,'');
@@ -1108,6 +1113,27 @@ const leumiSession=tabs=>tabs.filter(t=>!/\/H\/Login\.html/i.test(t.url||''));
 function leumiTab(tabs){return tabs.find(t=>t.url?.includes('/digitalfront/'))||tabs[0]}
 // מדידה של הלשונית הפעילה, לצורך כתיבת מתאם לבנק חדש. קריאה בלבד: אין לחיצות,
 // אין ניווט, ואין שינוי מצב באתר. הצילום נשמר ל-bankProbe ונקרא משם.
+// ⚠⚠ 27.08.2026 — הגשש רץ עד היום על **המסמך העליון בלבד**. בבינלאומי
+// התנועות וההלוואות יושבות בתוך `#iframe-old-pages` (ראה `fibi-content.js`),
+// ולכן `dateControls()` היה מדווח „אין שדות תאריך" על דף שיש בו בורר —
+// **בדיוק סוג התוצאה השלילית-כוזבת שהחזירה אותנו לניחוש ביהב.**
+// ⚠ אין דרך למסר מסגרת אחת עם `sendMessage` רגיל: כמה מסגרות עונות ורק
+// הראשונה נספרת. לכן מונים מסגרות ב-`webNavigation` וממסרים לכל אחת לפי
+// `frameId`. הגשש עצמו לא שונה — הוא כבר מוגן בשומר הזרקה.
+async function probeAllFrames(tabId){
+  let frames=[];
+  try{frames=await chrome.webNavigation.getAllFrames({tabId})||[]}catch(e){frames=[]}
+  if(!frames.length)frames=[{frameId:0,url:''}];
+  const out=[];
+  for(const f of frames.slice(0,12)){
+    try{
+      await chrome.scripting.executeScript({target:{tabId,frameIds:[f.frameId]},files:['probe-content.js']});
+      const r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'BANK_PROBE'},{frameId:f.frameId}),15000,'מדידת מסגרת');
+      if(r?.ok)out.push({frameId:f.frameId,...r.probe});
+    }catch(e){out.push({frameId:f.frameId,url:String(f.url||'').slice(0,120),probeError:String(e?.message||e).slice(0,90)})}
+  }
+  return out;
+}
 async function probeActiveTab(){
   // ⚠ 18.08.2026 — היה כאן {active:true,currentWindow:true}, ולכן הכפתור מדד **את
   // הדשבורד עצמו**: הלחיצה מתבצעת בחלון הדשבורד, ושם הלשונית הפעילה היא הדשבורד.
