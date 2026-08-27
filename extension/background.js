@@ -1497,6 +1497,28 @@ async function noteCardActiveSince(suffix,month){
 // שני אלה חייבים להיות עקביים, אחרת ההלוואה נקראת ולא מוצגת.
 // ⚠ `balance:null` במכוון: סכום ההלוואה **אינו** יתרת חשבון, וסיכום היתרות
 // בדשבורד לא יזייף בגללו (`Number(null)||0`).
+// ⚠⚠ 27.08.2026 — טל: „מכיוון שאין את שיעור הריבית, תצטרך לחשב אותו ביחס
+// להחזר, לשארית התקופה ולערך הנוכחי." **דף BTB אינו מציג ריבית**, אבל היא
+// נגזרת חד-משמעית משלושת אלה: פותרים את נוסחת האנונה
+//     pmt = PV · i / (1 − (1+i)^−n)
+// עבור i בחיפוש בינארי (אין פתרון סגור). מוחזר **נומינלי שנתי (i×12)**,
+// כמקובל בישראל, ולצידו האפקטיבי.
+// ⚠ **מסומן „מחושבת"** — זה נתון שגזרנו ולא נתון שהבנק מסר, והבחנה זו
+// חשובה יותר מהמספר עצמו.
+function annuityRate(pv,pmt,n){
+  pv=Number(pv);pmt=Number(pmt);n=Number(n);
+  if(!Number.isFinite(pv)||!Number.isFinite(pmt)||!Number.isFinite(n))return null;
+  if(pv<=0||pmt<=0||n<=0)return null;
+  // ⚠ אם סך התשלומים אינו עולה על הקרן — אין ריבית חיובית, ואין להמציא אחת.
+  if(pmt*n<=pv)return null;
+  // ⚠ ואם התשלום אינו מכסה אפילו ריבית בגבול העליון — נעצרים ומדווחים null.
+  let lo=0,hi=1;                     // 100% לחודש כגבול עליון בטוח
+  const f=i=>i>0?pv*i/(1-Math.pow(1+i,-n)):pv/n;
+  if(f(hi)<pmt)return null;
+  for(let k=0;k<200;k++){const mid=(lo+hi)/2;if(f(mid)<pmt)lo=mid;else hi=mid}
+  const m=(lo+hi)/2;
+  return{monthly:m,nominal:m*12,effective:Math.pow(1+m,12)-1};
+}
 const BTB_LOGIN='https://auth.btbisrael.co.il/auth/signin/id?appType=borrower&callbackUrl=https%3A%2F%2Fborrowers.btbisrael.co.il%2Fdashboard';
 async function btbTab(){const tabs=await chrome.tabs.query({url:['https://*.btbisrael.co.il/*']});
   return tabs.find(t=>String(t.url||'').includes('borrowers.'))||tabs[0]||null}
@@ -1531,12 +1553,16 @@ async function runBtb(tabId){
     await chrome.storage.local.set({btbProbe:{at:new Date().toISOString(),data:read?.data||null,error:read?.error||''}});
     if(!read?.ok||read.data.balance==null)throw Error(read?.error||'פרטי ההלוואה לא נקראו מדף BTB');
     const d=read.data,number=d.number||'BTB';
+    // ⚠ שארית התקופה = סך התשלומים פחות ששולמו; אם המונה חסר — אין על מה לחשב.
+    const remaining=(d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null;
+    const rate=annuityRate(d.balance,d.nextPayment,remaining);
+    const rateText=rate?`${(rate.nominal*100).toFixed(2)}% מחושבת`:'';
     const loan={type:`הלוואת BTB${d.number?` #${d.number}`:''}`,balance:d.balance,
       originalPrincipal:d.originalPrincipal,startDate:d.startDate,endDate:d.endDate,
-      nextPayment:d.nextPayment,nextPaymentDate:d.nextPaymentDate,interest:'',
+      nextPayment:d.nextPayment,nextPaymentDate:d.nextPaymentDate,interest:rateText,
       // ⚠ הפירעון החד-פעמי נשמר על ההלוואה — הוא מסביר את הפער בין הסכום
       // המקורי ליתרה, ובלעדיו התשלום החודשי נראה בלתי אפשרי.
-      lastPayment:d.lastPayment,lastPaymentDate:d.lastPaymentDate,
+      lastPayment:d.lastPayment,lastPaymentDate:d.lastPaymentDate,      rateComputed:rate?{nominal:rate.nominal,effective:rate.effective,basis:{pv:d.balance,pmt:d.nextPayment,n:remaining}}:null,
       installments:d.totalInstallments||null,totalInstallments:d.totalInstallments||null,
       remainingInstallments:(d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null,
       accountKey:`BTB-${number}`};
