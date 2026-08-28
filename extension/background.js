@@ -1913,6 +1913,17 @@ async function syncLeumi(keys){const tabs=leumiSession(await chrome.tabs.query({
 await clearSourceDiags('leumi');
 const disc=(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts;
 const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)balances[`${a.branch}-${a.accountNumber}`]=a.balance;const tabId=leumiTab(tabs).id,txUrl=LEUMI_TX_URL,loanUrl=LEUMI_LOAN_URL;let r,lastError='',lastDebug=null;
+// ⚠⚠ 28.08.2026 - טל צפה חי: "כשהדף מוצג זה עובר, כשהדף מוקטן זה לא עובר."
+// מזעור = rAF קפוא = רשת התנועות לא נבנית (הלקח המדוד מ-17-18.08, הפעם
+// נצפה בעיניים על המעבר בין חשבונות). שומר: כל 2 שניות, חלון עבודה ממוזער
+// מוחזר ל-normal בלי פוקוס. נעצר לבד אחרי 15 דקות או בסיום התקין.
+const visGuard0=Date.now();
+const visGuard=setInterval(async()=>{try{
+  if(Date.now()-visGuard0>15*60e3)return clearInterval(visGuard);
+  const t=await chrome.tabs.get(tabId),w=await chrome.windows.get(t.windowId);
+  if(w.state==='minimized'){await chrome.windows.update(t.windowId,{state:'normal'});
+    await chrome.storage.local.set({syncStatus:'לאומי: חלון העבודה היה ממוזער והוחזר — מזעור מקפיא את רשת התנועות'});}
+}catch(e){}},2000);
 // WHY 27.08.2026 - "למה הסנכרון של לאומי נורא איטי". במקום להתווכח על
 // ההערכה, כל שלב נמדד ונרשם ל-leumiTiming. הריצה הבאה תענה בעצמה.
 const t0=Date.now();const stageMs={};const stamp=(k,from)=>{stageMs[k]=Date.now()-from};const attempts=[];
@@ -2046,7 +2057,7 @@ await chrome.storage.local.set({leumiTiming:{at:new Date().toISOString(),seconds
 // בדיוק ההבטחה החצאית שתוקנה ב-22.08 בשורת הסטטוס של לאומי.
 const rep=(await chrome.storage.local.get({leumiChequeReport:null})).leumiChequeReport;
 const left=Number(rep?.remaining)||0;
-await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}${left?` — נותרו ${left} צילומים לסנכרון הבא`:''}${missingPay?` · ${missingPay} הלוואות ללא תשלום קרוב (ההרחבה לא נפתחה)`:''}${leumiMissingKeys.length?` ⚠ ${leumiMissingKeys.length} חשבונות לא נקראו הפעם (${leumiMissingKeys.join(', ')}) — נסה שוב`:''}`});return result}
+await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}${left?` — נותרו ${left} צילומים לסנכרון הבא`:''}${missingPay?` · ${missingPay} הלוואות ללא תשלום קרוב (ההרחבה לא נפתחה)`:''}${leumiMissingKeys.length?` ⚠ ${leumiMissingKeys.length} חשבונות לא נקראו הפעם (${leumiMissingKeys.join(', ')}) — נסה שוב`:''}`});clearInterval(visGuard);return result}
 let chequeCtx={base:0,total:0,noRef:0,done:0,selectionKey:'',savedRefs:new Set()};
 let notFoundAll=[];
 // WHY 27.08.2026 - טל: "ואיך מסדרים את זה".
