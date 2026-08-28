@@ -698,10 +698,25 @@ const DELTA_OVERLAP_DAYS=30,DELTA_WIDEN_DAYS=60,DELTA_MAX_WIDEN=4;
 // מפתח שורה משותף לשני העולמות: שורה גולמית מן הדף, ותנועה מפוענחת
 // שכבר שמורה. **היתרה המצטברת חלק מן המפתח** — היא מה שהופך „אותה
 // תנועה" ל„אותו מצב חשבון", וזו כל הבדיקה.
+// ⚠⚠ 28.08.2026 - נמדד בגשש המפתחות (freshKeys הסתיימו כולם ב-"||"):
+// התא המאוחד של 1.42.0 ("סכום ₪ X יתרה מצטברת ₪ Y") שבר את קריאת היתרה
+// **כאן** - money() על הטקסט המאוחד מחזיר NaN - בעוד הקורא הראשי (~441)
+// כבר תוקן. לכן העוגן לא נתפס אף פעם והדלתא ניוונה לקריאה מלאה.
+// העתק מכוון של הלוגיקה מהקורא הראשי (MERGED_CELL/runningBalance חיים
+// בסקופ אחר): תא מאוחד נקרא רק לפי התווית; תא רגיל כמו קודם. כל תיקון
+// עתידי חייב לעבור על שני המקומות.
+function keyBalanceOfCells(cells,col){
+  const v=String(cells[col('יתרה מצטברת',6)]||'');
+  if(/סכום|יתרה\s*מצטברת/.test(v)){
+    for(const c of cells){const m=String(c||'').match(/יתרה\s*מצטברת\s*₪?\s*(-?[\d,]+\.\d{2})/);if(m)return money(m[1])}
+    return null;
+  }
+  return money(v);
+}
 function rowKeyOfCells(cells,col){
   return [cells[col('תאריך',1)]||'',cells[col('אסמכתא',3)]||'',
     money(cells[col('חובה',4)]),money(cells[col('זכות',5)]),
-    money(cells[col('יתרה מצטברת',6)])].join('|');
+    keyBalanceOfCells(cells,col)].join('|');
 }
 const rowKeyOfSaved=r=>[r.date||'',r.reference||'',r.debit,r.credit,r.balance].join('|');
 // ההליכה עצמה, שאומתה חי (9 מקטעים, 196 תנועות): מבקשת מקטע, קוראת,
