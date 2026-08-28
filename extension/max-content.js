@@ -28,7 +28,19 @@ window.__maxSyncLoaded=()=>{try{return !!(__rt__maxSyncLoaded&&__rt__maxSyncLoad
 
 const clean=v=>String(v||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim(),wait=ms=>new Promise(r=>setTimeout(r,ms));
 const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);return m?Number(m[0].replace(/,/g,'')):null};
-function authenticated(){return /(^|\.)max\.co\.il$/.test(location.hostname)&&/היי\s+[^\n(]+\s*\(:|התנתקו/.test(document.body?.innerText||'')}
+// ⚠⚠ 28.08.2026 - "התחברתי והסנכרון לא התחיל": מקס החליפו את הממשק - אין עוד
+// "היי <שם> (:" גלוי (אווטאר במקום ברכה), ו"התנתקו" ירד לתפריט מוסתר. הגלאי
+// הישן נשאר עיוור, והתוסף חיכה להתחברות שכבר קרתה.
+// ⚠ "התנתק" באלמנטים מוסתרים קיים **גם בדף ההתחברות** (נמדד 28.08) - פסול כסימן.
+// המבחן שנמדד משני הצדדים: דפדפן לא מחובר מועף מ-transaction-details ל-/login
+// מיידית; מחובר נשאר. לכן ישיבה בעמוד אישי (או בורר החודשים) = מחובר.
+function authenticated(){
+  if(!/(^|\.)max\.co\.il$/.test(location.hostname))return false;
+  if(/^\/login/.test(location.pathname))return false;
+  if(/היי\s+[^\n(]+\s*\(:|התנתקו/.test(document.body?.innerText||''))return true; // הממשק הישן
+  if(document.querySelector('.combo.dates'))return true; // בורר החודשים - קיים רק בפנים
+  return /^\/transaction-details/.test(location.pathname);
+}
 function report(){if(authenticated())chrome.runtime.sendMessage({type:'MAX_AUTHENTICATED'}).catch(()=>{})}report();setInterval(report,5000);
 function monthKey(){const t=clean(document.querySelector('.combo-text.dates')?.textContent),names={ינואר:'01',פברואר:'02',מרץ:'03',אפריל:'04',מאי:'05',יוני:'06',יולי:'07',אוגוסט:'08',ספטמבר:'09',אוקטובר:'10',נובמבר:'11',דצמבר:'12'},m=t.match(/(ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר)\s+(\d{4})/);return m?`${names[m[1]]}.${m[2]}`:''}
 function rows(){return[...document.querySelectorAll('.row.body')].map(r=>{const date=clean(r.querySelector('.cell.date')?.textContent),merchant=clean(r.querySelector('.cell.name')?.textContent),category=clean(r.querySelector('.cell.category')?.textContent),suffix=clean(r.querySelector('.cell.card-number')?.textContent).replace(/\D/g,'').slice(-4),type=clean(r.querySelector('.cell.type')?.textContent),sumText=clean(r.querySelector('.cell.sum')?.textContent),ils=[...sumText.matchAll(/₪\s*(-?[\d,]+(?:\.\d{1,2})?)/g)],amount=ils.length?Number(ils.at(-1)[1].replace(/,/g,'')):money(sumText);return/^\d{2}\.\d{2}\.\d{2,4}$/.test(date)&&merchant&&Number.isFinite(amount)?{date,merchant,category,suffix,type,amount}:null}).filter(Boolean)}
