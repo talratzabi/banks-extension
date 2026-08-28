@@ -2417,12 +2417,24 @@ async function runCal(tabId,requestedSuffix=''){
       await chrome.tabs.update(tabId,{url:'https://digital-web.cal-online.co.il/transactions'});
     }for(let w=0;w<30;w++){current=await chrome.tabs.get(tabId);if(new URL(current.url).pathname==='/transactions')break;await delay(300)}current=await chrome.tabs.get(tabId);if(new URL(current.url).pathname!=='/transactions')throw Error('דף העסקאות החודשי של כאל לא נפתח');await prepareCal(tabId);await delay(1800);
     const wanted=String(requestedSuffix||'').replace(/\D/g,'').slice(-4),monthly=[],seenMonths=new Set();let previous='';
+    // ⚠ 28.08.2026 - סנכרון מצטבר (טל: "רצינו רק את חודש החיוב הקרוב והקודם").
+    // הניווט בכאל הוא עמוד-אחרי-עמוד, ולכן במקום לדלג - עוצרים: אחרי שהחודש
+    // הנוכחי והקודם נקראו טרי, אם החודש הישן הבא כבר שמור עם עסקאות -
+    // ההיסטוריה שמשם והלאה כבר בידינו. חור עמוק יותר יושלם רק אחרי מחיקתו.
+    const calPrevMonth=k=>{const m=Number(String(k).slice(0,2)),y=Number(String(k).slice(2));return m===1?`12${y-1}`:`${String(m-1).padStart(2,'0')}${y}`};
+    const storedCalMonths=new Set();
+    try{for(const r of await cardHistAll()){const norm=String(r.month||'').replace(/\D/g,'');
+      if(norm.length===6&&(r.transactions||[]).length&&/כאל|cal/i.test(String(r.issuer||''))&&(!wanted||String(r.suffix)===wanted))storedCalMonths.add(norm)}}catch(e){}
     let calEmptyStreak=0;
     for(let i=0;i<12;i++){let page=null,candidate='',stable=0;for(let wait=0;wait<25;wait++){await prepareCal(tabId);try{page=await chrome.tabs.sendMessage(tabId,{type:'CAL_MONTHLY_READ'})}catch{}const ready=page?.ok&&page.month&&!seenMonths.has(page.month)&&page.fingerprint!==previous;if(ready&&page.fingerprint===candidate)stable++;else{candidate=ready?page.fingerprint:'';stable=ready?1:0}if(stable>=3)break;await delay(400)}if(!page?.ok||!page.month||seenMonths.has(page.month)||stable<3)break;if(wanted&&page.suffix&&page.suffix!==wanted)throw Error(`הכרטיס הפעיל בכאל הוא ${page.suffix}, ולא ${wanted}`);const suffix=wanted||page.suffix||home.suffix;if(!suffix)throw Error('מספר הכרטיס הפעיל לא זוהה בדף החודשי');const card={suffix,name:'כרטיס כאל',issuer:'כאל',amount:page.total,chargeDate:page.chargeDate,transactions:page.transactions||[],debitAccount:home.debitAccount||'',month:page.month};await storeCardMonth(page.month,[card]);monthly.push(card);seenMonths.add(page.month);previous=page.fingerprint;await chrome.storage.local.set({syncStatus:`כאל: נשמר חודש ${i+1} מתוך 12 · ${page.month} · ${card.transactions.length} תנועות`});
       // ⚠ חודש ריק אינו מפיל, אבל שניים ברצף אומרים שהכרטיס עוד לא היה קיים.
       if(card.transactions.length)  {calEmptyStreak=0;await noteCardActiveSince(suffix,page.month)}
       else if(++calEmptyStreak>=EMPTY_MONTHS_STOP){
         await chrome.storage.local.set({syncStatus:`כאל: הכרטיס ${suffix} אינו פעיל לפני ${page.month} — נעצר אחרי ${i+1} חודשים במקום 12`});
+        break;
+      }
+      if(i>=1&&storedCalMonths.has(calPrevMonth(page.month))){
+        await chrome.storage.local.set({syncStatus:`כאל: ${page.month} נשמר; ההיסטוריה שלפניו כבר שמורה — נעצר אחרי ${i+1} עמודים במקום 12`});
         break;
       }
       if(!page.canPrev||i===11)break;const moved=await chrome.tabs.sendMessage(tabId,{type:'CAL_MONTHLY_PREV'});if(!moved?.ok)break;await delay(1800)}
@@ -2450,8 +2462,25 @@ async function runMax(tabId,requestedSuffix=''){
   await chrome.storage.local.set({syncStatus:'MAX: פותח פירוט חיובים'});let tab=await chrome.tabs.get(tabId);if(!String(tab.url||'').includes('/transaction-details/personal')){await chrome.tabs.update(tabId,{url:MAX_TX});for(let i=0;i<40;i++){await delay(300);tab=await chrome.tabs.get(tabId);if(String(tab.url||'').includes('/transaction-details/personal'))break}}
   await delay(1700);await prepareMax(tabId);const he=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'],wanted=String(requestedSuffix||'').replace(/\D/g,'').slice(-4),monthly=[],seen=new Set();
   const months=Array.from({length:13},(x,i)=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()+1-i);return{label:`${he[d.getMonth()]} ${d.getFullYear()}`,key:`${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`,optional:i===0}});let firstRead=null;
+  // ⚠ 28.08.2026 - טל: "רצינו להוריד רק את חודש החיוב הקרוב והקודם". סנכרון
+  // מצטבר: שלושת הראשונים (גישוש החודש הבא, הנוכחי והקודם) נקראים תמיד - הם
+  // עדיין משתנים; חודש ישן שכבר שמור עם עסקאות מדולג, וחור בהיסטוריה מושלם.
+  // דילוג הוא חודש-עם-נתונים לצורך רצף העצירה. הסיכון המתועד: חודש שנשמר
+  // חלקית (כרטיס אחד מתוך שניים) ידולג - מחיקת החודש מההיסטוריה תגרום
+  // לסנכרון הבא להשלימו.
+  const storedMaxMonths=new Set(),storedWantedMonths=new Set();
+  try{for(const r of await cardHistAll()){
+    const norm=String(r.month||'').replace(/\D/g,'');
+    if(norm.length!==6||!(r.transactions||[]).length||!/max|מקס/i.test(String(r.issuer||'')))continue;
+    const k=`${norm.slice(0,2)}.${norm.slice(2)}`;
+    storedMaxMonths.add(k);
+    if(wanted&&String(r.suffix)===wanted)storedWantedMonths.add(k);
+  }}catch(e){}
+  let skippedStored=0;
   let maxEmptyStreak=0;
-  for(let i=0;i<months.length;i++){const {label,key,optional}=months[i];await chrome.storage.local.set({syncStatus:`MAX: טוען ${key}${optional?' — בודק אם החודש הבא קיים':''}`});const sel=await chrome.tabs.sendMessage(tabId,{type:'MAX_SELECT_MONTH',label});if(!sel?.ok){if(optional)continue;if(!firstRead)throw Error(sel?.error||'בורר החודשים לא נטען');break}let page=null,candidate='',stable=0;for(let w=0;w<30;w++){await delay(350);await prepareMax(tabId);try{page=await chrome.tabs.sendMessage(tabId,{type:'MAX_READ'})}catch{}const ready=page?.ok&&page.month===key&&page.fingerprint;if(ready&&candidate===page.fingerprint)stable++;else{candidate=ready?page.fingerprint:'';stable=ready?1:0}if(stable>=3)break}if(!page?.ok||page.month!==key||stable<3){if(optional)continue;throw Error(`דף ${key} לא התייצב לקריאה`)}if(seen.has(key)){if(optional)continue;throw Error(`MAX נשאר בחודש ${key}`)}seen.add(key);if(!firstRead)firstRead={label,key};const groups=Object.entries(page.cards||{}).filter(([suffix])=>suffix&&suffix!=='unknown'&&(!wanted||suffix===wanted)),cards=groups.map(([suffix,transactions])=>({suffix,name:'כרטיס MAX',issuer:'MAX',amount:transactions.reduce((s,t)=>s+Math.abs(Number(t.amount)||0),0),transactions,month:key}));if(wanted&&!cards.length&&page.transactions?.length)throw Error(`כרטיס ${wanted} לא נמצא בדף ${key}`);if(cards.length){await storeCardMonth(key,cards);monthly.push(...cards)}
+  for(let i=0;i<months.length;i++){const {label,key,optional}=months[i];
+    if(i>=3&&(wanted?storedWantedMonths:storedMaxMonths).has(key)){skippedStored++;maxEmptyStreak=0;continue}
+    await chrome.storage.local.set({syncStatus:`MAX: טוען ${key}${optional?' — בודק אם החודש הבא קיים':''}`});const sel=await chrome.tabs.sendMessage(tabId,{type:'MAX_SELECT_MONTH',label});if(!sel?.ok){if(optional)continue;if(!firstRead)throw Error(sel?.error||'בורר החודשים לא נטען');break}let page=null,candidate='',stable=0;for(let w=0;w<30;w++){await delay(350);await prepareMax(tabId);try{page=await chrome.tabs.sendMessage(tabId,{type:'MAX_READ'})}catch{}const ready=page?.ok&&page.month===key&&page.fingerprint;if(ready&&candidate===page.fingerprint)stable++;else{candidate=ready?page.fingerprint:'';stable=ready?1:0}if(stable>=3)break}if(!page?.ok||page.month!==key||stable<3){if(optional)continue;throw Error(`דף ${key} לא התייצב לקריאה`)}if(seen.has(key)){if(optional)continue;throw Error(`MAX נשאר בחודש ${key}`)}seen.add(key);if(!firstRead)firstRead={label,key};const groups=Object.entries(page.cards||{}).filter(([suffix])=>suffix&&suffix!=='unknown'&&(!wanted||suffix===wanted)),cards=groups.map(([suffix,transactions])=>({suffix,name:'כרטיס MAX',issuer:'MAX',amount:transactions.reduce((s,t)=>s+Math.abs(Number(t.amount)||0),0),transactions,month:key}));if(wanted&&!cards.length&&page.transactions?.length)throw Error(`כרטיס ${wanted} לא נמצא בדף ${key}`);if(cards.length){await storeCardMonth(key,cards);monthly.push(...cards)}
     // ⚠ אותה מדיניות כמו בכאל ובישראכרט, ומאותו מקום: שני חודשים ריקים ברצף
     // אומרים שהכרטיס לא היה קיים. ⚠ **חודשים ש„optional" מדלג עליהם אינם
     // נספרים** — הם אינם עדות לכלום.
@@ -2479,7 +2508,7 @@ async function runMax(tabId,requestedSuffix=''){
   return await accountsMutex(async()=>{
   const state=await chrome.storage.local.get({accounts:[],maxLastCards:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[];let assigned=0;const digits=v=>String(v||'').replace(/\D/g,'');
   for(const card of details){const target=accounts.find(a=>(a.cards||[]).some(c=>digits(c.suffix).endsWith(card.suffix)));if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>digits(c.suffix).endsWith(card.suffix));if(index>=0)target.cards[index]={...target.cards[index],...card};else target.cards.push(card);assigned++}
-  const merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]};autoLoginRuns.set(`max|${tabId}`,Date.now());await chrome.storage.local.set({accounts,maxLastCards:merge(state.maxLastCards,details),maxUnassigned:unassigned,pendingMax:false,pendingMaxSuffix:'',syncStatus:`MAX: הסנכרון הסתיים — ${details.length} כרטיסים, ${seen.size} דפי חיוב חודשיים נשמרו, ${assigned} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:new Date().toISOString()});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:seen.size,assigned,unassigned:unassigned.length}});
+  const merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]};autoLoginRuns.set(`max|${tabId}`,Date.now());await chrome.storage.local.set({accounts,maxLastCards:merge(state.maxLastCards,details),maxUnassigned:unassigned,pendingMax:false,pendingMaxSuffix:'',syncStatus:`MAX: הסנכרון הסתיים — ${details.length} כרטיסים, ${seen.size} דפי חיוב נקראו${skippedStored?`, ${skippedStored} חודשים שמורים דולגו`:''}, ${assigned} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:new Date().toISOString()});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:seen.size,assigned,unassigned:unassigned.length}});
  }finally{maxBusy=false;await restoreSyncTabs()}
 }
 async function startDiscountBusiness(){const saved=await chrome.storage.local.get({discoveredAccounts:[]});

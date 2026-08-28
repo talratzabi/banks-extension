@@ -1,8 +1,8 @@
 {
   "extension/background.js": {
-    "mtime": 1787908826.149199,
-    "seen": 1787908886.9043403,
-    "ast_hash": "6a17957ab657a4f6a212a791f88a6cec",
+    "mtime": 1787909054.6189818,
+    "seen": 1787909113.4097595,
+    "ast_hash": "be380d7d0b2d981986ba988d74d11bb5",
     "semantic_hash": ""
   },
   "extension/btb-content.js": {
@@ -12,9 +12,9 @@
     "semantic_hash": ""
   },
   "extension/cal-content.js": {
-    "mtime": 1787890856.6468053,
-    "seen": 1787902538.2787333,
-    "ast_hash": "1216abadf1bd31993ecf77e971b44fb1",
+    "mtime": 1787909044.2526917,
+    "seen": 1787909113.4097595,
+    "ast_hash": "a5774ff5e2fd758e3cb541a7680581c8",
     "semantic_hash": ""
   },
   "extension/card-history.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1787908831.7396383,
-    "seen": 1787908886.9043403,
-    "ast_hash": "b1c3da476451ca5a4ac77ce47ddedf51",
+    "mtime": 1787909060.9501855,
+    "seen": 1787909113.4097595,
+    "ast_hash": "e030a9c747d2e2a5a8ce4880e878aeef",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1787908867.738744,
-    "seen": 1787908886.9043403,
-    "ast_hash": "fd7024513d8d387ac9542aa4f4e44790",
+    "mtime": 1787909092.5718095,
+    "seen": 1787909113.4097595,
+    "ast_hash": "a476efe1b42e7b4e20a27cb776a14a62",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
