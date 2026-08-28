@@ -778,7 +778,13 @@ async function collectRangeRows(expectedKey){
     const anchored=anchorPos>=0||full;
     report.attempts.push({from:ilShort(from),rows:result.cells.length,
       anchored,full,anchorAt:anchorPos>=0?String(result.cells[anchorPos][col('תאריך',1)]||''):'',
-      droppedFromSaved:pIdx>=0?prev.length-(pIdx+1):0,stop:result.stop});
+      droppedFromSaved:pIdx>=0?prev.length-(pIdx+1):0,stop:result.stop,
+      // ⚠ 28.08.2026 - טל: "למה הוא טוען הכל מחדש?" נמדד: העוגן לא נתפס אף
+      // פעם (anchored:false בכל הניסיונות) והדלתא ניוונה לקריאה מלאה. כשל
+      // עיגון רושם את המפתחות משני הצדדים - ההשוואה תגיד איזה שדה שבור,
+      // במקום לנחש. נשאר מקומי כמו כל האבחון.
+      ...(anchored?{}:{freshKeys:result.cells.slice(-3).map(c=>rowKeyOfCells(c,col)),
+        savedKeys:[...prev.slice(0,2),...prev.slice(-2)].map(rowKeyOfSaved)})});
     if(anchored){
       report.anchoredAt=ilShort(from);
       // ⚠⚠ **בתוך החלון שנקרא, הבנק הוא המקור היחיד.**
