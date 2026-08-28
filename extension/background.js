@@ -209,9 +209,14 @@ function accountForCard(accounts,card,savedId){
   }
   const when=previousChargeDayMonth(card);
   if(!target&&when&&card.previousCharge>0){                                    // חיוב בסכום ובתאריך של הכרטיס
+    // ⚠ 28.08.2026 - "גם ישראכרט לא מזהים": חיוב חודש-כרטיס X נוחת בבנק
+    // ב-X+1 (נמדד ב-1.57.1: chargeDate '10.9' על כרטיסי 08). ההתאמה המקורית
+    // חיפשה רק ב-X והחמיצה תמיד. כמו ב-viewer: בודקים את X וגם את X+1,
+    // והחד-ערכיות נמדדת על שני החלונות יחד.
+    const nextM=when[1]===12?1:when[1]+1;
     const m=accounts.filter(a=>(a.transactions||[]).some(t=>{
       const dm=dayMonthOf(t.date||t.valueDate||t.transactionDate);
-      if(!dm||dm[0]!==when[0]||dm[1]!==when[1])return false;
+      if(!dm||dm[0]!==when[0]||(dm[1]!==when[1]&&dm[1]!==nextM))return false;
       const amount=Number(t.amount??t.debit??t.credit??0);
       return Math.abs(Math.abs(amount)-card.previousCharge)<.02;
     }));
@@ -245,27 +250,33 @@ async function reconcileUnassignedCards(){
     const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{}});
     const accounts=(st.accounts||[]).map(a=>({...a,cards:[...(a.cards||[])]}));
     const patch={};let moved=0;
-    // ⚠ 28.08.2026 - כרטיסי מקס שנכנסו ל-maxUnassigned לפני 1.61.0 חסרים את
-    // bankChargeProbe (מסלול 5). מעשירים מן ההיסטוריה השמורה - אותו חישוב
-    // כמו ב-runMax: חודש-הכרטיס האחרון שהושלם, שחיובו נחת בבנק בחודש שאחריו.
-    if((st.maxUnassigned||[]).some(c=>!c.bankChargeProbe)){
-      try{
-        const d0=new Date(),nowNorm=String(d0.getMonth()+1).padStart(2,'0')+d0.getFullYear();
-        const bySuffix=new Map();
-        for(const r of await cardHistAll()){
-          const norm=String(r.month||'').replace(/\D/g,'');
-          if(!/max|מקס/i.test(String(r.issuer||''))||norm===nowNorm||!(Number(r.amount)>0))continue;
-          const key=norm.slice(2)+norm.slice(0,2); // YYYYMM להשוואת "חדש יותר"
-          const cur=bySuffix.get(r.suffix);
-          if(!cur||key>cur.key)bySuffix.set(r.suffix,{key,norm,amount:Number(r.amount)});
-        }
-        for(const c of st.maxUnassigned){
-          if(c.bankChargeProbe)continue;
-          const prev=bySuffix.get(c.suffix);if(!prev)continue;
-          const m1=Number(prev.norm.slice(0,2)),y1=Number(prev.norm.slice(2));
-          c.bankChargeProbe={amount:prev.amount,monthKey:m1===12?`01.${y1+1}`:`${String(m1+1).padStart(2,'0')}.${y1}`,textRe:'מקס|max'};
-        }
-      }catch(e){}
+    // ⚠ 28.08.2026 - העשרה למסלול 5 לכל המנפיקים: כרטיסים שממתינים לשיוך
+    // מקבלים bankChargeProbe מן ההיסטוריה השמורה - סכום חודש-הכרטיס האחרון
+    // שהושלם, שחיובו נחת בבנק **בחודש שאחריו** (הלקח המדוד מ-1.57.1), ורגקס
+    // שם-המנפיק כפי שהוא מופיע בתנועת הבנק. ההתאמה עצמה במסלול 5 - חד-ערכית.
+    {
+      const PROBE_RE={isracardUnassigned:'ישראכרט',calUnassigned:'כאל|ויזה|cal',maxUnassigned:'מקס|max'};
+      const lists=Object.keys(PROBE_RE);
+      if(lists.some(k=>(st[k]||[]).some(c=>!c.bankChargeProbe))){
+        try{
+          const d0=new Date(),nowNorm=String(d0.getMonth()+1).padStart(2,'0')+d0.getFullYear();
+          const hist=await cardHistAll();
+          for(const k of lists)for(const c of st[k]||[]){
+            if(c.bankChargeProbe)continue;
+            const issuerRe=new RegExp(PROBE_RE[k],'i');
+            let best=null;
+            for(const r of hist){
+              const norm=String(r.month||'').replace(/\D/g,'');
+              if(String(r.suffix)!==String(c.suffix)||!issuerRe.test(String(r.issuer||''))||norm===nowNorm||!(Number(r.amount)>0))continue;
+              const key=norm.slice(2)+norm.slice(0,2); // YYYYMM להשוואת "חדש יותר"
+              if(!best||key>best.key)best={key,norm,amount:Number(r.amount)};
+            }
+            if(!best)continue;
+            const m1=Number(best.norm.slice(0,2)),y1=Number(best.norm.slice(2));
+            c.bankChargeProbe={amount:best.amount,monthKey:m1===12?`01.${y1+1}`:`${String(m1+1).padStart(2,'0')}.${y1}`,textRe:PROBE_RE[k]};
+          }
+        }catch(e){}
+      }
     }
     for(const key of ['isracardUnassigned','calUnassigned','maxUnassigned']){
       const list=st[key]||[],left=[];
