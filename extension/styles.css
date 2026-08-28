@@ -109,3 +109,29 @@
 .scope-pick select{padding:5px 8px;border:1px solid #d3dbe3;border-radius:8px}
 
 .loan-kind{padding:4px 6px;border:1px solid #d3dbe3;border-radius:8px;font-size:12px;background:#fff}
+
+/* ── ניתוח חודשי (1.59.0) — אותה תצוגה כמו ב-viewer.html, תחומה לפאנל ── */
+#monthlyPanel .m-bar{margin:0 0 10px;font-size:14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+#monthlyPanel .m-bar select{padding:6px 10px;border:1px solid #cfdae4;border-radius:8px}
+#monthlyPanel .m-month{border:1px solid #e2eaf1;border-radius:12px;padding:10px 14px;margin-bottom:12px;background:#fff}
+#monthlyPanel .m-month>summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:10px;flex-wrap:wrap;list-style:none}
+#monthlyPanel .m-month>summary::-webkit-details-marker{display:none}
+#monthlyPanel .m-month>summary:hover{background:#f6f9fc}
+#monthlyPanel .m-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:8px}
+#monthlyPanel .m-col h4{margin:0 0 6px;font-size:13px;color:#0f2f4f}
+#monthlyPanel .m-col table{width:100%;border-collapse:collapse;font-size:12.5px}
+#monthlyPanel .m-col td{padding:4px 8px;border-bottom:1px solid #eef2f6}
+#monthlyPanel .m-row{border-bottom:1px solid #eef2f6}
+#monthlyPanel .m-row summary{display:flex;justify-content:space-between;gap:10px;padding:5px 2px;cursor:pointer;font-size:12.5px;list-style:none}
+#monthlyPanel .m-row summary::-webkit-details-marker{display:none}
+#monthlyPanel .m-row summary:hover{background:#f6f9fc}
+#monthlyPanel .m-row[open]>summary span:first-child{font-weight:700}
+#monthlyPanel .m-sub{margin:2px 0 8px 0;background:#f8fbfd;border-radius:6px;width:100%;border-collapse:collapse}
+#monthlyPanel .m-sub td{padding:4px 8px;font-size:12px;border-bottom:1px solid #eef2f6}
+#monthlyPanel .m-cardwrap>td{padding:0 8px 6px 8px;background:#f8fbfd}
+#monthlyPanel .m-cardsub summary{cursor:pointer;font-size:12px;color:#0f2f4f;padding:3px 0;list-style:none}
+#monthlyPanel .m-cardsub summary::-webkit-details-marker{display:none}
+#monthlyPanel .num{font-variant-numeric:tabular-nums;white-space:nowrap}
+#monthlyPanel .neg{color:#b03030}
+#monthlyPanel .pos{color:#2f6b3f}
+#monthlyPanel .muted{color:#7d8b99;font-size:12px}

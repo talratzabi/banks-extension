@@ -30,9 +30,9 @@
     "semantic_hash": ""
   },
   "extension/dashboard.js": {
-    "mtime": 1787903563.740733,
-    "seen": 1787903686.9325378,
-    "ast_hash": "d3147a75bac49ad8d91507a5bb9e4d56",
+    "mtime": 1787900222.1228497,
+    "seen": 1787902538.2787333,
+    "ast_hash": "ff446a90425d8f50e33380276bd1c3af",
     "semantic_hash": ""
   },
   "extension/discount-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1787903446.318604,
-    "seen": 1787903686.9325378,
-    "ast_hash": "468d693edf9d73092bbd6cd495638ce6",
+    "mtime": 1787900387.312301,
+    "seen": 1787902538.2787333,
+    "ast_hash": "677b90278e64dfd4356e41195c91ede2",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -150,9 +150,9 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1787903030.8517146,
-    "seen": 1787903686.9325378,
-    "ast_hash": "c7c239d6868beb228a47b16514c6522b",
+    "mtime": 1786951143.9834986,
+    "seen": 1787902538.2787333,
+    "ast_hash": "dc4ca87f40297e4465dc5848d7de87ea",
     "semantic_hash": ""
   },
   "AUDIT.md": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1787903672.4977584,
-    "seen": 1787903686.9325378,
-    "ast_hash": "bce4012afe9dcf135e15b6728d8395b6",
+    "mtime": 1787901567.6672664,
+    "seen": 1787902538.2787333,
+    "ast_hash": "fee8de8c5072b7bb1ff26570c29f60ca",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
@@ -186,9 +186,9 @@
     "semantic_hash": ""
   },
   "extension/dashboard.html": {
-    "mtime": 1787903228.5870104,
-    "seen": 1787903686.9325378,
-    "ast_hash": "f5ab0b79125f0a0fdbeadb03ad90b319",
+    "mtime": 1787894913.6567082,
+    "seen": 1787902538.2787333,
+    "ast_hash": "4eae10838a2b08381cda67dbde6d59c3",
     "semantic_hash": ""
   },
   "extension/popup.html": {

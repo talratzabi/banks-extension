@@ -1,16 +1,16 @@
 # Graph Report - banks-extension  (2026-08-28)
 
 ## Corpus Check
-- 32 files · ~147,645 words
+- 32 files · ~146,675 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1067 nodes · 1787 edges · 83 communities (71 shown, 12 thin omitted)
+- 1061 nodes · 1770 edges · 84 communities (72 shown, 12 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 11 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `4c9006e0`
+- Built from commit: `29b39d11`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -33,12 +33,12 @@
 - accountsMutex
 - esc
 - card-history.js
-- money
+- reNum
 - CDP
 - AGENTS — תוסף הבנקים
 - סוכן „תוסף" — חזרה לעבודה על תוסף הבנקים
 - cal-content.js
-- renderMonthlyView
+- load
 - cheque-store.js
 - isracard-content.js
 - yahav.js
@@ -52,6 +52,7 @@
 - 2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבעלות עוברת אליך.
 - runMax
 - btb-content.js
+- renderMaslaka
 - 2026-08-22 · Claude · אין לוח שנה — בורר התקופה הוא קבוצת רדיו — 1.1.6
 - 2026-08-22 · Claude · לאומי סופר שורות, לא תאריכים — 1.1.5
 - 2026-08-22 · Claude · „מאומת" בלאומי היה הבטחה שהקוד לא קיים — 1.1.2
@@ -98,13 +99,13 @@
 1. `HANDOFF — מסירה בין סוכנים` - 238 edges
 2. `delay()` - 36 edges
 3. `toast()` - 28 edges
-4. `esc()` - 27 edges
+4. `esc()` - 26 edges
 5. `פרויקט „בנקים” — היסטוריה, כללים והנחיות המשך` - 25 edges
-6. `render()` - 20 edges
-7. `money()` - 17 edges
-8. `host_permissions` - 17 edges
-9. `withTimeout()` - 16 edges
-10. `load()` - 16 edges
+6. `render()` - 19 edges
+7. `host_permissions` - 17 edges
+8. `withTimeout()` - 16 edges
+9. `load()` - 16 edges
+10. `money()` - 16 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `rowsOf()` --indirect_call--> `text()`  [INFERRED]
@@ -119,7 +120,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (83 total, 12 thin omitted)
+## Communities (84 total, 12 thin omitted)
 
 ### Community 0 - "HANDOFF — מסירה בין סוכנים"
 Cohesion: 0.01
@@ -142,16 +143,16 @@ Cohesion: 0.05
 Nodes (43): action, default_icon, default_popup, default_title, background, service_worker, content_scripts, 16 (+35 more)
 
 ### Community 5 - "dashboard.js"
-Cohesion: 0.05
-Nodes (51): accountKinds, accounts, agoText(), attributeStatus(), balanceLinkStyles, BANK_BUTTONS, bankAction(), bankBase() (+43 more)
+Cohesion: 0.07
+Nodes (40): accountKinds, accounts, agoText(), attributeStatus(), balanceLinkStyles, BANK_BUTTONS, bankAction(), bankBase() (+32 more)
 
 ### Community 6 - "HANDOFF.md"
-Cohesion: 0.05
-Nodes (36): 1.33.1 — הריבית האמיתית בטבלה, ואריח BTB שפתח את פועלים, 1.33.2 — התאריך שלא נקרא, וההפלה השקטה של כל השאר, 1.33.3 — „הסנכרון נכשל" שהיה בעצם ניתוק, 1.33.4 — `\b` אחד מנע את תאריך התשלום, 1.34.0 — לשונית „מסלקה": קליטת נתוני הגמל, ההשתלמות והפנסיה, 1.35.0 — לשונית „נדל״ן", 1.36.0 — לשונית „מאזן נכסים": צד הנכסים, 1.37.0 - מאזן נכסים: צד ההתחייבויות וההון העצמי (+28 more)
+Cohesion: 0.06
+Nodes (35): 1.33.1 — הריבית האמיתית בטבלה, ואריח BTB שפתח את פועלים, 1.33.2 — התאריך שלא נקרא, וההפלה השקטה של כל השאר, 1.33.3 — „הסנכרון נכשל" שהיה בעצם ניתוק, 1.33.4 — `\b` אחד מנע את תאריך התשלום, 1.34.0 — לשונית „מסלקה": קליטת נתוני הגמל, ההשתלמות והפנסיה, 1.35.0 — לשונית „נדל״ן", 1.36.0 — לשונית „מאזן נכסים": צד הנכסים, 1.37.0 - מאזן נכסים: צד ההתחייבויות וההון העצמי (+27 more)
 
 ### Community 7 - "render"
-Cohesion: 0.23
-Nodes (17): accountCardTotal(), accountFilterSentence(), accountKey(), dateKey(), dedupedCardTotal(), kindOf(), loanKeyOf(), loanKindOf() (+9 more)
+Cohesion: 0.13
+Nodes (29): accountCardTotal(), accountFilterSentence(), accountKey(), balanceAutoAssets(), balanceAutoLiabs(), balanceTable(), cardKindOf(), cardPasses() (+21 more)
 
 ### Community 8 - "poalim-content.js"
 Cohesion: 0.18
@@ -163,7 +164,7 @@ Nodes (26): dbgText(), discoverLeumi(), fibiNewRange(), fibiOpenNewScreen(), fib
 
 ### Community 10 - "toast"
 Cohesion: 0.15
-Nodes (23): assignCard(), bankForSource(), dispatchBank(), fullAccount(), importAllData(), load(), pruneOrphanCheques(), refreshBank() (+15 more)
+Nodes (22): assignCard(), baAdd(), baId(), bankForSource(), baRemove(), baSave(), dispatchBank(), importAllData() (+14 more)
 
 ### Community 11 - "ביקורת עומק — 28.08.2026 (גרסה 1.48.1)"
 Cohesion: 0.10
@@ -186,16 +187,16 @@ Cohesion: 0.17
 Nodes (16): accountsMutex, btbTab(), clearSourceDiags(), deleteCardEverywhere(), mizrahiTab(), openMizrahiLogin(), prepareMizrahi(), prepareRoute() (+8 more)
 
 ### Community 16 - "esc"
-Cohesion: 0.15
-Nodes (21): assignSelect(), cardDeleteButton(), cardHidden(), cardHistoryButton(), cardHistoryMark(), cardLastSync(), cardSrc(), cardSyncBadge() (+13 more)
+Cohesion: 0.22
+Nodes (16): assignSelect(), cardDeleteButton(), cardHistoryButton(), cardHistoryMark(), cardLastSync(), cardSrc(), cardSyncBadge(), cardSyncControl() (+8 more)
 
 ### Community 17 - "card-history.js"
 Cohesion: 0.36
 Nodes (11): cardHistAll(), cardHistDb(), cardHistDeleteCard(), cardHistDeleteMonths(), cardHistGetMonth(), cardHistMonths(), cardHistPrune(), cardHistPut() (+3 more)
 
-### Community 18 - "money"
-Cohesion: 0.13
-Nodes (22): baAdd(), baEdit(), baId(), balanceAutoAssets(), balanceAutoLiabs(), balanceTable(), baRemove(), baSave() (+14 more)
+### Community 18 - "reNum"
+Cohesion: 0.18
+Nodes (13): baEdit(), blAdd(), blEdit(), blId(), blRemove(), blSave(), reAdd(), reEdit() (+5 more)
 
 ### Community 19 - "CDP"
 Cohesion: 0.24
@@ -213,9 +214,9 @@ Nodes (11): אסור, ⚠ משימות רקע אינן עובדות במחשב �
 Cohesion: 0.20
 Nodes (5): authenticated(), WHY: הרישום חייב להיות חד-פעמי. ההזרקה מחדש (שהיא חלק מהתיקון!), report(), selectAndRead(), transactions()
 
-### Community 23 - "renderMonthlyView"
-Cohesion: 0.22
-Nodes (9): cardKindOf(), cardPasses(), mKeyMs(), normMonth(), renderMonthlyTab(), renderMonthlyView(), scheduleMovementSearch(), setActiveView() (+1 more)
+### Community 23 - "load"
+Cohesion: 0.17
+Nodes (12): cardHidden(), etaText(), fullAccount(), load(), progressLine(), renderSelection(), renderSyncProgress(), renderSyncStatus() (+4 more)
 
 ### Community 24 - "cheque-store.js"
 Cohesion: 0.42
@@ -264,6 +265,10 @@ Nodes (7): 2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבע
 ### Community 35 - "runMax"
 Cohesion: 0.33
 Nodes (6): cardActiveSince(), maxTab(), noteCardActiveSince(), prepareMax(), runMax(), startMax()
+
+### Community 37 - "renderMaslaka"
+Cohesion: 0.33
+Nodes (6): maslakaLoadFiles(), maslakaMonth(), maslakaParse(), maslakaRow(), maslakaTypeMap(), renderMaslaka()
 
 ### Community 38 - "2026-08-22 · Claude · אין לוח שנה — בורר התקופה הוא קבוצת רדיו — 1.1.6"
 Cohesion: 0.33
@@ -386,7 +391,7 @@ Cohesion: 0.67
 Nodes (3): 16. MAX, ⚠ MAX מחייבת את הבנק כמה פעמים בחודש (טל, 16.08.2026), ⚠ הלשונית של MAX היא חודש החיוב, לא חודש העסקאות
 
 ## Knowledge Gaps
-- **494 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+489 more)
+- **493 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+488 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **12 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -394,13 +399,13 @@ Nodes (3): 16. MAX, ⚠ MAX מחייבת את הבנק כמה פעמים בחו�
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `HANDOFF — מסירה בין סוכנים` connect `HANDOFF — מסירה בין סוכנים` to `HANDOFF.md`, `2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבעלות עוברת אליך.`, `2026-08-22 · Claude · אין לוח שנה — בורר התקופה הוא קבוצת רדיו — 1.1.6`, `2026-08-22 · Claude · לאומי סופר שורות, לא תאריכים — 1.1.5`, `2026-08-22 · Claude · „מאומת" בלאומי היה הבטחה שהקוד לא קיים — 1.1.2`, `2026-08-22 · Claude · לאומי מבקש טווח לפי collectSince — 1.2.0`, `2026-08-18 · Claude · הגלגל גם בטעינת השנה — 0.83.2`, `2026-08-17 · Claude · חלונית כניסה, והחזרה מכל מסלול — 0.74.0`, `2026-08-17 · Claude · לולאת הסנכרון האוטומטי בפועלים פרטי — 0.64.0`, `2026-08-25 · Claude · סיכום יום · יהב מוגבל לחצי שנה · נקודת עצירה`, `2026-08-18 · Claude · ישראכרט חוזר למארח שלו, ומחיקת כרטיס — 0.83.0`, `2026-08-18 · Claude · דף אינו סשן עד שהוא מוכיח זאת — 0.83.1`, `2026-08-17 · Claude · טבעת אחוזים, והלשונית חוזרת לחלון הראשי — 0.62.0`, `2026-08-22 · Claude · loadAllRows הוחזר — התיקון שלי החמיר — 1.2.5`, `2026-08-22 · Claude · הבורר לא נפתח כי שריד תפריט סגור ענה במקומו — 1.1.1`, `2026-08-23 · Claude · הסניף והחשבון נדבקו זה לזה — 1.3.0`, `2026-08-17 10:15 · Claude · לאומי — הרענון ב-startLeumi הרס את הסשן, 0.57.0`, `2026-08-18 · Claude · הגלגל מציג את מספר הכרטיס — 0.82.0`, `2026-08-18 · Claude · כאל, מקס ולאומי — הושלם — 0.79.0`, `2026-08-22 · Claude · הטווח עובד; נקרא עמוד אחד — 1.2.3`, `2026-08-22 · Claude · זיכרון מספרי חשבון ששורד מחיקה — 1.0.25`, `2026-08-23 · Claude · המשטח השלישי: אריח הבנק — 1.2.9`?**
-  _High betweenness centrality (0.101) - this node is a cross-community bridge._
-- **Why does `2026-08-22 · Claude · „מאומת" בלאומי היה הבטחה שהקוד לא קיים — 1.1.2` connect `2026-08-22 · Claude · „מאומת" בלאומי היה הבטחה שהקוד לא קיים — 1.1.2` to `HANDOFF — מסירה בין סוכנים`?**
-  _High betweenness centrality (0.005) - this node is a cross-community bridge._
+  _High betweenness centrality (0.102) - this node is a cross-community bridge._
 - **Why does `2026-08-17 · Claude · לולאת הסנכרון האוטומטי בפועלים פרטי — 0.64.0` connect `2026-08-17 · Claude · לולאת הסנכרון האוטומטי בפועלים פרטי — 0.64.0` to `HANDOFF — מסירה בין סוכנים`?**
   _High betweenness centrality (0.004) - this node is a cross-community bridge._
+- **Why does `2026-08-17 · Claude · חלונית כניסה, והחזרה מכל מסלול — 0.74.0` connect `2026-08-17 · Claude · חלונית כניסה, והחזרה מכל מסלול — 0.74.0` to `HANDOFF — מסירה בין סוכנים`?**
+  _High betweenness centrality (0.004) - this node is a cross-community bridge._
 - **What connects `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart` to the rest of the system?**
-  _494 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _493 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `HANDOFF — מסירה בין סוכנים` be split into smaller, more focused modules?**
   _Cohesion score 0.009216589861751152 - nodes in this community are weakly interconnected._
 - **Should `discount-content.js` be split into smaller, more focused modules?**

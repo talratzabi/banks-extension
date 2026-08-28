@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s);
-let accounts=[],discovered=[],selectedKeys=[],syncScope='business',accountFilter='both',accountKinds={},privateOwnerName='',hideMortgages=false,isracardUnassigned=[],calUnassigned=[],maxUnassigned=[],isracardLastCards=[],calLastCards=[],maxLastCards=[],cardHistoryStats={},activeView='accounts',loadEpoch=0,loadTimer=null;
+let accounts=[],discovered=[],selectedKeys=[],syncScope='business',accountFilter='both',accountKinds={},privateOwnerName='',hideMortgages=false,isracardUnassigned=[],calUnassigned=[],maxUnassigned=[],isracardLastCards=[],calLastCards=[],maxLastCards=[],cardHistoryStats={},activeView='accounts',loadEpoch=0,loadTimer=null,monthlyCardMonths=null,monthlyPick='';
 let movementSearchTimer=null,movementSearchEpoch=0;
 const BANK_BUTTONS=[
   {id:'business',name:'פועלים עסקי',logo:'icons/poalim-business.png',ready:true},
@@ -44,6 +44,7 @@ chrome.storage.onChanged.addListener(()=>{clearTimeout(loadTimer);loadTimer=setT
 
 async function load(){
   const epoch=++loadEpoch;
+  monthlyCardMonths=null; // טעינה מחדש = ייתכנו חודשי כרטיסים חדשים; הלשונית תקרא שוב.
   document.querySelector('.sources')?.classList.add('hidden');
   const data=await chrome.storage.local.get({viewSince:'',viewSinceInit:false,collectSince:'',accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{},hiddenCards:[],maslaka:null,realEstate:[],balanceAssets:[],balanceLiabs:[],loanKinds:{}});
   maslaka=data.maslaka||null;loanKinds=data.loanKinds||{};realEstate=Array.isArray(data.realEstate)?data.realEstate:[];balanceAssets=Array.isArray(data.balanceAssets)?data.balanceAssets:[];balanceLiabs=Array.isArray(data.balanceLiabs)?data.balanceLiabs:[];
@@ -120,7 +121,7 @@ function render(){
     box.appendChild(card);
   });
   const sums={balance:visible.reduce((s,a)=>s+(Number(a.balance)||0),0),limit:visible.reduce((s,a)=>s+(Number(a.creditLimit)||0),0),available:visible.reduce((s,a)=>s+(Number(a.availableCredit)||0),0),cards:visible.reduce((s,a)=>s+(Number(a.upcomingCardCharges)||0),0),loans:visible.reduce((s,a)=>s+(a.loans||[]).filter(l=>!hideMortgages||!l.isMortgage).reduce((n,l)=>n+(Number(l.balance)||0),0),0)};$('#count').textContent=visible.length;$('#total').textContent=money(sums.balance);let totals=$('#accountsTotals');if(!totals){totals=document.createElement('section');totals.id='accountsTotals';totals.className='panel accounts-total accounts-view';box.after(totals)}totals.innerHTML=`<h3>סיכום כללי · ${visible.length} חשבונות</h3><div class="accounts-total-grid"><div><span>יתרת עו״ש כוללת</span><strong>${money(sums.balance)}</strong></div><div><span>מסגרות אשראי</span><strong>${money(sums.limit)}</strong></div><div><span>יתרה זמינה</span><strong>${money(sums.available)}</strong></div><div><span>חיובי כרטיסים קרובים</span><strong>${money(sums.cards)}</strong></div><div><span>יתרת הלוואות כוללת</span><strong>${money(sums.loans)}</strong></div></div>`;
-  const cardTotalCell=totals.querySelector('.accounts-total-grid div:nth-child(4) strong');if(cardTotalCell)cardTotalCell.textContent=money(dedupedCardTotal(visible));const dates=accounts.map(a=>a.lastSync).filter(Boolean).sort();$('#lastSync').textContent=dates.length?shortDateTime(dates.at(-1)):'טרם בוצע';renderTransactions();renderAllCards().then(renderHiddenCards).catch(e=>console.warn('renderAllCards',e));renderLoansTable();renderMaslaka();renderRealEstate();renderBalance();
+  const cardTotalCell=totals.querySelector('.accounts-total-grid div:nth-child(4) strong');if(cardTotalCell)cardTotalCell.textContent=money(dedupedCardTotal(visible));const dates=accounts.map(a=>a.lastSync).filter(Boolean).sort();$('#lastSync').textContent=dates.length?shortDateTime(dates.at(-1)):'טרם בוצע';renderTransactions();renderAllCards().then(renderHiddenCards).catch(e=>console.warn('renderAllCards',e));renderLoansTable();renderMaslaka();renderRealEstate();renderBalance();if(activeView==='monthly')renderMonthlyTab();
 }
 function dedupedCardTotal(visible){const cards=new Map(),fallback=[];for(const a of visible){if((a.cards||[]).length)for(const c of a.cards){const key=String(c.suffix||`${a.id}-${cards.size}`);cards.set(key,Number(c.amount)||0)}else fallback.push(Number(a.upcomingCardCharges)||0)}const hasIsracard=accountFilter==='both'&&isracardLastCards.length>0;if(hasIsracard)for(const c of isracardLastCards)cards.set(String(c.suffix),Number(c.amount)||0);return[...cards.values()].reduce((s,n)=>s+n,0)+(hasIsracard?0:fallback.reduce((s,n)=>s+n,0))}
 function accountCardTotal(a){if(!(a.cards||[]).length)return a.upcomingCardCharges==null?null:Number(a.upcomingCardCharges)||0;const bySuffix=new Map();for(const c of a.cards)bySuffix.set(String(c.suffix||bySuffix.size),Number(c.amount)||0);return[...bySuffix.values()].reduce((s,n)=>s+n,0)}
@@ -344,7 +345,7 @@ const fingerprint=[a.source,ownerKey,l.type,l.originalPrincipal,l.balance,l.endD
   const allMonths=loanMonths(l.startDate,l.endDate),leftMonths=loanMonths(l.nextPaymentDate,l.endDate);
   if(Number.isFinite(allMonths)&&allMonths>0&&Number.isFinite(leftMonths)&&leftMonths>=0)return `~${leftMonths+1}/${allMonths+1}`;
   return '—'};const monthly=rows.reduce((sum,row)=>sum+(Number(row.loan.nextPayment)||0),0),hasMortgages=rows.some(r=>r.loan.isMortgage);box.innerHTML=`<div class="loans-table-wrap"><table class="loans-table"><thead><tr><th>בנק וחשבון</th><th>יתרה</th><th>תשלומים שנותרו</th><th>תשלום קרוב</th><th>תשלום סופי</th><th>ריבית</th><th>החזר קרוב</th><th>סוג</th><th>הסרה</th></tr></thead><tbody>${rows.map(({account:a,loan:l,loanIndex})=>`<tr><td><b>${esc(a.sourceLabel||'בנק')}</b> · ${esc(a.branch)}-${esc(a.accountNumber)} ${l.isMortgage?'<span class="mortgage-tag">משכנתא</span>':''}</td><td>${l.balance==null?'—':money(l.balance)}</td><td dir="ltr">${esc(remaining(l))}</td><td>${esc(short(l.nextPaymentDate))}</td><td>${esc(short(l.endDate))}</td><td title="${esc(l.interestNote||'')}">${esc(short(l.interest))}</td><td><b>${l.nextPayment==null?'—':money(l.nextPayment)}</b></td><td><select class="loan-kind" data-key="${encodeURIComponent(loanKeyOf(a,l))}" title="ברירת המחדל — לפי סוג החשבון (${kindOf(a)==='business'?'עסקי':'פרטי'})"><option value="" ${loanKinds[loanKeyOf(a,l)]?'':'selected'}>לפי החשבון</option><option value="business" ${loanKinds[loanKeyOf(a,l)]==='business'?'selected':''}>עסקי</option><option value="private" ${loanKinds[loanKeyOf(a,l)]==='private'?'selected':''}>פרטי</option></select></td><td>${l.isMortgage?`<label class="loan-remove-label"><input type="checkbox" class="mortgage-remove" data-account-id="${esc(a.id)}" data-loan-index="${loanIndex}"> הסר</label>`:'—'}</td></tr>`).join('')}</tbody></table></div>${hasMortgages?'<button type="button" id="removeSelectedMortgages" class="button secondary">הסר משכנתאות מסומנות מהרשימה</button>':''}<div class="loans-total"><span>סה״כ החזר חודשי</span><strong>${money(monthly)}</strong></div>`}
-function setActiveView(view){activeView=['accounts','selection','transactions','cards','search','loans','maslaka','realestate','balance'].includes(view)?view:'accounts';document.querySelectorAll('.dashboard-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===activeView));document.querySelectorAll('.selection-view').forEach(el=>el.classList.toggle('hidden',activeView!=='selection'));document.querySelectorAll('.accounts-view').forEach(el=>el.classList.toggle('hidden',activeView!=='accounts'));document.querySelectorAll('.transactions-view').forEach(el=>el.classList.toggle('hidden',activeView!=='transactions'));document.querySelectorAll('.cards-view').forEach(el=>el.classList.toggle('hidden',activeView!=='cards'));document.querySelectorAll('.search-view').forEach(el=>el.classList.toggle('hidden',activeView!=='search'));document.querySelectorAll('.loans-view').forEach(el=>el.classList.toggle('hidden',activeView!=='loans'));document.querySelectorAll('.maslaka-view').forEach(el=>el.classList.toggle('hidden',activeView!=='maslaka'));document.querySelectorAll('.realestate-view').forEach(el=>el.classList.toggle('hidden',activeView!=='realestate'));document.querySelectorAll('.balance-view').forEach(el=>el.classList.toggle('hidden',activeView!=='balance'));if(activeView==='search')scheduleMovementSearch()}
+function setActiveView(view){activeView=['accounts','selection','transactions','monthly','cards','search','loans','maslaka','realestate','balance'].includes(view)?view:'accounts';document.querySelectorAll('.monthly-view').forEach(el=>el.classList.toggle('hidden',activeView!=='monthly'));document.querySelectorAll('.dashboard-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===activeView));document.querySelectorAll('.selection-view').forEach(el=>el.classList.toggle('hidden',activeView!=='selection'));document.querySelectorAll('.accounts-view').forEach(el=>el.classList.toggle('hidden',activeView!=='accounts'));document.querySelectorAll('.transactions-view').forEach(el=>el.classList.toggle('hidden',activeView!=='transactions'));document.querySelectorAll('.cards-view').forEach(el=>el.classList.toggle('hidden',activeView!=='cards'));document.querySelectorAll('.search-view').forEach(el=>el.classList.toggle('hidden',activeView!=='search'));document.querySelectorAll('.loans-view').forEach(el=>el.classList.toggle('hidden',activeView!=='loans'));document.querySelectorAll('.maslaka-view').forEach(el=>el.classList.toggle('hidden',activeView!=='maslaka'));document.querySelectorAll('.realestate-view').forEach(el=>el.classList.toggle('hidden',activeView!=='realestate'));document.querySelectorAll('.balance-view').forEach(el=>el.classList.toggle('hidden',activeView!=='balance'));if(activeView==='search')scheduleMovementSearch();if(activeView==='monthly')renderMonthlyTab()}
 
 function searchDateValue(value,end=false){if(!value)return end?Infinity:-Infinity;return new Date(`${value}T${end?'23:59:59':'00:00:00'}`).getTime()}
 function scheduleMovementSearch(){clearTimeout(movementSearchTimer);movementSearchTimer=setTimeout(renderMovementSearch,220)}
@@ -1196,3 +1197,122 @@ document.addEventListener('click',e=>{
   removedCardsOpen=!removedCardsOpen;
   renderHiddenCards();
 });
+
+// ── ניתוח חודשי (1.59.0) ─────────────────────────────────────────────
+// אותה לוגיקה כמו ב-viewer.html (1.55-1.58), על הנתונים החיים של התוסף:
+// העו"ש מ-accounts, פירוט האשראי מ-cardHistAll(). הלקחים מן ה-viewer חלים:
+// ⚠⚠ אין כפל-ספירה — הסכומים מצד הבנק בלבד; עסקאות הכרטיס תצוגה בלבד.
+// ⚠⚠ חיוב הכרטיס יורד בחודש שאחרי חודש העסקאות — התאמה קודם מול החודש הקודם.
+// ⚠ מסד הכרטיסים שומר '062026' בלי נקודה — normMonth מקבל את שני הפורמטים.
+// ⚠ שסתום עמלות: נפילת "כל כרטיסי החודש" רק לחיובים מעל 200 ש"ח.
+// ⚠ כל הקבוצות מוצגות — slice שהעלים קבוצות עלה יום עבודה ב-viewer.
+// מכבד את בורר עסקי/פרטי: חשבונות לפי kindOf, כרטיסים לפי cardPasses.
+function signedAmt(t){return t.debit!=null&&t.debit!==''?-Math.abs(Number(t.debit)||0):(Number(t.credit)||Number(t.amount)||0)}
+function mKeyMs(ms){const d=new Date(ms);return `${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`}
+function normMonth(m){const x=String(m||'').match(/^(\d{2})\.?(\d{4})$/);return x?`${x[1]}.${x[2]}`:null}
+// monthlyCardMonths ו-monthlyPick מוצהרים בראש הקובץ — load() ניגשת אליהם.
+async function renderMonthlyTab(){
+  const state=$('#monthlyState');
+  if(monthlyCardMonths===null){
+    if(state)state.textContent='קורא היסטוריית כרטיסים…';
+    try{monthlyCardMonths=await cardHistAll();if(state)state.textContent=''}
+    catch(e){monthlyCardMonths=[];if(state)state.textContent=`היסטוריית הכרטיסים לא נקראה (${e.message}) — הניתוח מוצג בלי פירוט אשראי`}
+  }
+  renderMonthlyView(monthlyPick);
+}
+$('#monthPick').onchange=e=>{monthlyPick=e.target.value;renderMonthlyView(monthlyPick)};
+function renderMonthlyView(pick=''){
+  const box=$('#monthlyBox');if(!box)return;
+  const cardMonths=(monthlyCardMonths||[]).filter(r=>cardPasses(r.suffix));
+  const shownAccounts=accounts.filter(a=>accountFilter==='both'||kindOf(a)===accountFilter);
+  const buckets=new Map();
+  const bucket=k=>{if(!buckets.has(k))buckets.set(k,{inSum:0,outSum:0,n:0,byAcc:new Map(),byAction:new Map()});return buckets.get(k)};
+  for(const a of shownAccounts){
+    const accName=`${a.sourceLabel||a.source||''} ${a.branch||''}-${a.accountNumber||''}`.trim();
+    for(const t of a.transactions||[]){
+      const ms=dateKey(t.date);if(!ms)continue;
+      const amt=signedAmt(t);if(!amt)continue;
+      const b=bucket(mKeyMs(ms));b.n++;
+      if(amt>0)b.inSum+=amt;else b.outSum+=-amt;
+      const acc=b.byAcc.get(accName)||{inSum:0,outSum:0};
+      if(amt>0)acc.inSum+=amt;else acc.outSum+=-amt;b.byAcc.set(accName,acc);
+      const label=`${amt>0?'+':'-'}|${String(t.action||t.merchant||'ללא שם').replace(/\s+/g,' ').trim().slice(0,40)||'ללא שם'}`;
+      const g=b.byAction.get(label)||{sum:0,n:0,txs:[]};g.sum+=Math.abs(amt);g.n++;
+      const isCard=amt<0&&/ישראכרט|כאל|מקס|max|לאומי קארד|ויזה|כרטיסי אשראי|אשראי/i.test(String(t.action||''));
+      g.txs.push({date:t.date,amt,details:String(t.details||'').slice(0,60),ref:t.reference||'',acc:accName,isCard});
+      b.byAction.set(label,g);
+    }}
+  const cardsBy=new Map();
+  for(const r of cardMonths){const k=normMonth(r.month);if(!k)continue;
+    if(!cardsBy.has(k))cardsBy.set(k,[]);cardsBy.get(k).push(r)}
+  // כרטיס-חודש מוליד את שורת חודש-החיוב שלו (החודש העוקב), לא את שלו-עצמו.
+  const nextK=k=>{const[m1,y1]=k.split('.').map(Number);
+    return m1===12?`01.${y1+1}`:`${String(m1+1).padStart(2,'0')}.${y1}`};
+  for(const k of cardsBy.keys())bucket(nextK(k));
+  const keys=[...buckets.keys()].sort((a,b)=>{const[a1,a2]=a.split('.'),[b1,b2]=b.split('.');
+    return (Number(b2)*12+Number(b1))-(Number(a2)*12+Number(a1))});
+  if(!keys.length){box.innerHTML='<div class="empty">אין תנועות מתוארכות — התחבר וסנכרן קודם.</div>';return}
+  const pickEl=$('#monthPick');
+  pickEl.innerHTML='<option value="">כל החודשים</option>'+keys.map(k=>`<option value="${k}">${k}</option>`).join('');
+  pickEl.value=pick&&keys.includes(pick)?pick:'';
+  const chosen=pickEl.value;
+  const shown=chosen?keys.filter(k=>k===chosen):keys;
+  const pct=(x,t)=>t?` (${(x/t*100).toFixed(0)}%)`:'';
+  box.innerHTML=shown.map(k=>{
+    const b=buckets.get(k),net=b.inSum-b.outSum;
+    const prevK=(()=>{const[m1,y1]=k.split('.').map(Number);
+      return m1===1?`12.${y1-1}`:`${String(m1-1).padStart(2,'0')}.${y1}`})();
+    // cmCharged - הכרטיסים שחיובם ירד בחודש הזה (עסקאות החודש הקודם);
+    // cmSame - נפילה לאחור בלבד, לכרטיס שמחויב באותו חודש.
+    const cmCharged=cardsBy.get(prevK)||[],cmSame=cardsBy.get(k)||[];
+    const cardSum=cmCharged.reduce((s,r)=>s+(Number(r.amount)||0),0);
+    const actions=dir=>[...b.byAction.entries()].filter(([l])=>l.startsWith(dir))
+      .sort((x,y)=>y[1].sum-x[1].sum);
+    const merch=new Map();
+    for(const r of cmCharged)for(const t of r.transactions||[]){
+      const m2=String(t.merchant||'ללא שם').slice(0,40);const g=merch.get(m2)||{sum:0,n:0,txs:[]};
+      const am=Math.abs(Number(t.amount)||0);g.sum+=am;g.n++;
+      g.txs.push({date:t.date||'',amt:-am,details:t.payments?`תשלומים ${t.payments}`:'',ref:'',acc:`כרטיס ${r.suffix||''}`});
+      merch.set(m2,g)}
+    const topMerch=[...merch.entries()].sort((x,y)=>y[1].sum-x[1].sum);
+    // התאמת סכום (±1 ש"ח) קודם מול החודש הקודם - המקרה הרגיל - ואז מול
+    // אותו חודש; בלי התאמה נופלים לחודש הקודם ואז לנוכחי (רק מעל 200 ש"ח).
+    const chargeCards=amt=>{
+      const near=list=>list.filter(r=>Math.abs((Number(r.amount)||0)-Math.abs(amt))<=1);
+      const hp=near(cmCharged);if(hp.length)return{rows:hp,exact:true,note:''};
+      const hc=near(cmSame);if(hc.length)return{rows:hc,exact:true,note:''};
+      if(Math.abs(amt)<200)return{rows:[],exact:false,note:''};
+      if(cmCharged.length)return{rows:cmCharged,exact:false,note:'התאמה לפי חודש החיוב'};
+      return{rows:cmSame,exact:false,note:'התאמה לפי חודש'}};
+    const cardDrill=t=>{if(!t.isCard)return '';
+      if(!cmCharged.length&&!cmSame.length)
+        return `<tr class="m-cardwrap"><td colspan="3"><span class="muted">אין פירוט אשראי שמור לחודש ${esc(prevK)}</span></td></tr>`;
+      const {rows,exact,note}=chargeCards(t.amt);
+      const txn=rows.flatMap(r=>(r.transactions||[]).map(x=>({...x,suffix:r.suffix})));
+      if(!txn.length)return '';
+      return `<tr class="m-cardwrap"><td colspan="3"><details class="m-cardsub">
+        <summary>▸ פירוט החיוב · ${txn.length} עסקאות · כרטיס${rows.length>1?'ים':''} ${rows.map(r=>esc(r.suffix||'')).join(', ')} <span class="muted">(חודש עסקאות ${esc(normMonth(rows[0]?.month)||rows[0]?.month||'')})</span>${exact?'':` <span class="muted">(${note})</span>`}</summary>
+        <table class="m-sub"><tbody>${txn.sort((a2,b2)=>Math.abs(Number(b2.amount)||0)-Math.abs(Number(a2.amount)||0)).map(x=>
+         `<tr><td class="num">${esc(x.date||'')}</td><td>${esc(x.merchant||'')} <span class="muted">${x.payments?`תשלומים ${esc(x.payments)} · `:''}כרטיס ${esc(x.suffix||'')}</span></td>
+          <td class="num neg">${money(Math.abs(Number(x.amount)||0))}-</td></tr>`).join('')}</tbody></table></details></td></tr>`};
+    const groupTx=g=>`<table class="m-sub"><tbody>${(g.txs||[]).map(t=>
+      `<tr><td class="num">${esc(t.date)}</td><td>${esc(t.details||'')} <span class="muted">${esc(t.acc)}${t.ref?` · ${esc(t.ref)}`:''}</span></td>
+       <td class="num ${t.amt<0?'neg':'pos'}">${money(Math.abs(t.amt))}${t.amt<0?'-':''}</td></tr>${cardDrill(t)}`).join('')}</tbody></table>`;
+    const list=(title,rows,total)=>rows.length?`<div class="m-col"><h4>${title}</h4>
+      ${rows.map(([l,g])=>`<details class="m-row"><summary><span>▸ ${esc(l.slice(2))} <span class="muted">×${g.n}</span></span>
+        <span class="num">${money(g.sum)}${pct(g.sum,total)}</span></summary>${groupTx(g)}</details>`).join('')}</div>`:'';
+    return `<details class="m-month" ${chosen?'open':''}><summary>
+      <span><b>${esc(k)}</b> <span class="muted">· ${b.n} תנועות${cmCharged.length?` · חיובי אשראי ${money(cardSum)}`:''}</span></span>
+      <span class="num"><span class="pos">+${money(b.inSum)}</span> · <span class="neg">-${money(b.outSum)}</span>
+       · נטו <b class="${net<0?'neg':'pos'}">${money(net)}</b></span></summary>
+      <div class="m-grid">
+       ${list('הכנסות לפי סוג',actions('+'),b.inSum)}
+       ${list('הוצאות לפי סוג',actions('-'),b.outSum)}
+       ${topMerch.length?`<div class="m-col"><h4>אשראי לפי בית עסק <span class="muted">(חיובי החודש · עסקאות ${esc(prevK)} · כלול בהוצאות)</span></h4>
+        ${topMerch.map(([m2,g])=>`<details class="m-row"><summary><span>▸ ${esc(m2)} <span class="muted">×${g.n}</span></span>
+         <span class="num">${money(g.sum)}${pct(g.sum,cardSum)}</span></summary>${groupTx(g)}</details>`).join('')}</div>`:''}
+       <div class="m-col"><h4>לפי חשבון</h4><table><tbody>
+        ${[...b.byAcc.entries()].sort((x,y)=>(y[1].inSum+y[1].outSum)-(x[1].inSum+x[1].outSum)).map(([n2,v2])=>
+         `<tr><td>${esc(n2)}</td><td class="num"><span class="pos">+${money(v2.inSum)}</span> / <span class="neg">-${money(v2.outSum)}</span></td></tr>`).join('')}</tbody></table></div>
+      </div></details>`}).join('');
+}
