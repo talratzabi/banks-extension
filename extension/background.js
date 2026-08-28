@@ -1915,11 +1915,21 @@ const disc=(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredA
 const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)balances[`${a.branch}-${a.accountNumber}`]=a.balance;const tabId=leumiTab(tabs).id,txUrl=LEUMI_TX_URL,loanUrl=LEUMI_LOAN_URL;let r,lastError='',lastDebug=null;
 // WHY 27.08.2026 - "למה הסנכרון של לאומי נורא איטי". במקום להתווכח על
 // ההערכה, כל שלב נמדד ונרשם ל-leumiTiming. הריצה הבאה תענה בעצמה.
-const t0=Date.now();const stageMs={};const stamp=(k,from)=>{stageMs[k]=Date.now()-from};const attempts=[];for(let attempt=1;attempt<=3;attempt++){const attemptStart=Date.now();await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא תנועות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,txUrl);// WHY: לדף עצמו יש המתנה מוצהרת של 45 שניות (openCurrentAccount), והשומר
+const t0=Date.now();const stageMs={};const stamp=(k,from)=>{stageMs[k]=Date.now()-from};const attempts=[];
+// ⚠⚠ 28.08.2026 - נמדד חי: חשבון 348300 עבר בדלתא (22 שורות) ואז 876000
+// נתקע ב"ממתין לרשת התנועות" - והניסיון החוזר קרא מחדש **גם את מה שכבר
+// הצליח**. כשל של חשבון אחד לא זורק עוד את עבודת השאר: תוצאות חלקיות
+// נאספות בין הניסיונות, וניסיון חוזר מבקש רק את החשבונות החסרים.
+const collectedLeumi=new Map();let lastGoodR=null;
+for(let attempt=1;attempt<=3;attempt++){const missingKeys=keys.filter(k=>!collectedLeumi.has(k));const attemptStart=Date.now();await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא תנועות, ניסיון ${attempt} מתוך 3${collectedLeumi.size?` (${collectedLeumi.size} חשבונות כבר בידיים, ממשיך ב-${missingKeys.length})`:''}`});try{await prepareLeumiRoute(tabId,txUrl);// WHY: לדף עצמו יש המתנה מוצהרת של 45 שניות (openCurrentAccount), והשומר
 // ב-45 ירה **באותו רגע** ובלע את ההודעה המדויקת שלו ("רשת התנועות לא
 // נטענה") לטובת "הפסיק להגיב" הכללי. 75 שניות נותנות לדף לומר את שלו קודם.
 // ⚠ שומר שמקדים את השגיאה האמיתית גרוע משומר שאין - הוא מוחק ראיה.
-r=await withHeartbeat(chrome.tabs.sendMessage(tabId,{type:'LEUMI_SYNC_SELECTED',keys,balances}),leumiSyncBudget(keys.length),'קריאת תנועות בלאומי',75000);if(r?.ok&&r.accounts?.length===keys.length&&r.accounts.every(a=>a.balance!=null&&Array.isArray(a.transactions)))break;lastError=r?.error||'לא התקבלו תנועות ויתרות מלאות';lastDebug=r?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}
+const rr=await withHeartbeat(chrome.tabs.sendMessage(tabId,{type:'LEUMI_SYNC_SELECTED',keys:missingKeys,balances}),leumiSyncBudget(missingKeys.length),'קריאת תנועות בלאומי',75000);
+for(const a of (rr?.accounts||[]))if(a&&a.balance!=null&&Array.isArray(a.transactions))collectedLeumi.set(a.key,a);
+if(rr?.ok)lastGoodR=rr;
+if(collectedLeumi.size===keys.length){r={...(lastGoodR||rr||{}),ok:true,accounts:keys.map(k=>collectedLeumi.get(k))};break}
+lastError=rr?.error||'לא התקבלו תנועות ויתרות מלאות';lastDebug=rr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}
 // WHY: עד עכשיו רק הסיבה של הניסיון האחרון שרדה, ולכן לא היה אפשר לדעת
 // אם הראשון נפל אחרת. שלוש הסיבות והזמנים נשמרים.
 if(BFCACHE.test(String(lastError||'')))leumiForceInject=true;
@@ -1930,7 +1940,15 @@ await chrome.storage.local.set({leumiAttempts:attempts});
 // ⚠ שתי שגיאות שונות כן מצדיקות ניסיון שלישי - זה עשוי להיות רעש חולף.
 if(attempts.length>=2&&!BFCACHE.test(String(lastError||''))&&attempts[attempts.length-1].error===attempts[attempts.length-2].error){
   lastError=`${lastError} (שני ניסיונות נפלו זהה — הופסק)`;r=null;break}
-r=null}if(!r){await chrome.storage.local.set({leumiDebug:{stage:'transactions',asked:txUrl,error:lastError,text:dbgText(txUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת תנועות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}stamp('transactions',t0);
+r=null}
+// חלקי עדיף על כלום: מה שנקרא בהצלחה ממשיך בצנרת (נשמר, מקבל הלוואות),
+// והחשבונות שנכשלו נאמרים במפורש בסוף במקום להפיל את כולם.
+let leumiMissingKeys=[];
+if(!r&&collectedLeumi.size){leumiMissingKeys=keys.filter(k=>!collectedLeumi.has(k));
+  r={...(lastGoodR||{}),ok:true,accounts:[...collectedLeumi.values()]};
+  await chrome.storage.local.set({syncStatus:`לאומי: ${collectedLeumi.size} חשבונות נקראו; ${leumiMissingKeys.length} נכשלו (${String(lastError||'').slice(0,80)}) — ממשיך עם מה שבידיים`});}
+if(!r){await chrome.storage.local.set({leumiDebug:{stage:'transactions',asked:txUrl,error:lastError,text:dbgText(txUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת תנועות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}stamp('transactions',t0);
+const syncedLeumiKeys=r.accounts.map(a=>a.key);
 // WHY 28.08.2026 - טל: "לא הצליח, אין עדכון". והמדידה הראתה שהכול **כן**
 // נקרא: 200 שורות תנועות, ושתי הלוואות משני חשבונות, עד "סוגר הרחבה".
 // ואז הריצה נעלמה - **וכל העבודה נזרקה.** הסיבה מבנית: `syncLeumi` מחזיר
@@ -1969,7 +1987,7 @@ const tLoans=Date.now();let lr=null;lastError='';lastDebug=null;const loanAttemp
        ...(s.loansTotal!=null?{loansTotal:s.loansTotal}:{}),...(s.loanCount!=null?{loanCount:s.loanCount}:{})}})};
    await chrome.storage.local.set({syncStatus:'לאומי: היתרות לא השתנו — ההלוואות נלקחו מהמסד'});
  }}
-if(!lr)for(let attempt=1;attempt<=3;attempt++){const loanStart=Date.now();await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא הלוואות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,loanUrl);lr=await withHeartbeat(chrome.tabs.sendMessage(tabId,{type:'LEUMI_LOANS_SELECTED',keys}),leumiLoanBudget(keys.length),'קריאת הלוואות בלאומי',45000);if(lr?.ok&&lr.accounts?.length===keys.length&&lr.accounts.every(a=>Array.isArray(a.loans)))break;lastError=lr?.error||'לא התקבל פירוט הלוואות מלא';lastDebug=lr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}
+if(!lr)for(let attempt=1;attempt<=3;attempt++){const loanStart=Date.now();await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא הלוואות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,loanUrl);lr=await withHeartbeat(chrome.tabs.sendMessage(tabId,{type:'LEUMI_LOANS_SELECTED',keys:syncedLeumiKeys}),leumiLoanBudget(syncedLeumiKeys.length),'קריאת הלוואות בלאומי',45000);if(lr?.ok&&lr.accounts?.length===syncedLeumiKeys.length&&lr.accounts.every(a=>Array.isArray(a.loans)))break;lastError=lr?.error||'לא התקבל פירוט הלוואות מלא';lastDebug=lr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}
 // ⚠ נמדד: שלושת הניסיונות נפלו על אותה שגיאה, 120/120/121 שניות.
 // חזרה שלישית על תנאים זהים אינה ניסיון - היא רק עוד שתי דקות.
 if(BFCACHE.test(String(lastError||'')))leumiForceInject=true;
@@ -2028,7 +2046,7 @@ await chrome.storage.local.set({leumiTiming:{at:new Date().toISOString(),seconds
 // בדיוק ההבטחה החצאית שתוקנה ב-22.08 בשורת הסטטוס של לאומי.
 const rep=(await chrome.storage.local.get({leumiChequeReport:null})).leumiChequeReport;
 const left=Number(rep?.remaining)||0;
-await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}${left?` — נותרו ${left} צילומים לסנכרון הבא`:''}${missingPay?` · ${missingPay} הלוואות ללא תשלום קרוב (ההרחבה לא נפתחה)`:''}`});return result}
+await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}${left?` — נותרו ${left} צילומים לסנכרון הבא`:''}${missingPay?` · ${missingPay} הלוואות ללא תשלום קרוב (ההרחבה לא נפתחה)`:''}${leumiMissingKeys.length?` ⚠ ${leumiMissingKeys.length} חשבונות לא נקראו הפעם (${leumiMissingKeys.join(', ')}) — נסה שוב`:''}`});return result}
 let chequeCtx={base:0,total:0,noRef:0,done:0,selectionKey:'',savedRefs:new Set()};
 let notFoundAll=[];
 // WHY 27.08.2026 - טל: "ואיך מסדרים את זה".

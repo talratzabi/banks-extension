@@ -54,15 +54,15 @@
     "semantic_hash": ""
   },
   "extension/leumi-content.js": {
-    "mtime": 1787913100.1724596,
-    "seen": 1787913159.0631192,
-    "ast_hash": "e4f3649040b25b5fe7a24ec847ae729c",
+    "mtime": 1787913352.762691,
+    "seen": 1787913434.0694711,
+    "ast_hash": "37579db5a9148aa7b024e6b04a843212",
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1787913105.972168,
-    "seen": 1787913159.0631192,
-    "ast_hash": "b28643943505c4ccc342f9eb4613be4b",
+    "mtime": 1787913358.987857,
+    "seen": 1787913434.0694711,
+    "ast_hash": "9682891a2b03946dd774b8186c607122",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1787913140.68254,
-    "seen": 1787913159.0631192,
-    "ast_hash": "00525a1820edc44205cd5517637eb12a",
+    "mtime": 1787913413.213513,
+    "seen": 1787913434.0694711,
+    "ast_hash": "51c95d564c7c2985c6fdb75bffa502c3",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {

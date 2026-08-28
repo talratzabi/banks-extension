@@ -1,16 +1,16 @@
 # Graph Report - banks-extension  (2026-08-28)
 
 ## Corpus Check
-- 33 files · ~152,059 words
+- 33 files · ~152,318 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1086 nodes · 1809 edges · 85 communities (73 shown, 12 thin omitted)
+- 1088 nodes · 1812 edges · 85 communities (73 shown, 12 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 11 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e1b68f1f`
+- Built from commit: `6ef8891a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -133,7 +133,7 @@ Nodes (51): activeAccount(), applyCollectSince(), assertEntityMatches(), chainSc
 
 ### Community 2 - "leumi-content.js"
 Cohesion: 0.11
-Nodes (51): accountCard(), accountName(), accountTabs(), applyButtonIn(), applyLeumiRange(), captureOptionProbe(), cellsOf(), chequeImages() (+43 more)
+Nodes (52): accountCard(), accountName(), accountTabs(), applyButtonIn(), applyLeumiRange(), captureOptionProbe(), cellsOf(), chequeImages() (+44 more)
 
 ### Community 3 - "background.js"
 Cohesion: 0.06
@@ -149,7 +149,7 @@ Nodes (51): accountKinds, accounts, agoText(), attributeStatus(), balanceLinkSty
 
 ### Community 6 - "HANDOFF.md"
 Cohesion: 0.04
-Nodes (48): 1.33.1 — הריבית האמיתית בטבלה, ואריח BTB שפתח את פועלים, 1.33.2 — התאריך שלא נקרא, וההפלה השקטה של כל השאר, 1.33.3 — „הסנכרון נכשל" שהיה בעצם ניתוק, 1.33.4 — `\b` אחד מנע את תאריך התשלום, 1.34.0 — לשונית „מסלקה": קליטת נתוני הגמל, ההשתלמות והפנסיה, 1.35.0 — לשונית „נדל״ן", 1.36.0 — לשונית „מאזן נכסים": צד הנכסים, 1.37.0 - מאזן נכסים: צד ההתחייבויות וההון העצמי (+40 more)
+Nodes (49): 1.33.1 — הריבית האמיתית בטבלה, ואריח BTB שפתח את פועלים, 1.33.2 — התאריך שלא נקרא, וההפלה השקטה של כל השאר, 1.33.3 — „הסנכרון נכשל" שהיה בעצם ניתוק, 1.33.4 — `\b` אחד מנע את תאריך התשלום, 1.34.0 — לשונית „מסלקה": קליטת נתוני הגמל, ההשתלמות והפנסיה, 1.35.0 — לשונית „נדל״ן", 1.36.0 — לשונית „מאזן נכסים": צד הנכסים, 1.37.0 - מאזן נכסים: צד ההתחייבויות וההון העצמי (+41 more)
 
 ### Community 7 - "render"
 Cohesion: 0.23
@@ -396,7 +396,7 @@ Cohesion: 0.50
 Nodes (5): accountForCard(), cardDigits(), dayMonthOf(), previousChargeDayMonth(), reconcileUnassignedCards()
 
 ## Knowledge Gaps
-- **509 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+504 more)
+- **510 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+505 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **12 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -407,13 +407,13 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.105) - this node is a cross-community bridge._
 - **Why does `2026-08-22 · Claude · אין לוח שנה — בורר התקופה הוא קבוצת רדיו — 1.1.6` connect `2026-08-22 · Claude · אין לוח שנה — בורר התקופה הוא קבוצת רדיו — 1.1.6` to `HANDOFF — מסירה בין סוכנים`?**
   _High betweenness centrality (0.008) - this node is a cross-community bridge._
-- **Why does `2026-08-22 · Claude · „מאומת" בלאומי היה הבטחה שהקוד לא קיים — 1.1.2` connect `2026-08-22 · Claude · „מאומת" בלאומי היה הבטחה שהקוד לא קיים — 1.1.2` to `HANDOFF — מסירה בין סוכנים`?**
+- **Why does `סיכום 28.08.2026 - לאומי ודיסקונט פרטי נסגרו (1.42.0 -> 1.48.1)` connect `סיכום 28.08.2026 - לאומי ודיסקונט פרטי נסגרו (1.42.0 -> 1.48.1)` to `HANDOFF.md`?**
   _High betweenness centrality (0.005) - this node is a cross-community bridge._
 - **What connects `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart` to the rest of the system?**
-  _509 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _510 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `HANDOFF — מסירה בין סוכנים` be split into smaller, more focused modules?**
   _Cohesion score 0.009216589861751152 - nodes in this community are weakly interconnected._
 - **Should `discount-content.js` be split into smaller, more focused modules?**
   _Cohesion score 0.08020050125313283 - nodes in this community are weakly interconnected._
 - **Should `leumi-content.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.11175616835994194 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.1090146750524109 - nodes in this community are weakly interconnected._
