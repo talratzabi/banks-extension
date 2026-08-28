@@ -1158,9 +1158,22 @@ async function syncFibi(tabId){
     await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnAccountMngment/OnSummaryReports/createOwnerApproval'});await delay(1800);
     const ownerResult=await fibiRead(tabId,'FIBI_OWNER','קריאת שם בעל החשבון');const owner=ownerResult.data||{fullName:'',firstName:''};
     const existingSame=state.accounts.find(a=>a.source?.startsWith('fibi-')&&a.accountNumber===s.data.accountNumber&&a.source!==state.pendingFibiSlot);if(existingSame)throw Error('זהו אותו חשבון שכבר נשמר בחיבור האחר');
-    await chrome.storage.local.set({syncStatus:'הבינלאומי: קורא פירוט הלוואות ומשכנתאות'});
-    await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnLoansMortgageMenu/OnLoans/AuthLoansDetails'});await delay(2200);
-    const loanResult=await fibiRead(tabId,'FIBI_LOANS','קריאת פירוט ההלוואות');loanResult.data.loans=await enrichFibiInstallments(tabId,loanResult.data.loans||[]);
+    // ⚠ 28.08.2026 - DELTA-AUDIT פער 4: יתרה זהה לשמור => ההלוואות ולוחות
+    // הסילוקין (החלק הכבד - דיאלוג לכל הלוואה, עד 50 סבבים×250ms) נלקחים
+    // מהשמור. תשלום הלוואה משנה את יתרת העו"ש, ולכן יתרה-זהה מכסה גם אותן.
+    // התנועות עדיין נקראות תמיד - יתרה זהה אינה מוכיחה היעדר תנועות
+    // (שתי נגדיות באותו סכום), והלקח הזה נקבע ע"י טל בדיסקונט.
+    const savedFibi=state.accounts.find(a=>a.source===state.pendingFibiSlot);
+    const fibiBalSame=!!(savedFibi&&savedFibi.balance!=null&&Number.isFinite(Number(s.data.balance))&&Math.abs(Number(s.data.balance)-Number(savedFibi.balance))<0.005);
+    let loanResult;
+    if(fibiBalSame&&(savedFibi.loans||[]).length){
+      loanResult={data:{loans:savedFibi.loans.map(l=>({...l}))}};
+      await chrome.storage.local.set({syncStatus:'הבינלאומי: היתרה לא השתנתה — ההלוואות ולוחות הסילוקין נלקחו מהמסד'});
+    }else{
+      await chrome.storage.local.set({syncStatus:'הבינלאומי: קורא פירוט הלוואות ומשכנתאות'});
+      await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnLoansMortgageMenu/OnLoans/AuthLoansDetails'});await delay(2200);
+      loanResult=await fibiRead(tabId,'FIBI_LOANS','קריאת פירוט ההלוואות');loanResult.data.loans=await enrichFibiInstallments(tabId,loanResult.data.loans||[]);
+    }
     // ⚠⚠ קודם מנסים את המסך החדש („תנועות בחשבון"), לפי בקשת טל: שם הטווח
     // נבחר בחלונית רגילה **וכל התנועות בעמוד אחד**. ⚠ הנתיב אינו ידוע ולכן
     // אינו מנוחש — נלחץ פריט התפריט, והמדידה נשמרת כדי שייכתב לו מתאם.
@@ -1252,7 +1265,11 @@ async function syncFibi(tabId){
     // WHY (AUDIT סעיף 2): state נקרא בתחילת הסנכרון, לפני דקות. קוראים מחדש.
     await accountsMutex(async()=>{
     const accounts=(((await chrome.storage.local.get({accounts:[]})).accounts)||[]).filter(a=>a.source!==source);accounts.push(account);const names=(await chrome.storage.local.get({fibiConnectionNames:{}})).fibiConnectionNames;names[source]=owner.firstName||t.data.accountNumber;
-    await chrome.storage.local.set({accounts,fibiConnectionNames:names,pendingFibiSlot:'',syncStatus:`${label} סונכרן`,lastAutoSync:now});});if(!autoBusy)await chrome.runtime.openOptionsPage();
+    // "אין נתונים חדשים" - השוואת מפתחות מול השמור, אותו מפתח כמו דדופ הדפדוף.
+    const fibiKey=x=>`${x.date}|${x.reference||''}|${x.debit??''}|${x.credit??''}|${x.description||x.action||''}`;
+    const savedKeys=new Set(((savedFibi&&savedFibi.transactions)||[]).map(fibiKey));
+    const freshFibi=(t.data.transactions||[]).filter(x=>!savedKeys.has(fibiKey(x))).length;
+    await chrome.storage.local.set({accounts,fibiConnectionNames:names,pendingFibiSlot:'',syncStatus:`${label} סונכרן בהצלחה${savedFibi?(freshFibi?` — ${freshFibi} תנועות חדשות`:' — אין נתונים חדשים'):''}${fibiBalSame&&(savedFibi.loans||[]).length?' · ההלוואות מהמסד':''}`,lastAutoSync:now});});if(!autoBusy)await chrome.runtime.openOptionsPage();
   }catch(e){await chrome.storage.local.set({pendingFibiSlot:'',syncStatus:`שגיאה בבינלאומי: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{running=false;await restoreSyncTabs()}
 }
 
