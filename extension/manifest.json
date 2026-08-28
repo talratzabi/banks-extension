@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "בנקים",
-  "version": "1.61.1",
+  "version": "1.61.2",
   "description": "דשבורד מקומי לסנכרון מאומת של בנקים וכרטיסי אשראי.",
   "icons": {
     "16": "icons/bank-16.png",

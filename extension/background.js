@@ -2390,7 +2390,24 @@ async function startCal(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').s
 async function runCal(tabId,requestedSuffix=''){
   if(calBusy)return;calBusy=true;
   try{
-    await chrome.storage.local.set({syncStatus:'כאל: קורא חיוב קרוב וחשבון חיוב'});let current=await chrome.tabs.get(tabId);if(!String(current.url||'').includes('digital-web.cal-online.co.il'))throw Error('החיבור לכאל אינו פעיל — יש להתחבר מחדש');await prepareCal(tabId);if(!String(current.url||'').includes('/dashboard')){const go=await chrome.tabs.sendMessage(tabId,{type:'CAL_GO_HOME'});if(!go?.ok)throw Error('לא נמצא קישור דף הבית בכאל');await waitTab(tabId,'/dashboard');await prepareCal(tabId)}await delay(1200);
+    await chrome.storage.local.set({syncStatus:'כאל: קורא חיוב קרוב וחשבון חיוב'});let current=await chrome.tabs.get(tabId);if(!String(current.url||'').includes('digital-web.cal-online.co.il'))throw Error('החיבור לכאל אינו פעיל — יש להתחבר מחדש');await prepareCal(tabId);if(!String(current.url||'').includes('/dashboard')){const go=await chrome.tabs.sendMessage(tabId,{type:'CAL_GO_HOME'});
+    if(!go?.ok){
+      // ⚠ 28.08.2026 - "לא נמצא קישור דף הבית בכאל": הלשונית ישבה על עמוד
+      // ביניים (סשן שפג?) בלי הקישור. נמדד 28.08: בדף ההתחברות אין "דף הבית".
+      // במקום להיכשל - ניווט ישיר לדשבורד; אם כאל מפנה להתחברות, נרשם
+      // "ממתין להתחברות" והלשונית מוקפצת. אחרי הכניסה CAL_AUTHENTICATED
+      // (נורה כל 5 שניות) ימשיך את הסנכרון לבד - pendingCal נשאר דלוק.
+      await chrome.tabs.update(tabId,{url:'https://digital-web.cal-online.co.il/dashboard'});
+      const goStart=Date.now();let landedLogin=false;
+      while(Date.now()-goStart<30000){const t=await chrome.tabs.get(tabId);
+        if(t.status==='complete'&&/\/login/.test(String(t.url||''))){landedLogin=true;break}
+        if(t.status==='complete'&&String(t.url||'').includes('/dashboard'))break;
+        await delay(250)}
+      if(landedLogin){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לכאל'});
+        try{const t=await chrome.tabs.get(tabId);await chrome.windows.update(t.windowId,{focused:true});await chrome.tabs.update(tabId,{active:true})}catch{}
+        return}
+    }
+    await waitTab(tabId,'/dashboard');await prepareCal(tabId)}await delay(1200);
     const hr=await chrome.tabs.sendMessage(tabId,{type:'CAL_HOME'});if(!hr?.ok)throw Error('דף הבית של כאל לא נקרא');const home=hr.data||{};
     await chrome.storage.local.set({syncStatus:'כאל: פותח עסקאות לפי מועד חיוב'});const opened=await chrome.tabs.sendMessage(tabId,{type:'CAL_OPEN_MONTHLY'});if(!opened?.ok)throw Error('לא נמצא המסלול עסקאות בכרטיס לפי מועד חיוב');for(let w=0;w<30;w++){current=await chrome.tabs.get(tabId);if(new URL(current.url).pathname==='/transactions')break;await delay(300)}current=await chrome.tabs.get(tabId);if(new URL(current.url).pathname!=='/transactions')throw Error('דף העסקאות החודשי של כאל לא נפתח');await prepareCal(tabId);await delay(1800);
     const wanted=String(requestedSuffix||'').replace(/\D/g,'').slice(-4),monthly=[],seenMonths=new Set();let previous='';
