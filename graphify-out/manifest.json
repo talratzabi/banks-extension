@@ -1,8 +1,8 @@
 {
   "extension/background.js": {
-    "mtime": 1787893407.195009,
-    "seen": 1787902538.2787333,
-    "ast_hash": "2a1bd98dc0a51970d3770b45e0440cbe",
+    "mtime": 1787907328.8092809,
+    "seen": 1787907387.5096028,
+    "ast_hash": "484e183c1e2b66ccfee4f5804a84cbd2",
     "semantic_hash": ""
   },
   "extension/btb-content.js": {
@@ -60,15 +60,15 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1787906556.7942421,
-    "seen": 1787906638.4192085,
-    "ast_hash": "f4afb4842ae5715afdf9d3baedaa20e0",
+    "mtime": 1787907233.3676317,
+    "seen": 1787907387.5096028,
+    "ast_hash": "5bd9d71ec49bb33ad8c166e01f189613",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
-    "mtime": 1787906524.955447,
-    "seen": 1787906638.4192085,
-    "ast_hash": "50cf5bb620cb60abfc23a34e80bca53f",
+    "mtime": 1787906808.8755164,
+    "seen": 1787907387.5096028,
+    "ast_hash": "36b3ad705f6fab40b7878efe24ea5284",
     "semantic_hash": ""
   },
   "extension/mizrahi-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1787906618.6107266,
-    "seen": 1787906638.4192085,
-    "ast_hash": "02316345a43f4ec4230f2edd28ab1b5c",
+    "mtime": 1787907367.515794,
+    "seen": 1787907387.5096028,
+    "ast_hash": "057b5f96b65982794a9328db26886fe7",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {

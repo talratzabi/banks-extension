@@ -217,6 +217,22 @@ function accountForCard(accounts,card,savedId){
     }));
     if(m.length===1)target=m[0];                                              // ⚠ חד-ערכי בלבד; שניים = לא יודעים
   }
+  // מסלול 5 (28.08.2026) - "כרטיסי האשראי לא מזהים לאיזה חשבונות הם שייכים":
+  // מקס אינו מוסר debitAccount/chargeDate/previousCharge, ולכן מסלולים 3-4
+  // חסרי חומר עבורו. במקומם runMax מצרף bankChargeProbe: סכום חיוב החודש
+  // שכבר ירד בבנק + חודש הנחיתה + שם המנפיק. בלי יום מדויק - ולכן הדרישה
+  // המפצה: שם המנפיק חייב להופיע בתנועת הבנק, וההתאמה חד-ערכית בלבד.
+  if(!target&&card.bankChargeProbe&&Number(card.bankChargeProbe.amount)>0){
+    const p=card.bankChargeProbe,re=new RegExp(p.textRe||'.','i');
+    const monthKeyOf=v=>{const m2=String(v||'').match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);if(!m2)return null;const y=m2[3].length===2?2000+Number(m2[3]):Number(m2[3]);return`${String(Number(m2[2])).padStart(2,'0')}.${y}`};
+    const m=accounts.filter(a=>(a.transactions||[]).some(t=>{
+      if(monthKeyOf(t.date||t.valueDate||t.transactionDate)!==p.monthKey)return false;
+      if(!re.test(`${t.action||''} ${t.details||''}`))return false;
+      const amount=Number(t.amount??t.debit??t.credit??0);
+      return Math.abs(Math.abs(amount)-Number(p.amount))<=1;                  // ±1 ש"ח - הלקח מהתאמת ה-viewer
+    }));
+    if(m.length===1)target=m[0];                                              // ⚠ חד-ערכי בלבד
+  }
   return target||null;
 }
 let reconcileBusy=false;
@@ -229,6 +245,28 @@ async function reconcileUnassignedCards(){
     const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{}});
     const accounts=(st.accounts||[]).map(a=>({...a,cards:[...(a.cards||[])]}));
     const patch={};let moved=0;
+    // ⚠ 28.08.2026 - כרטיסי מקס שנכנסו ל-maxUnassigned לפני 1.61.0 חסרים את
+    // bankChargeProbe (מסלול 5). מעשירים מן ההיסטוריה השמורה - אותו חישוב
+    // כמו ב-runMax: חודש-הכרטיס האחרון שהושלם, שחיובו נחת בבנק בחודש שאחריו.
+    if((st.maxUnassigned||[]).some(c=>!c.bankChargeProbe)){
+      try{
+        const d0=new Date(),nowNorm=String(d0.getMonth()+1).padStart(2,'0')+d0.getFullYear();
+        const bySuffix=new Map();
+        for(const r of await cardHistAll()){
+          const norm=String(r.month||'').replace(/\D/g,'');
+          if(!/max|מקס/i.test(String(r.issuer||''))||norm===nowNorm||!(Number(r.amount)>0))continue;
+          const key=norm.slice(2)+norm.slice(0,2); // YYYYMM להשוואת "חדש יותר"
+          const cur=bySuffix.get(r.suffix);
+          if(!cur||key>cur.key)bySuffix.set(r.suffix,{key,norm,amount:Number(r.amount)});
+        }
+        for(const c of st.maxUnassigned){
+          if(c.bankChargeProbe)continue;
+          const prev=bySuffix.get(c.suffix);if(!prev)continue;
+          const m1=Number(prev.norm.slice(0,2)),y1=Number(prev.norm.slice(2));
+          c.bankChargeProbe={amount:prev.amount,monthKey:m1===12?`01.${y1+1}`:`${String(m1+1).padStart(2,'0')}.${y1}`,textRe:'מקס|max'};
+        }
+      }catch(e){}
+    }
     for(const key of ['isracardUnassigned','calUnassigned','maxUnassigned']){
       const list=st[key]||[],left=[];
       for(const card of list){
@@ -2392,6 +2430,17 @@ async function runMax(tabId,requestedSuffix=''){
     }
   }
   if(!monthly.length)throw Error('לא נקראו עסקאות חודשיות מ‑MAX');const latestBySuffix=new Map();for(const c of monthly)if(!latestBySuffix.has(c.suffix))latestBySuffix.set(c.suffix,c);const nowLabel=firstRead.label,nowKey=firstRead.key;await chrome.storage.local.set({syncStatus:`MAX: החיוב הקרוב — ${nowLabel}`});await chrome.tabs.sendMessage(tabId,{type:'MAX_SELECT_MONTH',label:nowLabel});await delay(1800);await prepareMax(tabId);let currentPage=await chrome.tabs.sendMessage(tabId,{type:'MAX_READ'});if(!currentPage?.ok||currentPage.month!==nowKey)currentPage={ok:true,month:nowKey,total:0,cards:{}};const details=[...latestBySuffix.keys()].map(suffix=>{const transactions=currentPage.cards?.[suffix]||[],onlyCard=latestBySuffix.size===1,amount=onlyCard&&Number.isFinite(Number(currentPage.total))?Number(currentPage.total):transactions.reduce((s,t)=>s+Math.abs(Number(t.amount)||0),0);return{...latestBySuffix.get(suffix),amount,transactions,month:currentPage.month}});
+  // ⚠ 28.08.2026 - חומר למסלול 5 של מנוע השיוך: מקס אינו מוסר חשבון חיוב או
+  // previousCharge. במקומם - סכום חודש-הכרטיס האחרון שהושלם, שחיובו כבר נחת
+  // בבנק **בחודש שאחריו** (הלקח מ-1.57.1), ודרישת "מקס" בטקסט התנועה.
+  {const newer=(a,b)=>{const[p1,p2]=a.split('.'),[q1,q2]=b.split('.');return(Number(p2)*12+Number(p1))-(Number(q2)*12+Number(q1))};
+   const nextMonthKey=k=>{const[m1,y1]=k.split('.').map(Number);return m1===12?`01.${y1+1}`:`${String(m1+1).padStart(2,'0')}.${y1}`};
+   const prevBySuffix=new Map();
+   for(const c of monthly){if(!c.month||c.month===nowKey)continue;
+     const cur=prevBySuffix.get(c.suffix);
+     if(!cur||newer(c.month,cur.month)>0)prevBySuffix.set(c.suffix,c)}
+   for(const d of details){const prev=prevBySuffix.get(d.suffix);
+     if(prev&&Number(prev.amount)>0)d.bankChargeProbe={amount:Number(prev.amount),monthKey:nextMonthKey(prev.month),textRe:'מקס|max'}}}
   // ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
   return await accountsMutex(async()=>{
   const state=await chrome.storage.local.get({accounts:[],maxLastCards:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[];let assigned=0;const digits=v=>String(v||'').replace(/\D/g,'');
