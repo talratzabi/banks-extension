@@ -36,6 +36,8 @@ async function cardHistMonths(){
   const all = await cardHistWrap((await cardHistStore('readonly')).getAll());
   return [...new Set(all.map(r => r.month))].sort().reverse();
 }
+// לייצוא הגיבוי: כל רשומות החודשים כמו שהן.
+async function cardHistAll(){ return cardHistWrap((await cardHistStore('readonly')).getAll()) }
 async function cardHistStats(){
   const all=await cardHistWrap((await cardHistStore('readonly')).getAll()),out={};
   for(const r of all){const key=String(r.suffix||'');if(!key)continue;const item=out[key]||(out[key]={months:[],lastSync:''});if(!item.months.includes(String(r.month)))item.months.push(String(r.month));if(String(r.savedAt||'')>item.lastSync)item.lastSync=String(r.savedAt||'')}

@@ -39,7 +39,7 @@ chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='LEUMI_PING'){r
 // לכן התמונה נלקחת מהשורה עצמה ואין שום התאמה לפי תאריך וסכום, שממילא אינה חד-ערכית.
 // ⚠ בלי בחירת החשבון הקציר רץ על החשבון שבמקרה פעיל, ולכן לכל חשבון פרט לאחרון
 // לא נמצאו שורות תואמות ולא נשמר אף צילום.
-async function chequeImages(wanted,key,offset=0,total=0){const notFound=[];if(key&&accountTabs().length)await selectAccount(key);await openCurrentAccount();
+async function chequeImages(wanted,key,offset=0,total=0){const notFound=[]; const noImage=[];if(key&&accountTabs().length)await selectAccount(key);await openCurrentAccount();
 // ⚠⚠ 23.08.2026 — טל: „אין צילומי שיקים". נמדד:
 //   leumiChequeReport = {asked:15, saved:0, failed:0, already:0, why:""}
 // התבקשו 15 ונשמרו 0, **בלי אף כשל** — כלומר כולם דולגו בשקט בשורת
@@ -100,7 +100,17 @@ chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_PROGRESS',done:offset+wanted.inde
 await closeViewer();const before=new Set(dataSrc());hit.row.querySelector('button,[role="button"]')?.click();
 // 4 שניות היו קצרות, אבל 12 הוציאו את האצווה מתקרת ה-120 שניות
 // וכל ששת השיקים נזרקו. 8 שניות עם יציאה מוקדמת, והתקרה הורחבה ל-300.
-let fresh=[];for(let i=0;i<32;i++){await wait(250);fresh=dataSrc().filter(s=>!before.has(s));if(fresh.length>=2)break}
+let fresh=[];
+// WHY 27.08.2026 - טל: "למה הסנכרון של לאומי נורא איטי".
+// הלולאה הזאת המתינה 32*250ms = 8 שניות **גם כששום חלון לא נפתח**, כלומר
+// כששום תמונה לא יכולה להגיע. שיק כזה עלה 8 שניות ריקות בכל סנכרון מחדש.
+// עכשיו: אם אחרי 1.25 שניות אין [role="dialog"] ואין תמונה חדשה - אין מה
+// לחכות לו. יש חלון -> ממשיכים את 8 השניות המלאות כדי לא לקצץ טעינה אמיתית.
+for(let i=0;i<32;i++){await wait(250);
+  fresh=dataSrc().filter(s=>!before.has(s));
+  if(fresh.length>=2)break;
+  if(i===4&&!fresh.length&&!document.querySelector('[role="dialog"]'))break}
+if(!fresh.length)noImage.push(reference);
 if(fresh.length){out[reference]={front:fresh[0],back:fresh[1]||''};
 // ⚠ שולחים כל צילום מיד ולא רק בסוף האצווה: אצווה שחורגת מהתקרה איבדה עד עכשיו
 // גם את מה שכבר צולם בהצלחה (נמדד 18.08.2026 — 14 מתוך 32 אבדו כך).
@@ -108,6 +118,9 @@ chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_IMAGE',reference,front:fresh[0],b
 await closeViewer();
 // ⚠ הדילוגים נשלחים הלאה, אחרת הרשומה תמשיך לומר „failed:0" על כשל מלא.
 if(notFound.length)out.__notFound=notFound.slice(0,20);
+// WHY: "נלחץ ולא הגיעה תמונה" הוא מצב שונה מ"השורה לא נמצאה", והוא זה
+// שעולה זמן. בלי לדווח עליו, הרקע אינו יכול לזכור ולדלג בפעם הבאה.
+if(noImage.length)out.__noImage=noImage.slice(0,40);
 // ⚠ הגשש נשמר תמיד, גם בהצלחה: „0 החלות" מול „12 החלות ו-0 החטאות"
 // הם שני מצבים שונים לגמרי שנראים זהה בדוח השיקים.
 try{chqProbe.misses=chqProbe.misses.slice(0,25);
@@ -117,12 +130,21 @@ function snapshot(){try{const dated=datedRows(),page=normalized(txt(document.bod
 function probe(){try{const roleCounts={};for(const role of['table','grid','treegrid','row','rowgroup','gridcell','cell','columnheader','list','listitem']){const n=document.querySelectorAll(`[role="${role}"]`).length;if(n)roleCounts[role]=n}
 const frames=[...document.querySelectorAll('iframe')].map(f=>{let doc=null;try{doc=f.contentDocument}catch{}return{id:f.id||'',name:f.name||'',src:String(f.src||'').slice(0,140),sameOrigin:Boolean(doc),innerTables:doc?doc.querySelectorAll('table').length:-1,innerRows:doc?doc.querySelectorAll('table tr,[role="row"]').length:-1}});
 const dateEls=[...document.querySelectorAll('*')].filter(el=>!el.children.length&&/^\d{2}\.\d{2}\.\d{4}$/.test((el.textContent||'').trim())).slice(0,3);
+// WHY: "0 שורות מתוארכות" אינו אומר **למה**. שתי הדגימות האלה מכריעות:
+// rawCells מראה מה באמת יש בשורה, ו-dateish מראה איך תאריך נראה בפועל.
+const rawCells=gridRows().slice(0,3).map(r=>({
+  inside:r.querySelectorAll(CELL).length,
+  owns:(r.getAttribute('aria-owns')||'').split(/\s+/).filter(Boolean).length,
+  texts:rowCellEls(r).slice(0,10).map(c=>String(c.textContent||'').replace(/\s+/g,' ').trim().slice(0,22))}));
+const dateish=[...document.querySelectorAll('*')].filter(el=>!el.children.length
+  &&/^\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}$/.test((el.textContent||'').trim()))
+  .slice(0,6).map(el=>(el.textContent||'').trim());
 const chain=dateEls.map(el=>{const parts=[];let n=el;for(let i=0;i<6&&n&&n.tagName!=='BODY';i++){const role=n.getAttribute?.('role'),cls=typeof n.className==='string'&&n.className.trim()?'.'+n.className.trim().split(/\s+/).slice(0,2).join('.'):'';parts.push(`${n.tagName.toLowerCase()}${role?`[role=${role}]`:''}${cls}`);n=n.parentElement}return{path:parts.join(' < '),near:String(el.parentElement?.parentElement?.innerText||'').replace(/\s+/g,' ').slice(0,240)}});
 const flat=s=>String(s||'').replace(/\s+/g,' ').trim();
 const headers=[...document.querySelectorAll('[role="columnheader"]')].map(h=>flat(h.innerText||h.textContent)).slice(0,15);
 const gridRowEls=[...document.querySelectorAll('[role="row"]')];
 const sampleCells=gridRowEls.map(r=>[...r.querySelectorAll('[role="cell"],[role="gridcell"]')].map(c=>({t:flat(c.innerText),a:flat(c.getAttribute('aria-label')),cls:flat(typeof c.className==='string'?c.className:'').slice(0,60)}))).filter(cs=>cs.some(c=>/^\d{2}\.\d{2}\.\d{4}$/.test(c.t))).slice(0,5);
-return{roleCounts,frames,dateEls:dateEls.length,chain,headers,gridRowCount:gridRowEls.length,sampleCells,bodyLen:(document.body.innerText||'').length}}catch(e){return{probeError:e.message}}}
+return{roleCounts,frames,rawCells,dateish,dateEls:dateEls.length,chain,headers,gridRowCount:gridRowEls.length,sampleCells,bodyLen:(document.body.innerText||'').length}}catch(e){return{probeError:e.message}}}
 // ⚠ 18.08.2026 — הפריט שנרשם כפתוח ב-0.58.0: ההודעה נשלחה בלי לוודא שהמשתמש מחובר.
 // הגייט היחיד היה „מארח hb2 + קיים <main>", ודף ההתחברות עונה על שניהם. כל עוד
 // הכניסה הייתה על www.leumi.co.il (בלי content script) הבאג היה רדום; ברגע שהכניסה
@@ -173,7 +195,33 @@ function uniqueAccounts(elements){const seen=new Set();return elements.filter(el
 const CELL='[role="cell"],[role="gridcell"]';
 const cellText=el=>String(el?.innerText||'').replace(/\s+/g,' ').trim();
 function gridRows(){return[...document.querySelectorAll('[role="row"]')]}
-function cellsOf(row){return[...row.querySelectorAll(CELL)].map(cellText)}
+// WHY 27.08.2026 - טל: "נכשל". ה-snapshot ברגע הכשל מכריע:
+//   rows:201 - cell:2017 - columnheader:9 - headers כוללות "תאריך"
+//   head: "נמצאו 200 תנועות"        => **הדף מלא ותקין**
+//   datedRows:0 - dateEls:0          => **הגלאי עיוור**
+// אין במסמך אף עלה שכל הטקסט שלו הוא dd.mm.yyyy. הרשת שם, אנחנו לא רואים.
+// (cols:0 ו-firstRow:[] אינם ראיה נוספת - הם נגזרים מ-dated[0] שאינו קיים.)
+// ⚠ שלוש אפשרויות, ואין לי מדידה שמכריעה ביניהן:
+//   1. שנה דו-ספרתית - שדות הטווח כבר מדווחים placeholder:"dd.mm.yy"
+//   2. מפריד אחר (/ במקום .)
+//   3. התאים אינם צאצאים של [role=row] - רשת וירטואלית שטוחה עם aria-owns
+// **לכן הגלאי נעשה עמיד לשלושתן, ובמקביל נוסף אבחון שיכריע מי מהן זו.**
+// הנרמול הוא בתא עצמו ולא בתבניות, כדי שכל /^\d{2}\.\d{2}\.\d{4}$/ שכבר
+// קיים בקובץ ימשיך לעבוד בלי שינוי - שינוי רוחבי היה שובר קוד מדוד.
+const DATE_CELL=/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2}|\d{4})$/;
+const norm4=v=>{const m=DATE_CELL.exec(String(v==null?'':v).trim());if(!m)return v;
+  const y=m[3].length===2?'20'+m[3]:m[3];
+  return `${m[1].padStart(2,'0')}.${m[2].padStart(2,'0')}.${y}`};
+function rowCellEls(row){
+  let cells=[...row.querySelectorAll(CELL)];
+  if(cells.length)return cells;
+  // אפשרות 3: התא מקושר ולא מקונן
+  const owns=(row.getAttribute('aria-owns')||'').split(/\s+/).filter(Boolean);
+  if(owns.length){cells=owns.map(id=>document.getElementById(id)).filter(Boolean);if(cells.length)return cells}
+  // נפילה אחרונה: העלים של השורה עצמה
+  return [...row.querySelectorAll('*')].filter(el=>!el.children.length);
+}
+function cellsOf(row){return rowCellEls(row).map(c=>norm4(cellText(c)))}
 function datedRows(){return gridRows().map(row=>({row,cells:cellsOf(row)})).filter(x=>x.cells.some(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)))}
 // ⚠ מספר החשבון מופיע ב-DOM לפני שכרטיס היתרה נטען. בחלון הזה קריאה מטקסט כל הדף
 // תופסת את ה-₪ הראשון שנקרה בדרך — יתרה מצטברת של שורת תנועה — ומחזירה מספר שגוי בשקט.
@@ -181,7 +229,13 @@ function datedRows(){return gridRows().map(row=>({row,cells:cellsOf(row)})).filt
 async function accountCard(a){const key=`${a.branch}-${a.accountNumber}`;for(let i=0;i<60;i++){const hits=[...document.querySelectorAll('div,section,button')].filter(el=>{const t=normalized(cellText(el));return t.length<400&&t.includes(key)&&/₪\s*-?[\d,]+\.\d{2}/.test(t)});if(hits.length)return hits.sort((x,y)=>cellText(x).length-cellText(y).length)[0];await wait(250)}return null}
 function columnIndex(){const idx={};[...document.querySelectorAll('[role="columnheader"]')].forEach((h,i)=>{const label=cellText(h);if(label&&!(label in idx))idx[label]=i});return idx}
 // הרשת נבנית מעצמה ברגע שנבחר חשבון ספציפי — אין כפתור לפתוח, ואין ללחוץ על כפתור לא מזוהה בדף בנק מחובר.
-async function openCurrentAccount(){for(let i=0;i<180;i++){if(datedRows().length)return;await wait(250)}throw Error(`רשת התנועות לא נטענה בתוך 45 שניות (שורות ${gridRows().length}, תאים ${document.querySelectorAll(CELL).length})`)}
+// WHY 27.08.2026 - כאן נמצא השקט. leumiAttempts הראה 46 שניות בלי סימן
+// חיים, וזה **בדיוק** 180*250ms של הלולאה הזאת: היא ממתינה לרשת שלא
+// נטענת, ואינה משמיעה קול. עכשיו היא פועמת, כדי שהסטטוס יראה במה מדובר
+// ושהשומר לא יפרש המתנה מוצהרת כמוות.
+async function openCurrentAccount(){for(let i=0;i<180;i++){if(datedRows().length)return;
+  if(i%8===0)beat('ממתין לרשת התנועות',gridRows().length);
+  await wait(250)}throw Error(`רשת התנועות לא נטענה בתוך 45 שניות (שורות ${gridRows().length}, תאים ${document.querySelectorAll(CELL).length})`)}
 // ⚠ הרשת מרנדרת חלק מהשורות וטוענת עוד בגלילה. בלי זה נקראות רק השורות הראשונות
 // והתנועות האחרונות נראות כאילו אינן קיימות — הן פשוט עוד לא נכנסו ל-DOM.
 // ⚠⚠ 22.08.2026 — **הוחזר. הניסיון לתקן כאן החמיר את המצב, נמדד.**
@@ -197,7 +251,33 @@ async function openCurrentAccount(){for(let i=0;i<180;i++){if(datedRows().length
 // המימוש המקורי חוזר כלשונו. `leumiLoadRows` נשאר — הוא זה שגילה את זה.
 // ⚠ הפריט „נקראות ~29 שורות בלבד" **נשאר פתוח**, וצריך מדידה חיה של
 // המנגנון האמיתי (מה בעצם מפעיל טעינת עמוד נוסף) לפני ניסיון נוסף.
+// WHY 27.08.2026 - טל: "עדיין איטי". המדידה מהאחסון הראתה שהסטטוס תקוע
+// על "קורא תנועות, ניסיון 2 מתוך 3" - כלומר **ניסיון 1 נכשל**, וכל ניסiון
+// כזה שורף את leumiSyncBudget במלואו (7 דקות לחשבון אחד) לפני שנודע שנכשל.
+// שליחת התנועות היא הודעה **אחת** ארוכה, ולכן לרקע אין שום דרך לדעת אם
+// העמוד עובד או מת - הוא רק ממתין לתקרה. פעימה קלה כל סבב פותרת את זה.
+// WHY 28.08.2026 - **סוף-סוף השגיאה האמיתית**, אחרי יומיים של "מוות בשקט":
+//   "The page keeping the extension port is moved into back/forward cache,
+//    so the message channel is closed."
+// דף שנכנס ל-back/forward cache **סוגר את כל ערוצי ההודעות של התוסף**.
+// זה מסביר הכול למפרע: התשובה לעולם לא הגיעה, בלי שגיאה ובלי סיבה, תמיד
+// אחרי ניווט (selectAccount / prepareLeumiRoute). השומר של 45 השניות רק
+// דיווח על התסמין - "הפסיק להגיב" - כי הוא ירה לפני שהשגיאה הזאת הגיעה.
+// ⚠ דף שיש לו מאזין unload **אינו כשיר ל-bfcache**. זה הפתח, והוא מוגבל
+// לדף הבנק בזמן שהסקריפט שלנו חי - לא שינוי גלובלי בדפדפן.
+// ⚠ pageshow עם persisted=true מסמן דף שחזר מהמטמון; אם זה יקרה בכל זאת,
+// הוא נרשם במקום להיעלם.
+// WHY: הרישום חייב להיות חד-פעמי. ההזרקה מחדש (שהיא חלק מהתיקון!)
+// רצה **לפני** שומר הטעינה הכפולה בקבצים האלה, ובלי הדגל הזה כל
+// הזרקה הייתה מוסיפה מאזין נוסף. דגל על window פותר בלי להזיז קוד.
+try{if(!window.__bfcacheGuard){window.__bfcacheGuard=1;
+  window.addEventListener('unload',()=>{});
+  window.addEventListener('pageshow',e=>{if(e.persisted){
+    try{chrome.storage.local.set({leumiBfcache:{at:new Date().toISOString(),url:String(location.href).slice(0,140)}})}catch{}}});
+}}catch(e){}
+const beat=(stage,rows)=>{try{chrome.runtime.sendMessage({type:'LEUMI_SYNC_PROGRESS',stage,rows}).catch(()=>{})}catch{}};
 async function loadAllRows(){let last=0,stable=0;for(let i=0;i<120;i++){const rows=datedRows();if(rows.length===last){if(++stable>=5)break}else{stable=0;last=rows.length}
+beat('טוען שורות',rows.length);
 const tail=rows.at(-1)?.row;try{tail?.scrollIntoView({block:'end'})}catch{}
 const box=tail?.closest('[role="table"],[role="grid"]')||document.scrollingElement;if(box)box.scrollTop=box.scrollHeight;window.scrollTo(0,document.documentElement.scrollHeight);
 await wait(400)}
@@ -275,9 +355,32 @@ try{opts=await options();lastStrategy='בורר החשבונות'}catch(e){lastS
 if(uniqueAccounts(opts).length<2){const alt=await fromOverview();if(uniqueAccounts(alt).length>uniqueAccounts(opts).length){opts=alt;lastStrategy='דף תמונת מצב'}}
 if(!opts.length)throw Error('לא נמצאה רשימת החשבונות בלאומי — לא בבורר ולא בתמונת מצב');
 return opts}
-async function discover(){if(!await ready())throw Error(`דף לאומי לא נטען בתוך 45 שניות ונשאר ריק (${normalized(txt(document.body)).length} תווים בדף). ברוב המקרים זה אומר שההתחברות ללאומי פגה — התחבר מחדש באתר והרץ שוב.`);const opts=await discoverAccounts(),accounts=uniqueAccounts(opts).map(o=>{const value=txt(o),a=parseAccount(value);if(!a)return null;
-const name=accountName(o)||`חשבון ${a.accountNumber}`;const values=value.match(/-?[\d,]+\.\d{2}/g);return{...a,nickname:name,balance:values?.length?money(values.at(-1)):null}}).filter(Boolean);document.querySelector('[role="dialog"] button[aria-label="סגירה"]')?.click();return accounts}
-async function selectAccount(key){const current=parseAccount(txt(chooser()));if(current?.key===key)return;let option=accountTabs().find(o=>parseAccount(txt(o))?.key===key);if(!option){const opts=await options();option=opts.find(o=>parseAccount(txt(o))?.key===key)}if(!option){
+async function discover(){if(!await ready())throw Error(`דף לאומי לא נטען בתוך 45 שניות ונשאר ריק (${normalized(txt(document.body)).length} תווים בדף). ברוב המקרים זה אומר שההתחברות ללאומי פגה — התחבר מחדש באתר והרץ שוב.`);const opts=await discoverAccounts();
+// WHY 28.08.2026 - טל שלח צילום: ברשימת החשבונות הופיע **שיק** -
+//   "הפקדת שיק ... תאריך ערך ... אסמכתא 73416 מס' שיק 80000766 ערוץ
+//    הפקדה אפליקציית לאומי חשבון משלם 11- ייצוא הדפסה"
+// והוא נקרא כחשבון 153-54074.
+// ⚠ parseAccount עושה את שלו **נכון** - יש בטקסט רצף שנראה כמו חשבון.
+// מה שחסר הוא שהאפשרות עצמה תיבחן: חשבון או תנועה? מספר תקין בתוך
+// טקסט לא נכון הוא עדיין מספר לא נכון.
+// שני סימנים בלתי תלויים, ולא אחד:
+//   1. אוצר מילים של תנועה - שאינו מופיע בשם חשבון
+//   2. אורך חריג - שמות החשבונות האמיתיים כאן קצרים
+//      ("דפנה מלכה- מלכה משק חקלאי מניב", "מתיישבי קדרון-אגג'")
+// ⚠ הנדחים **נרשמים** ולא נזרקים בשקט: אם יום אחד ייפסל חשבון אמיתי,
+// זה יופיע ברשומה במקום להיעלם.
+const TX_WORDS=/הפקדת\s*שיק|אסמכתא|תאריך\s*ערך|מס['׳]?\s*שיק|ערוץ\s*הפקדה|חשבון\s*משלם|ייצוא\s*הדפסה/;
+const rejected=[];
+const looksLikeTransaction=v=>{const t=normalized(v);
+  return TX_WORDS.test(t)||t.length>120};
+const accounts=uniqueAccounts(opts).map(o=>{const value=txt(o),a=parseAccount(value);if(!a)return null;
+if(looksLikeTransaction(value)){rejected.push({key:a.key,text:normalized(value).slice(0,120)});return null}
+const name=accountName(o)||`חשבון ${a.accountNumber}`;const values=value.match(/-?[\d,]+\.\d{2}/g);return{...a,nickname:name,balance:values?.length?money(values.at(-1)):null}}).filter(Boolean);document.querySelector('[role="dialog"] button[aria-label="סגירה"]')?.click();
+if(rejected.length)try{await chrome.storage.local.set({leumiRejectedOptions:{at:new Date().toISOString(),rejected}})}catch{}
+return accounts}
+// ⚠ selectAccount שקט לגמרי והוא רץ **בין** חשבונות - בדיוק המקום שבו
+// שתיקה נראית כמו מוות. פעימה אחת בכניסה מספיקה כדי להבדיל.
+async function selectAccount(key){beat(`בוחר חשבון · ${key}`,0);const current=parseAccount(txt(chooser()));if(current?.key===key)return;let option=accountTabs().find(o=>parseAccount(txt(o))?.key===key);if(!option){const opts=await options();option=opts.find(o=>parseAccount(txt(o))?.key===key)}if(!option){
   // ⚠⚠ 23.08.2026 — טל: „החשבון לא נכון, בלאומי יש 348300/77, יש התעלמות
   // מהסלש ושתי הספרות." ההודעה „החשבון X לא נמצא" לא אמרה **מה כן נמצא**,
   // ולכן אי אפשר היה לדעת אם הבעיה בהתאמה, בפירוק, או בטקסט עצמו.
@@ -316,7 +419,26 @@ if(balance==null&&Number.isFinite(fallbackBalance))balance=fallbackBalance;if(ba
 const idx=columnIndex(),col=(label,fallback)=>Number.isInteger(idx[label])?idx[label]:fallback;
 const iDate=col('תאריך',1),iAction=col('תנועות',2),iRef=col('אסמכתא',3),iDebit=col('חובה',4),iCredit=col('זכות',5),iBalance=col('יתרה מצטברת',6);
 // שורה עתידית ממלאת גם חובה וגם זכות ומשאירה את היתרה המצטברת ריקה — זה המבחן, ולא השוואת תאריכים.
-const parsed=raw.map(cells=>{const date=cells[iDate]||'';if(!/^\d{2}\.\d{2}\.\d{4}$/.test(date))return null;const action=cells[iAction]||'',credit=money(cells[iCredit]),rowBalance=money(cells[iBalance]);return{date,action,details:'',reference:cells[iRef]||'',debit:money(cells[iDebit]),credit,balance:rowBalance,future:rowBalance==null,cheque:/שיק/.test(action)&&credit>0,chequeAmount:credit}}).filter(Boolean);
+// WHY 27.08.2026 - טל: "נכשל הסנכרון" עם הודעה חדשה: "200 שורות, מהן 200
+// עתידיות". rawCells ו-dateish הכריעו בין שלוש ההשערות:
+//   dateish: ["01.01.26",...]      => אפשרות 1, שנה דו-ספרתית. norm4 תיקן.
+//   rawCells: inside:10, owns:0    => התאים **כן** מקוננים. אפשרות 3 נשללה.
+// ומיד נחשף השלב הבא: עמודת "יתרה מצטברת" אינה מספר אלא טקסט מאוחד -
+//   "סכום ₪ 3,540.00 יתרה מצטברת ₪ 44,079.56"
+// money() מסיר תווים ומקבל "3540.0044079.56" => NaN => null. ומכיוון
+// ש-future נקבע לפי rowBalance==null, **כל 200 השורות סווגו כעתידיות.**
+// ⚠ שים לב שהמבחן עצמו נכון ולא שונה: שורה עתידית באמת אין לה יתרה
+// מצטברת. מה שנשבר הוא **הקריאה** של הערך, לא הכלל.
+// WHY: הבדיקה שלי תפסה השחתה שקטה. בשורה **עתידית** התא המאוחד מכיל
+// רק "סכום ₪ -100.00" בלי "יתרה מצטברת", ו-money() היה מפרש את הסכום
+// כיתרה מצטברת - כלומר שורה עתידית הייתה נספרת כמבוצעת עם יתרה מומצאת,
+// ושרשרת היתרות (gapOf) הייתה נשברת בלי שאיש ידע.
+// לכן: תא מאוחד נקרא **רק** לפי התווית; תא רגיל כמו קודם.
+const MERGED_CELL=/סכום|יתרה\s*מצטברת/;
+const runningBalance=cells=>{for(const v of cells){
+  const m=String(v||'').match(/יתרה\s*מצטברת\s*₪?\s*(-?[\d,]+\.\d{2})/);
+  if(m)return money(m[1])}return null};
+const parsed=raw.map(cells=>{const date=cells[iDate]||'';if(!/^\d{2}\.\d{2}\.\d{4}$/.test(date))return null;const action=cells[iAction]||'',credit=money(cells[iCredit]),rowBalance=MERGED_CELL.test(String(cells[iBalance]||''))?runningBalance(cells):money(cells[iBalance]);return{date,action,details:'',reference:cells[iRef]||'',debit:money(cells[iDebit]),credit,balance:rowBalance,future:rowBalance==null,cheque:/שיק/.test(action)&&credit>0,chequeAmount:credit}}).filter(Boolean);
 // ⚠ המיזוג עם מה שכבר שמור. בקריאה מלאה `collected.prev` ריק והתוצאה
 // זהה לקודם; בדלתא זה מה שמשלים את התקופה שלא נקראה שוב.
 const rows=mergeRows(collected.prev||[],parsed.filter(r=>!r.future)),future=parsed.filter(r=>r.future);
@@ -893,10 +1015,52 @@ function rangeProbe(){try{
 async function syncSelected(keys,balances={}){const out=[];// ⚠ הטווח נשלח **לפני** קריאת השורות. הפוך מזה — והקריאה תקדים את הבקשה,
 
 for(const key of keys){if(accountTabs().length)await selectAccount(key);out.push(await extract(key,Number(balances[key])))}return out}
-async function syncLoans(keys){const out=[];for(const key of keys){if(accountTabs().length)await selectAccount(key);let rows=[];for(let i=0;i<180;i++){rows=gridRows().map(row=>({row,cells:cellsOf(row)})).filter(x=>x.cells.some(v=>/%/.test(v))&&x.cells.filter(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)).length>=2);if(rows.length)break;await wait(250)}const page=txt(document.body),declaredTotal=money((page.match(/סך יתרת הלוואות[\s\S]{0,200}?₪\s*([\d,]+\.\d{2})/)||[])[1]);if(declaredTotal>0&&!rows.length)throw Error(`לא נטען פירוט ההלוואות בחשבון ${key}`);const loans=[];let prevStamp='';for(const {row,cells:c} of rows){const end=c.findIndex(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)),interest=c.findIndex(v=>/%/.test(v));if(end<1||interest<0)continue;row.querySelector('button,[role="button"]')?.click();await wait(800);const panel=txt(document.querySelector('[aria-label="הרחבת הלוואה"]')||document.querySelector('[role="complementary"]')||document.body);const nextPayment=money((panel.match(/התשלום הבא\s*₪?\s*([\d,]+\.\d{2})/)||[])[1]),nextPaymentDate=(panel.match(/תאריך התשלום הבא\s*(\d{2}\.\d{2}\.\d{4})/)||[])[1]||'';if(nextPayment==null||!nextPaymentDate)throw Error(`חסר תשלום קרוב בהלוואה בחשבון ${key}`);
+// WHY 28.08.2026 - נמדד בשטח: התנועות עברו ב-60 שניות, וההלוואות שרפו
+// 362 שניות מתוך 422. הסיבה זהה לזו שתוקנה בתנועות אתמול - **ההודעה
+// הזאת שקטה לגמרי**, ולכן הרקע ממתין לתקרה של 120 שניות במקום לדעת
+// אם העמוד עובד. הלולאה כאן לבדה היא 180*250ms = 45 שניות **לכל חשבון**,
+// ולכן בשני חשבונות היא חורגת מהתקרה **בזמן שהיא עובדת כשורה**.
+async function syncLoans(keys){const out=[];for(const key of keys){if(accountTabs().length)await selectAccount(key);
+// WHY 28.08.2026 - טל: "ההלוואה מהחשבון החדש הועתקה לחשבון הישן במקום
+// להתייחס לכל חשבון ולכל הלוואה בנפרד."
+// ⚠⚠ `selectAccount` יכול **להיכשל בשקט**: אם האפשרות לא נמצאה או שהמעבר
+// לא הספיק לרנדר, הדף נשאר על החשבון הקודם - ואז נקראות **ההלוואות שלו**
+// ונרשמות תחת המפתח החדש. מספר שנקרא מהחשבון הלא נכון גרוע מהיעדר מספר.
+// (בתנועות זה כבר מאומת דרך expectedKey; ההלוואות נשארו בלי אימות.)
+// ⚠ ההמתנה היא לתוכן ולא לשניות: עד 8 שניות, עם יציאה ברגע שהבורר מתחלף.
+{let shown=null;
+ for(let i=0;i<32;i++){shown=parseAccount(txt(chooser()))?.key||null;
+   if(shown===key)break; if(i%8===0)beat(`מוודא חשבון · ${key}`,0); await wait(250)}
+ if(shown!==key){
+   try{await chrome.storage.local.set({leumiLoanMismatch:{want:key,got:shown||'',at:new Date().toISOString()}})}catch{}
+   throw Error(`בורר החשבונות נשאר על ${shown||'לא ידוע'} כשביקשנו ${key} — ההלוואות לא נקראו כדי לא לשייך אותן לחשבון הלא נכון`);}}
+beat('קורא הלוואות',0);
+let rows=[];for(let i=0;i<180;i++){rows=gridRows().map(row=>({row,cells:cellsOf(row)})).filter(x=>x.cells.some(v=>/%/.test(v))&&x.cells.filter(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)).length>=2);if(rows.length)break;
+if(i%8===0)beat(`ממתין לרשת ההלוואות · ${key}`,gridRows().length);
+await wait(250)}const page=txt(document.body),declaredTotal=money((page.match(/סך יתרת הלוואות[\s\S]{0,200}?₪\s*([\d,]+\.\d{2})/)||[])[1]);if(declaredTotal>0&&!rows.length)throw Error(`לא נטען פירוט ההלוואות בחשבון ${key}`);const loans=[];let prevStamp='',missingPayment=0;for(const {row,cells:c} of rows){const end=c.findIndex(v=>/^\d{2}\.\d{2}\.\d{4}$/.test(v)),interest=c.findIndex(v=>/%/.test(v));if(end<1||interest<0)continue;// WHY 28.08.2026 - המדידה: הפעימה האחרונה לפני 45 שניות השקט היא
+// "פותח הלוואה", ואחריה **כלום**. כלומר התקיעה היא בתוך הבלוק הזה, אחרי
+// הפעימה ולפני הבאה. הזריקות כאן ("חסר תשלום קרוב") היו מדווחות מיד,
+// ולכן מה שקורה אינו שגיאה אלא **היעלמות** - ככל הנראה ה-SPA מרנדר מחדש
+// והסקריפט מת, ואז ההודעה לעולם אינה נענית.
+// ⚠ פעימה אחת לכל הלוואה אינה מספיקה כדי לדעת **איפה** - צריך פעימה בכל צעד.
+beat(`פותח הלוואה · ${key}`,loans.length);row.querySelector('button,[role="button"]')?.click();
+beat(`נלחץ · ${key}`,loans.length);await wait(800);
+beat(`קורא הרחבה · ${key}`,loans.length);const panel=txt(document.querySelector('[aria-label="הרחבת הלוואה"]')||document.querySelector('[role="complementary"]')||document.body);const nextPayment=money((panel.match(/התשלום הבא\s*₪?\s*([\d,]+\.\d{2})/)||[])[1]),nextPaymentDate=(panel.match(/תאריך התשלום הבא\s*(\d{2}\.\d{2}\.\d{4})/)||[])[1]||'';// WHY 28.08.2026 - ה-chain ב-leumiDebug מראה שהשורה עצמה **מכילה כמעט הכול**:
+//   "מט\"י ז\"א לא צמוד ר.משתנה 741611 | 10.03.2042 | ₪1,940,000.00 |
+//    ₪585,882.38 | ₪587,656.08 | 6.5% | 30.03.2022"
+// סוג, תאריך סיום, קרן מקורית, יתרה, ריבית ותאריך התחלה - הכול בשורה.
+// **רק** התשלום הקרוב דורש הרחבה, וההרחבה היא בדיוק מה שהורג את הסקריפט.
+// ⚠⚠ לכן ההרחבה הופכת מ**תנאי** ל**העשרה**: הלוואה בלי תשלום קרוב היא
+// הלוואה חסרה, אבל **אפס הלוואות זו קריסה**. אותו כלל שהוחל על לאומי
+// ב-22.08 ("לא זורקים את הנתונים") ועל יהב ("מגבלת בנק אינה באג").
+// המספר החסר נספר ומדווח, כדי שזה לא ייראה כהצלחה מלאה.
+if(nextPayment==null||!nextPaymentDate)missingPayment++;
 // ההרחבה יושבת מחוץ לשורה, ולחיצה שנייה אינה מקפלת אותה. אם שתי שורות מחזירות את אותו תשלום — עוצרים במקום לשכפל.
-const stamp=`${nextPayment}|${nextPaymentDate}`;if(rows.length>1&&stamp===prevStamp)throw Error(`הרחבת ההלוואה בחשבון ${key} לא התחלפה בין שורות (אותו תשלום קרוב ${nextPaymentDate}) — נעצר כדי לא לשכפל נתון`);prevStamp=stamp;
-loans.push({type:c[0],endDate:c[end],originalPrincipal:money(c[end+1]),balance:money(c[interest-1]),interest:c[interest],startDate:c[interest+1]||'',nextPayment,nextPaymentDate});document.querySelector('button[aria-label="סגירה חלון"]')?.click();await wait(180)}if(declaredTotal>0&&!loans.length)throw Error(`לא אומתו הלוואות בחשבון ${key}`);out.push({key,loans,loansTotal:loans.reduce((sum,l)=>sum+(l.balance||0),0),loanCount:loans.length})}return out}
+beat(`נקרא תשלום · ${key}`,loans.length);// ⚠ שמירת הכפילות רק כששני הערכים קיימים: שתי הלוואות בלי הרחבה יראו
+// שתיהן "null|" ויתפסו בטעות ככפילות.
+const stamp=`${nextPayment}|${nextPaymentDate}`;if(rows.length>1&&nextPayment!=null&&nextPaymentDate&&stamp===prevStamp)throw Error(`הרחבת ההלוואה בחשבון ${key} לא התחלפה בין שורות (אותו תשלום קרוב ${nextPaymentDate}) — נעצר כדי לא לשכפל נתון`);prevStamp=stamp;
+loans.push({type:c[0],endDate:c[end],originalPrincipal:money(c[end+1]),balance:money(c[interest-1]),interest:c[interest],startDate:c[interest+1]||'',nextPayment,nextPaymentDate});document.querySelector('button[aria-label="סגירה חלון"]')?.click();beat(`סוגר הרחבה · ${key}`,loans.length);await wait(180)}if(declaredTotal>0&&!loans.length)throw Error(`לא אומתו הלוואות בחשבון ${key}`);if(missingPayment)try{await chrome.storage.local.set({leumiLoanGaps:{key,missingPayment,of:loans.length,at:new Date().toISOString()}})}catch{}
+out.push({key,loans,loansTotal:loans.reduce((sum,l)=>sum+(l.balance||0),0),loanCount:loans.length,missingPayment})}return out}
 async function openCheque(m){await selectAccount(`${m.branch}-${m.accountNumber}`);const date=String(m.date||'').replace(/\//g,'.'),amount=Number(m.amount)||0;for(let i=0;i<40;i++){if(datedRows().length)break;await wait(250)}
 // בדף השיקים הכותרות שונות, ולכן ההתאמה סמנטית: אותה שורה מכילה את התאריך וגם סכום זהה.
 const hit=datedRows().find(({cells})=>cells.some(v=>v===date)&&cells.some(v=>Math.abs((money(v)||0)-amount)<0.01));if(!hit)throw Error('לא נמצא צילום שיק תואם לפי תאריך וסכום');hit.row.querySelector('button,[role="button"]')?.click();await wait(900)}

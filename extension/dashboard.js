@@ -45,7 +45,8 @@ chrome.storage.onChanged.addListener(()=>{clearTimeout(loadTimer);loadTimer=setT
 async function load(){
   const epoch=++loadEpoch;
   document.querySelector('.sources')?.classList.add('hidden');
-  const data=await chrome.storage.local.get({viewSince:'',viewSinceInit:false,collectSince:'',accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{},hiddenCards:[]});
+  const data=await chrome.storage.local.get({viewSince:'',viewSinceInit:false,collectSince:'',accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{},hiddenCards:[],maslaka:null,realEstate:[],balanceAssets:[],balanceLiabs:[],loanKinds:{}});
+  maslaka=data.maslaka||null;loanKinds=data.loanKinds||{};realEstate=Array.isArray(data.realEstate)?data.realEstate:[];balanceAssets=Array.isArray(data.balanceAssets)?data.balanceAssets:[];balanceLiabs=Array.isArray(data.balanceLiabs)?data.balanceLiabs:[];
   hiddenCards=(data.hiddenCards||[]).map(x=>String(x).replace(/\D/g,'')).filter(Boolean);
   // כרטיס שהוסתר אינו חוזר דרך סנכרון: הסינון כאן, לפני כל רינדור.
   data.accounts=(data.accounts||[]).map(a=>({...a,cards:(a.cards||[]).filter(c=>!cardHidden(c))}));
@@ -80,7 +81,7 @@ async function load(){
   setActiveView(discovered.length&&activeView!=='selection'?'selection':activeView);
 }
 function renderScope(){const syncToggleState=()=>chrome.storage.local.get({autoSyncOnLogin:false}).then(x=>{for(const c of document.querySelectorAll('[id="autoSyncOnLogin"]'))c.checked=x.autoSyncOnLogin});let panel=$('#scopePanel');if(!panel){panel=document.createElement('section');panel.id='scopePanel';panel.className='panel scope-panel';document.querySelector('.sources')?.before(panel)}panel.onchange=async e=>{const c=e.target.closest('#autoSyncOnLogin');if(c)await chrome.storage.local.set({autoSyncOnLogin:c.checked})};
-panel.innerHTML=`<h2>הבנקים וכרטיסי האשראי שלי</h2><div class="control-row"><label class="control" title="תחילת איסוף נתונים — הבנק יישאל מתאריך זה ואילך. מה שכבר נשמר נשאר."><span>איסוף מ־</span>${collectSinceControls()}</label><label class="control" title="הצגת נתונים — סינון תצוגה בלבד. אינו מוחק ואינו פונה לבנק."><span>תצוגה מ־</span>${viewSinceControls()}</label><label class="control" title="עסקי / פרטי — כולל כרטיסי האשראי המשויכים לכל חשבון"><span>סוג</span><select id="accountFilter" class="since-select"><option value="both">שניהם</option><option value="business">עסקי</option><option value="private">פרטי</option></select></label><label class="control control-check" title="בכל התחברות חדשה מעדכן לבד את החשבונות שכבר בחרת"><input type="checkbox" id="autoSyncOnLogin"><span>סנכרון אוטומטי</span></label></div><div class="bank-grid">${BANK_BUTTONS.map(b=>`<button class="bank-button ${b.ready?'ready':''}" data-bank="${b.id}" title="${esc(bankLine(b))}"><img src="${b.logo}" alt=""><span><b>${b.name}</b><small>${esc(bankAction(b))}</small></span></button>`).join('')}</div><h3>אילו חשבונות להציג?</h3><div class="scope-choice"><label><input type="radio" name="accountFilter" value="business" ${accountFilter==='business'?'checked':''}> עסקיים</label><label><input type="radio" name="accountFilter" value="private" ${accountFilter==='private'?'checked':''}> פרטיים</label><label><input type="radio" name="accountFilter" value="both" ${accountFilter==='both'?'checked':''}> כולם</label></div>`;panel.onclick=async e=>{const button=e.target.closest('.bank-button');if(!button)return;const bank=BANK_BUTTONS.find(b=>b.id===button.dataset.bank);if(bank.fibi)return startFibi(bank.id,button);if(bank.leumi)return startLeumi(button);if(bank.discountBusiness)return startDiscountBusiness(button);if(bank.discountPrivate)return startDiscountPrivate(button);if(bank.mizrahi)return startMizrahi(button);if(bank.yahav)return startYahav(button);if(bank.isracard)return startIsracard(button);if(bank.cal)return startCal(button);if(bank.max)return startMax(button);if(bank.ready)return startChosenSync(bank.id,button);await chrome.runtime.sendMessage({type:'OPEN_EXTERNAL_BANK',url:bank.url});toast(`${bank.name}: האתר הרשמי נפתח; חיבור הסנכרון יתווסף בשלב הבא`)};panel.onchange=async e=>{if(e.target.name==='accountFilter'){accountFilter=e.target.value;await chrome.storage.local.set({accountFilter});render()}}
+panel.innerHTML=`<h2>הבנקים וכרטיסי האשראי שלי</h2><div class="control-row"><label class="control" title="תחילת איסוף נתונים — הבנק יישאל מתאריך זה ואילך. מה שכבר נשמר נשאר."><span>איסוף מ־</span>${collectSinceControls()}</label><label class="control" title="הצגת נתונים — סינון תצוגה בלבד. אינו מוחק ואינו פונה לבנק."><span>תצוגה מ־</span>${viewSinceControls()}</label><label class="control" title="עסקי / פרטי — כולל כרטיסי האשראי המשויכים לכל חשבון"><span>סוג</span><select id="accountFilter" class="since-select"><option value="both">שניהם</option><option value="business">עסקי</option><option value="private">פרטי</option></select></label><label class="control control-check" title="בכל התחברות חדשה מעדכן לבד את החשבונות שכבר בחרת"><input type="checkbox" id="autoSyncOnLogin"><span>סנכרון אוטומטי</span></label></div><div class="bank-grid">${BANK_BUTTONS.map(b=>`<button class="bank-button ${b.ready?'ready':''}" data-bank="${b.id}" title="${esc(bankLine(b))}"><img src="${b.logo}" alt=""><span><b>${b.name}</b><small>${esc(bankAction(b))}</small></span></button>`).join('')}</div><h3>אילו חשבונות להציג?</h3><div class="scope-choice"><label><input type="radio" name="accountFilter" value="business" ${accountFilter==='business'?'checked':''}> עסקיים</label><label><input type="radio" name="accountFilter" value="private" ${accountFilter==='private'?'checked':''}> פרטיים</label><label><input type="radio" name="accountFilter" value="both" ${accountFilter==='both'?'checked':''}> כולם</label></div>`;panel.onclick=async e=>{const button=e.target.closest('.bank-button');if(!button)return;const bank=BANK_BUTTONS.find(b=>b.id===button.dataset.bank);if(bank)return dispatchBank(bank,button)};panel.onchange=async e=>{if(e.target.name==='accountFilter'){accountFilter=e.target.value;await chrome.storage.local.set({accountFilter});render()}}
 syncToggleState();}
 function cardSrc(c){const s=String(c?.issuer||'');return /MAX|מקס/i.test(s)?'max':/כאל|CAL/i.test(s)?'cal':'isracard'}
 function assignSelect(c){return`<select class="isracard-account" data-suffix="${esc(c.suffix)}" data-src="${esc(cardSrc(c))}"><option value="">ממתין לשיוך — בחר חשבון</option>${accounts.map(a=>`<option value="${esc(a.id)}">${esc(a.sourceLabel)} · ${esc(a.branch)}-${esc(a.accountNumber)}${a.nickname||a.owner?` · ${esc(a.nickname||a.owner)}`:''}</option>`).join('')}</select>`}
@@ -101,7 +102,12 @@ function renderSyncStatus(raw=''){const value=String(raw||''),el=$('#syncStatus'
 //   3. תקרת גובה עם גלילה, כדי שהודעה ארוכה לא תדחוף את התוכן כלפי מטה.
 const shown=String(value||'').length>320?String(value).slice(0,320)+'…':String(value||'');
 const html=`<span class="sync-state ${state}">${label}</span><small class="sync-detail">${esc(shown)}</small>`;el.innerHTML=html;banner.innerHTML=html}
-function esc(v){const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML}
+// ⚠⚠ 28.08.2026 - טל: "אני משנה לפרטי וזה חוזר". textContent->innerHTML
+// מנטרל < > & אבל **לא גרשיים** - בטוח לטקסט, שבור בתוך מאפיין. הגרש של
+// 'מט"י' סגר את data-key באמצע, נשמר מפתח קטוע, והרינדור לא מצא אותו.
+// ישויות (&quot;) נפרסות זהה בטקסט ובמאפיין, ולכן התיקון בטוח בשני ההקשרים.
+function esc(v){const d=document.createElement('div');d.textContent=String(v??'');
+  return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function render(){
   const visible=accounts.filter(a=>accountFilter==='both'||kindOf(a)===accountFilter);const box=$('#accounts');box.innerHTML=visible.length?'':'<div class="panel empty">אין חשבונות בסוג שנבחר.</div>';
   visible.forEach(a=>{
@@ -114,7 +120,7 @@ function render(){
     box.appendChild(card);
   });
   const sums={balance:visible.reduce((s,a)=>s+(Number(a.balance)||0),0),limit:visible.reduce((s,a)=>s+(Number(a.creditLimit)||0),0),available:visible.reduce((s,a)=>s+(Number(a.availableCredit)||0),0),cards:visible.reduce((s,a)=>s+(Number(a.upcomingCardCharges)||0),0),loans:visible.reduce((s,a)=>s+(a.loans||[]).filter(l=>!hideMortgages||!l.isMortgage).reduce((n,l)=>n+(Number(l.balance)||0),0),0)};$('#count').textContent=visible.length;$('#total').textContent=money(sums.balance);let totals=$('#accountsTotals');if(!totals){totals=document.createElement('section');totals.id='accountsTotals';totals.className='panel accounts-total accounts-view';box.after(totals)}totals.innerHTML=`<h3>סיכום כללי · ${visible.length} חשבונות</h3><div class="accounts-total-grid"><div><span>יתרת עו״ש כוללת</span><strong>${money(sums.balance)}</strong></div><div><span>מסגרות אשראי</span><strong>${money(sums.limit)}</strong></div><div><span>יתרה זמינה</span><strong>${money(sums.available)}</strong></div><div><span>חיובי כרטיסים קרובים</span><strong>${money(sums.cards)}</strong></div><div><span>יתרת הלוואות כוללת</span><strong>${money(sums.loans)}</strong></div></div>`;
-  const cardTotalCell=totals.querySelector('.accounts-total-grid div:nth-child(4) strong');if(cardTotalCell)cardTotalCell.textContent=money(dedupedCardTotal(visible));const dates=accounts.map(a=>a.lastSync).filter(Boolean).sort();$('#lastSync').textContent=dates.length?shortDateTime(dates.at(-1)):'טרם בוצע';renderTransactions();renderAllCards().then(renderHiddenCards).catch(e=>console.warn('renderAllCards',e));renderLoansTable();
+  const cardTotalCell=totals.querySelector('.accounts-total-grid div:nth-child(4) strong');if(cardTotalCell)cardTotalCell.textContent=money(dedupedCardTotal(visible));const dates=accounts.map(a=>a.lastSync).filter(Boolean).sort();$('#lastSync').textContent=dates.length?shortDateTime(dates.at(-1)):'טרם בוצע';renderTransactions();renderAllCards().then(renderHiddenCards).catch(e=>console.warn('renderAllCards',e));renderLoansTable();renderMaslaka();renderRealEstate();renderBalance();
 }
 function dedupedCardTotal(visible){const cards=new Map(),fallback=[];for(const a of visible){if((a.cards||[]).length)for(const c of a.cards){const key=String(c.suffix||`${a.id}-${cards.size}`);cards.set(key,Number(c.amount)||0)}else fallback.push(Number(a.upcomingCardCharges)||0)}const hasIsracard=accountFilter==='both'&&isracardLastCards.length>0;if(hasIsracard)for(const c of isracardLastCards)cards.set(String(c.suffix),Number(c.amount)||0);return[...cards.values()].reduce((s,n)=>s+n,0)+(hasIsracard?0:fallback.reduce((s,n)=>s+n,0))}
 function accountCardTotal(a){if(!(a.cards||[]).length)return a.upcomingCardCharges==null?null:Number(a.upcomingCardCharges)||0;const bySuffix=new Map();for(const c of a.cards)bySuffix.set(String(c.suffix||bySuffix.size),Number(c.amount)||0);return[...bySuffix.values()].reduce((s,n)=>s+n,0)}
@@ -314,7 +320,20 @@ const shown=accounts.filter(a=>accountFilter==='both'||kindOf(a)===accountFilter
 // המוצגים. כלומר כרטיס ששייך לחשבון עסקי הופיע גם כשסוננו „פרטי" — הוא נכנס
 // דרך ההזרעה ולא דרך החשבון. **הסינון חל עכשיו גם על ההזרעה.**
 for(const card of [...isracardLastCards,...calLastCards])if(cardPasses(card.suffix))bySuffix.set(String(card.suffix),{account:null,card});for(const a of shown)for(const card of a.cards||[]){const key=String(card.suffix||`${a.id}-${bySuffix.size}`),current=bySuffix.get(key);bySuffix.set(key,{account:a,card:current?.card?.transactions?.length&&!card.transactions?.length?{...card,transactions:current.card.transactions}:card})}const groups=[...bySuffix.values()],isracardTotal=isracardLastCards.reduce((s,c)=>s+(Number(c.amount)||0),0),box=$('#allCards');if(!groups.length){box.innerHTML='<div class="empty">לא נמצאו כרטיסי אשראי בחשבונות המוצגים.</div>';return}box.innerHTML=`${isracardLastCards.length?`<div class="loans-total"><span>סך החיובים בכל כרטיסי ישראכרט</span><strong>${money(isracardTotal)}</strong></div>`:''}${groups.map(({account:a,card:c})=>`<section class="detail-card card-statement"><div class="statement-head"><div><h3>${esc(c.name||'כרטיס אשראי')} · ${esc(c.suffix||'')} ${cardSyncBadge(c.suffix,a)} ${cardSyncControl(a,c)}</h3><p>${esc(c.issuer||a?.sourceLabel||'')}${a?` · חשבון ${esc(a.branch)}-${esc(a.accountNumber)}`:' · '+assignSelect(c)}${c.chargeDate?` · חיוב ${esc(c.chargeDate)}`:''}</p></div><strong>${money(c.amount)}</strong></div>${c.transactions?.length?`<table class="mini-table"><thead><tr><th>תאריך</th><th>בית עסק</th><th>סכום</th><th>תשלומים</th></tr></thead><tbody>${[...c.transactions].sort((x,y)=>dateKey(y.date)-dateKey(x.date)).map(t=>`<tr><td>${esc(t.date)}</td><td>${esc(t.merchant)}</td><td>${money(t.amount)}</td><td>${esc(t.payments||'')}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">אין תנועות זמינות לכרטיס זה.</div>'}</section>`).join('')}`}
-function renderAllLoans(){const shown=accounts.filter(a=>accountFilter==='both'||kindOf(a)===accountFilter),rows=[],seen=new Set();for(const a of shown){const ownerKey=`${a.branch}-${a.accountNumber}`;for(let loanIndex=0;loanIndex<(a.loans||[]).length;loanIndex++){const l=a.loans[loanIndex];if(!l||(Number(l.balance)<=0&&Number(l.nextPayment)<=0)||l.accountKey&&l.accountKey!==ownerKey)continue;const fingerprint=[a.source,ownerKey,l.type,l.originalPrincipal,l.balance,l.endDate,l.nextPayment,l.nextPaymentDate,l.interest].join('|');if(seen.has(fingerprint))continue;seen.add(fingerprint);rows.push({account:a,loan:l,loanIndex})}}rows.sort((x,y)=>String(x.account.sourceLabel).localeCompare(String(y.account.sourceLabel),'he')||String(x.account.branch).localeCompare(String(y.account.branch),'he')||String(x.account.accountNumber).localeCompare(String(y.account.accountNumber),'he')||Number(y.loan.balance||0)-Number(x.loan.balance||0));const box=$('#allLoans');if(!rows.length){box.innerHTML='<div class="empty">לא נמצאו הלוואות בחשבונות המוצגים.</div>';return}const short=v=>{const s=String(v||'').replace(/\s+/g,' ').trim();return s&&s.length<=60?s:'—'},remaining=l=>{const m=String(l.installments||'').match(/(\d+)\s*\/\s*(\d+)/);if(m){const paid=Number(m[1]),total=Number(m[2]);return total>=paid?`${total-paid}/${total}`:'—'}const left=Number(l.remainingInstallments),total=Number(l.totalInstallments);
+// ── סוג הלוואה: עסקי/פרטי ─────────────────────────────────────────────
+// ⚠ 28.08.2026 - טל: "תאפשר להגדיר בתוסף עצמו אם ההלוואה פרטית או עסקית."
+// עד עכשיו הלוואה ירשה את הסוג מהחשבון - אבל הלוואה עסקית יכולה לשבת
+// בחשבון פרטי ולהפך. הדריסה נשמרת ב-loanKinds לפי מפתח **יציב**:
+// חשבון + סוג + תאריך סיום - שדות ששורדים סנכרון (אינדקס היה משתנה
+// עם כל שינוי סדר, ולכן אינו מפתח).
+var loanKinds={};
+function loanKeyOf(a,l){return `${a.selectionKey||accountKey(a)}|${l.type||''}|${l.endDate||''}`}
+function loanKindOf(a,l){return loanKinds[loanKeyOf(a,l)]||kindOf(a)}
+function renderAllLoans(){
+// ⚠ הסינון עבר מרמת החשבון לרמת ההלוואה - אחרת הלוואה עסקית בחשבון
+// פרטי לא הייתה מופיעה לעולם בסינון "עסקיים".
+const rows=[],seen=new Set();for(const a of accounts){const ownerKey=`${a.branch}-${a.accountNumber}`;for(let loanIndex=0;loanIndex<(a.loans||[]).length;loanIndex++){const l=a.loans[loanIndex];if(!l||(Number(l.balance)<=0&&Number(l.nextPayment)<=0)||l.accountKey&&l.accountKey!==ownerKey)continue;if(accountFilter!=='both'&&loanKindOf(a,l)!==accountFilter)continue;
+const fingerprint=[a.source,ownerKey,l.type,l.originalPrincipal,l.balance,l.endDate,l.nextPayment,l.nextPaymentDate,l.interest].join('|');if(seen.has(fingerprint))continue;seen.add(fingerprint);rows.push({account:a,loan:l,loanIndex})}}rows.sort((x,y)=>String(x.account.sourceLabel).localeCompare(String(y.account.sourceLabel),'he')||String(x.account.branch).localeCompare(String(y.account.branch),'he')||String(x.account.accountNumber).localeCompare(String(y.account.accountNumber),'he')||Number(y.loan.balance||0)-Number(x.loan.balance||0));const box=$('#allLoans');if(!rows.length){box.innerHTML='<div class="empty">לא נמצאו הלוואות בחשבונות המוצגים.</div>';return}const short=v=>{const s=String(v||'').replace(/\s+/g,' ').trim();return s&&s.length<=60?s:'—'},remaining=l=>{const m=String(l.installments||'').match(/(\d+)\s*\/\s*(\d+)/);if(m){const paid=Number(m[1]),total=Number(m[2]);return total>=paid?`${total-paid}/${total}`:'—'}const left=Number(l.remainingInstallments),total=Number(l.totalInstallments);
   if(Number.isFinite(left)&&left>=0&&Number.isFinite(total)&&total>0)return `${left}/${total}`;
   // ⚠ 18.08.2026 — לאומי אינו מחזיר מספר תשלומים כלל: ברשומה שלו אין installments,
   // בעוד שפועלים מחזיר "8/71". לכן העמודה הופיעה ריקה דווקא בהלוואה של לאומי.
@@ -324,8 +343,8 @@ function renderAllLoans(){const shown=accounts.filter(a=>accountFilter==='both'|
     const a2=part(from),b2=part(to);return a2&&b2?(b2.y-a2.y)*12+(b2.m-a2.m):null};
   const allMonths=loanMonths(l.startDate,l.endDate),leftMonths=loanMonths(l.nextPaymentDate,l.endDate);
   if(Number.isFinite(allMonths)&&allMonths>0&&Number.isFinite(leftMonths)&&leftMonths>=0)return `~${leftMonths+1}/${allMonths+1}`;
-  return '—'};const monthly=rows.reduce((sum,row)=>sum+(Number(row.loan.nextPayment)||0),0),hasMortgages=rows.some(r=>r.loan.isMortgage);box.innerHTML=`<div class="loans-table-wrap"><table class="loans-table"><thead><tr><th>בנק וחשבון</th><th>יתרה</th><th>תשלומים שנותרו</th><th>תשלום קרוב</th><th>תשלום סופי</th><th>ריבית</th><th>החזר קרוב</th><th>הסרה</th></tr></thead><tbody>${rows.map(({account:a,loan:l,loanIndex})=>`<tr><td><b>${esc(a.sourceLabel||'בנק')}</b> · ${esc(a.branch)}-${esc(a.accountNumber)} ${l.isMortgage?'<span class="mortgage-tag">משכנתא</span>':''}</td><td>${l.balance==null?'—':money(l.balance)}</td><td dir="ltr">${esc(remaining(l))}</td><td>${esc(short(l.nextPaymentDate))}</td><td>${esc(short(l.endDate))}</td><td>${esc(short(l.interest))}</td><td><b>${l.nextPayment==null?'—':money(l.nextPayment)}</b></td><td>${l.isMortgage?`<label class="loan-remove-label"><input type="checkbox" class="mortgage-remove" data-account-id="${esc(a.id)}" data-loan-index="${loanIndex}"> הסר</label>`:'—'}</td></tr>`).join('')}</tbody></table></div>${hasMortgages?'<button type="button" id="removeSelectedMortgages" class="button secondary">הסר משכנתאות מסומנות מהרשימה</button>':''}<div class="loans-total"><span>סה״כ החזר חודשי</span><strong>${money(monthly)}</strong></div>`}
-function setActiveView(view){activeView=['accounts','selection','transactions','cards','search','loans'].includes(view)?view:'accounts';document.querySelectorAll('.dashboard-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===activeView));document.querySelectorAll('.selection-view').forEach(el=>el.classList.toggle('hidden',activeView!=='selection'));document.querySelectorAll('.accounts-view').forEach(el=>el.classList.toggle('hidden',activeView!=='accounts'));document.querySelectorAll('.transactions-view').forEach(el=>el.classList.toggle('hidden',activeView!=='transactions'));document.querySelectorAll('.cards-view').forEach(el=>el.classList.toggle('hidden',activeView!=='cards'));document.querySelectorAll('.search-view').forEach(el=>el.classList.toggle('hidden',activeView!=='search'));document.querySelectorAll('.loans-view').forEach(el=>el.classList.toggle('hidden',activeView!=='loans'));if(activeView==='search')scheduleMovementSearch()}
+  return '—'};const monthly=rows.reduce((sum,row)=>sum+(Number(row.loan.nextPayment)||0),0),hasMortgages=rows.some(r=>r.loan.isMortgage);box.innerHTML=`<div class="loans-table-wrap"><table class="loans-table"><thead><tr><th>בנק וחשבון</th><th>יתרה</th><th>תשלומים שנותרו</th><th>תשלום קרוב</th><th>תשלום סופי</th><th>ריבית</th><th>החזר קרוב</th><th>סוג</th><th>הסרה</th></tr></thead><tbody>${rows.map(({account:a,loan:l,loanIndex})=>`<tr><td><b>${esc(a.sourceLabel||'בנק')}</b> · ${esc(a.branch)}-${esc(a.accountNumber)} ${l.isMortgage?'<span class="mortgage-tag">משכנתא</span>':''}</td><td>${l.balance==null?'—':money(l.balance)}</td><td dir="ltr">${esc(remaining(l))}</td><td>${esc(short(l.nextPaymentDate))}</td><td>${esc(short(l.endDate))}</td><td title="${esc(l.interestNote||'')}">${esc(short(l.interest))}</td><td><b>${l.nextPayment==null?'—':money(l.nextPayment)}</b></td><td><select class="loan-kind" data-key="${encodeURIComponent(loanKeyOf(a,l))}" title="ברירת המחדל — לפי סוג החשבון (${kindOf(a)==='business'?'עסקי':'פרטי'})"><option value="" ${loanKinds[loanKeyOf(a,l)]?'':'selected'}>לפי החשבון</option><option value="business" ${loanKinds[loanKeyOf(a,l)]==='business'?'selected':''}>עסקי</option><option value="private" ${loanKinds[loanKeyOf(a,l)]==='private'?'selected':''}>פרטי</option></select></td><td>${l.isMortgage?`<label class="loan-remove-label"><input type="checkbox" class="mortgage-remove" data-account-id="${esc(a.id)}" data-loan-index="${loanIndex}"> הסר</label>`:'—'}</td></tr>`).join('')}</tbody></table></div>${hasMortgages?'<button type="button" id="removeSelectedMortgages" class="button secondary">הסר משכנתאות מסומנות מהרשימה</button>':''}<div class="loans-total"><span>סה״כ החזר חודשי</span><strong>${money(monthly)}</strong></div>`}
+function setActiveView(view){activeView=['accounts','selection','transactions','cards','search','loans','maslaka','realestate','balance'].includes(view)?view:'accounts';document.querySelectorAll('.dashboard-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===activeView));document.querySelectorAll('.selection-view').forEach(el=>el.classList.toggle('hidden',activeView!=='selection'));document.querySelectorAll('.accounts-view').forEach(el=>el.classList.toggle('hidden',activeView!=='accounts'));document.querySelectorAll('.transactions-view').forEach(el=>el.classList.toggle('hidden',activeView!=='transactions'));document.querySelectorAll('.cards-view').forEach(el=>el.classList.toggle('hidden',activeView!=='cards'));document.querySelectorAll('.search-view').forEach(el=>el.classList.toggle('hidden',activeView!=='search'));document.querySelectorAll('.loans-view').forEach(el=>el.classList.toggle('hidden',activeView!=='loans'));document.querySelectorAll('.maslaka-view').forEach(el=>el.classList.toggle('hidden',activeView!=='maslaka'));document.querySelectorAll('.realestate-view').forEach(el=>el.classList.toggle('hidden',activeView!=='realestate'));document.querySelectorAll('.balance-view').forEach(el=>el.classList.toggle('hidden',activeView!=='balance'));if(activeView==='search')scheduleMovementSearch()}
 
 function searchDateValue(value,end=false){if(!value)return end?Infinity:-Infinity;return new Date(`${value}T${end?'23:59:59':'00:00:00'}`).getTime()}
 function scheduleMovementSearch(){clearTimeout(movementSearchTimer);movementSearchTimer=setTimeout(renderMovementSearch,220)}
@@ -375,20 +394,30 @@ function updateSelectionCount(){const box=document.querySelector('#discoveredAcc
 // 6 השעות של הסנכרון האוטומטי — כי כאן המשתמש ביקש רענון מפורשות.
 function bankForSource(source){const s=String(source||'');
  if(s.startsWith('fibi-'))return BANK_BUTTONS.find(b=>b.id===s)||BANK_BUTTONS.find(b=>b.fibi);
- const map={business:'business',private:'private',leumi:'leumi','discount-business':'discount-business','discount-private':'discount-private',mizrahi:'mizrahi',yahav:'yahav',isracard:'isracard'};
+ const map={business:'business',private:'private',leumi:'leumi','discount-business':'discount-business','discount-private':'discount-private',mizrahi:'mizrahi',yahav:'yahav',isracard:'isracard',cal:'cal',max:'max',btb:'btb'};
  return BANK_BUTTONS.find(b=>b.id===map[s])}
-async function refreshBank(source,button){const bank=bankForSource(source);
- if(!bank)return toast('לא ידוע איזה חיבור מרענן את החשבון הזה');
+// ⚠⚠ 27.08.2026 — טל: „פתחת את בנק הפועלים במקום את BTB".
+// היו **שתי** שרשראות ניתוב זהות — אחת לאריח ואחת לרענון — ו-BTB נוסף רק לאחת מהן.
+// מי שנופל מהשרשרת מגיע ל-startChosenSync ומשם ל-START_AUTO_SYNC, שברירת
+// המחדל שלו היא פועלים. לכן **שרשרת אחת בלבד**, ושתי הכניסות קוראות לה.
+// (האיחוד גם סוגר פער הפוך: לרענון חסר ענף cal.)
+async function dispatchBank(bank,button){
  if(bank.fibi)return startFibi(bank.id,button);
  if(bank.leumi)return startLeumi(button);
  if(bank.discountBusiness)return startDiscountBusiness(button);
  if(bank.discountPrivate)return startDiscountPrivate(button);
  if(bank.mizrahi)return startMizrahi(button);
  if(bank.yahav)return startYahav(button);
-  if(bank.isracard)return startIsracard(button);
-  if(bank.max)return startMax(button);
-  if(bank.btb)return startBtb(button);
- return startChosenSync(bank.id,button)}
+ if(bank.isracard)return startIsracard(button);
+ if(bank.cal)return startCal(button);
+ if(bank.max)return startMax(button);
+ if(bank.btb)return startBtb(button);
+ if(bank.ready)return startChosenSync(bank.id,button);
+ await chrome.runtime.sendMessage({type:'OPEN_EXTERNAL_BANK',url:bank.url});
+ toast(`${bank.name}: האתר הרשמי נפתח; חיבור הסנכרון יתווסף בשלב הבא`)}
+async function refreshBank(source,button){const bank=bankForSource(source);
+ if(!bank)return toast('לא ידוע איזה חיבור מרענן את החשבון הזה');
+ return dispatchBank(bank,button)}
 async function startChosenSync(scope,button){syncScope=scope;await chrome.storage.local.set({syncScope});const original=button.innerHTML;button.disabled=true;button.textContent='פותח את הבנק…';const response=await chrome.runtime.sendMessage({type:'START_AUTO_SYNC',scope,force:scope!=='both'});button.disabled=false;button.innerHTML=original;if(!response?.ok)return toast(response?.error||'ההפעלה נכשלה');if(response.status==='already_synced_today')return toast('כל החיבורים כבר סונכרנו היום');toast(scope==='both'?'התחבר לשני אתרי הבנק; חיבור שעודכן היום ידולג':'מתבצע סנכרון ידני מחדש גם אם החשבון עודכן היום')}
 async function startFibi(slot,button){const original=button.innerHTML;button.disabled=true;button.textContent='בודק חיבור לבינלאומי…';const r=await chrome.runtime.sendMessage({type:'START_FIBI',slot});button.disabled=false;button.innerHTML=original;if(!r?.ok)return toast(r?.error||'פתיחת הבינלאומי נכשלה');toast(r.status==='syncing_connected'?'נמצא חיבור פעיל — הסנכרון התחיל':'התחבר בבינלאומי; הסנכרון יתחיל אוטומטית')}
 async function startLeumi(button){const original=button.innerHTML;button.disabled=true;button.textContent='מזהה חשבונות לאומי…';let r;try{r=await chrome.runtime.sendMessage({type:'START_LEUMI'})}catch(e){button.disabled=false;button.innerHTML=original;return toast(`רכיב לאומי לא נטען: ${e.message}. יש לרענן את התוסף`)}button.disabled=false;button.innerHTML=original;if(!r?.ok)return toast(r?.error||'פתיחת לאומי נכשלה');toast(r.status==='discovering'?'מזהה את חשבונות לאומי לבחירה':'התחבר ללאומי; לאחר הכניסה יוצגו החשבונות לבחירה')}
@@ -421,13 +450,51 @@ const local=b.dataset.selection&&b.dataset.reference?await chequeGet(chequeId(b.
 if(local?.front){showCheque(local,b.dataset);b.disabled=false;b.textContent='צילום שיק';return}
 const r=await chrome.runtime.sendMessage({type:'OPEN_LEUMI_CHEQUE',branch:b.dataset.branch,accountNumber:b.dataset.account,date:b.dataset.date,amount:Number(b.dataset.amount)});if(!r?.ok){b.disabled=false;b.textContent='צילום שיק';toast(r?.error||'צילום השיק לא נמצא')}else{b.disabled=false;b.textContent='צילום שיק'}};
 function showCheque(record,data){const body=$('#chequeModalBody');$('#chequeModalTitle').textContent=`צילום שיק · ${data.date||''} · אסמכתא ${record.reference}`;
-body.innerHTML=`<div class="cheque-shots"><figure><figcaption>קדמי</figcaption><img alt="צילום תמונת שיק מלפנים" src="${record.front}"></figure>${record.back?`<figure><figcaption>אחורי</figcaption><img alt="צילום תמונת שיק מאחור" src="${record.back}"></figure>`:''}</div><small class="sync-detail">נשמר מקומית ${record.savedAt?new Date(record.savedAt).toLocaleString('he-IL'):''} — נפתח גם ללא חיבור לבנק.</small>`;
+body.innerHTML=`<div class="cheque-shots"><figure><figcaption>קדמי</figcaption><img alt="צילום תמונת שיק מלפנים" src="${esc(record.front)}"></figure>${record.back?`<figure><figcaption>אחורי</figcaption><img alt="צילום תמונת שיק מאחור" src="${esc(record.back)}"></figure>`:''}</div><small class="sync-detail">נשמר מקומית ${record.savedAt?new Date(record.savedAt).toLocaleString('he-IL'):''} — נפתח גם ללא חיבור לבנק.</small>`;
 $('#chequeModal').classList.remove('hidden')}
 $('#closeChequeModal').onclick=()=>$('#chequeModal').classList.add('hidden');
 $('#chequeModal').onclick=e=>{if(e.target.id==='chequeModal')e.currentTarget.classList.add('hidden')};
 $('#allLoans').onclick=async e=>{if(!e.target.closest('#toggleMortgages'))return;hideMortgages=!hideMortgages;await chrome.storage.local.set({hideMortgages});render();toast(hideMortgages?'המשכנתאות הוסרו מהתצוגה ומהסיכומים':'המשכנתאות הוחזרו לתצוגה ולסיכומים')};
 const chequeStyles=document.createElement('style');chequeStyles.textContent='#stopSync{margin-top:6px;display:block}.collect-since select{margin-inline-start:8px;font:inherit;padding:4px 8px;border-radius:8px}.collect-since{align-items:center}.auto-sync{display:inline-flex;align-items:center;gap:6px;font-weight:800;color:#173b86;background:#eef4ff;border-radius:999px;padding:8px 14px}.choice-id{font-variant-numeric:tabular-nums;font-weight:800;letter-spacing:.02em;direction:ltr;text-align:right;display:block}.cheque-shots{display:grid;gap:14px}.cheque-shots figure{margin:0}.cheque-shots figcaption{font-weight:800;margin-bottom:6px;color:#6d788b}.cheque-shots img{width:100%;max-width:640px;border:1px solid #e5eaf1;border-radius:10px;display:block}';document.head.appendChild(chequeStyles);
 $('#accounts').onchange=async e=>{const select=e.target.closest('.account-kind');if(!select)return;accountKinds[select.dataset.key]=select.value;await chrome.storage.local.set({accountKinds});render()};
+// ⚠ הקליטה היא ייבוא מקומי: הקובץ נקרא בדפדפן ונשמר ב-chrome.storage,
+// ולא נשלח לשום מקום.
+// ⚠ הקיפול נרשם על שני הצדדים באותו מאזין, ורץ **לפני** מאזיני העריכה
+// והמחיקה; לחיצה בתוך input או על כפתור הסרה אינה מקפלת.
+for(const sel of ['#balanceAssets','#balanceLiabs'])$(sel)?.addEventListener('click',e=>{
+  if(e.target.closest('input,button'))return;
+  const row=e.target.closest('.fold');if(!row)return;
+  const key=row.dataset.key;if(!key)return;
+  if(balanceOpen.has(key))balanceOpen.delete(key);else balanceOpen.add(key);
+  renderBalance()});
+$('#balanceLiabAdd')?.addEventListener('submit',async e=>{e.preventDefault();
+  await blAdd($('#blName').value,$('#blGroup').value,$('#blValue').value);
+  $('#blName').value='';$('#blValue').value='';$('#blName').focus()});
+$('#balanceLiabs')?.addEventListener('change',e=>{const cell=e.target.closest('.bl-cell');if(!cell)return;
+  blEdit(cell.closest('tr').dataset.id,cell.dataset.field,cell.value)});
+$('#balanceLiabs')?.addEventListener('click',e=>{const b=e.target.closest('.bl-remove');
+  if(b)blRemove(b.closest('tr').dataset.id)});
+// שמירת סוג הלוואה: ערך ריק = חזרה לירושה מהחשבון (מוחקים את הדריסה).
+$('#allLoans')?.addEventListener('change',async e=>{const sel=e.target.closest('.loan-kind');if(!sel)return;
+  const key=decodeURIComponent(sel.dataset.key);
+  if(sel.value)loanKinds[key]=sel.value;else delete loanKinds[key];
+  await chrome.storage.local.set({loanKinds});render()});
+$('#balanceAssetAdd')?.addEventListener('submit',async e=>{e.preventDefault();
+  await baAdd($('#baName').value,$('#baGroup').value,$('#baValue').value);
+  $('#baName').value='';$('#baValue').value='';$('#baName').focus()});
+$('#balanceAssets')?.addEventListener('change',e=>{const cell=e.target.closest('.ba-cell');if(!cell)return;
+  baEdit(cell.closest('tr').dataset.id,cell.dataset.field,cell.value)});
+$('#balanceAssets')?.addEventListener('click',e=>{const b=e.target.closest('.ba-remove');
+  if(b)baRemove(b.closest('tr').dataset.id)});
+$('#realEstateAdd')?.addEventListener('submit',async e=>{e.preventDefault();
+  await reAdd($('#reAddress').value,$('#reCity').value,$('#reValue').value);
+  $('#reAddress').value='';$('#reCity').value='';$('#reValue').value='';$('#reAddress').focus()});
+$('#realEstateTable')?.addEventListener('change',e=>{const cell=e.target.closest('.re-cell');if(!cell)return;
+  reEdit(cell.closest('tr').dataset.id,cell.dataset.field,cell.value)});
+$('#realEstateTable')?.addEventListener('click',e=>{const b=e.target.closest('.re-remove');
+  if(b)reRemove(b.closest('tr').dataset.id)});
+$('#maslakaFile')?.addEventListener('change',e=>{maslakaLoadFiles(e.target.files);e.target.value=''});
+$('#maslakaClear')?.addEventListener('click',async()=>{maslaka=null;await chrome.storage.local.remove('maslaka');renderMaslaka();toast('נתוני המסלקה נוקו')});
 $('#confirmSelection').onclick=async()=>{document.querySelectorAll('.discovered-kind').forEach(s=>accountKinds[s.dataset.key]=s.value);const keys=[...document.querySelectorAll('#discoveredAccounts input:checked')].map(x=>x.value);if(!keys.length)return toast('יש לבחור לפחות חשבון אחד');/* ⚠ 21.08.2026 — כאן נכתבו לאחסון **רק** המפתחות שסומנו בתיבת הזיהוי, ולכן אישור ישות חדשה מחק מן הבחירה את הישויות שכבר סונכרנו, והן נשרו מן הסנכרון האוטומטי. עכשיו מוסרים רק מפתחות שמופיעים בתיבה ולא סומנו, ושאר הבחירה נשמרת. *//* ⚠ 22.08.2026 — נמדד: בזרימת לאומי הופיעו בתיבה גם ארבע ישויות דיסקונט —
      שריד מזיהוי דיסקונט שנכשל ולכן לא נוקה. הן לא סומנו, וההסרה הפילה אותן
      מ-selectedAccountKeys: נשאר leumi|921-348300 בלבד, והסנכרון האוטומטי הפסיק
@@ -437,7 +504,8 @@ $('#confirmSelection').onclick=async()=>{document.querySelectorAll('.discovered-
   const roundSources=new Set(keys.map(sourceOf));
   const inBox=new Set(discovered.map(a=>a.key).filter(k=>roundSources.has(sourceOf(k))));selectedKeys=[...new Set([...selectedKeys.filter(k=>!inBox.has(k)),...keys])];await chrome.storage.local.set({selectedAccountKeys:selectedKeys,accountKinds});const button=$('#confirmSelection');button.disabled=true;button.textContent='מסנכרן את החשבונות שנבחרו…';const response=await chrome.runtime.sendMessage({type:'SYNC_SELECTED',keys});button.disabled=false;button.textContent='אישור וסנכרון המסומנים';if(!response?.ok)return toast(response?.error||'הסנכרון נכשל');toast(`${response.count} חשבונות סונכרנו`);await load()};
 function toast(text){const el=$('#toast');el.textContent=text;el.classList.remove('hidden');setTimeout(()=>el.classList.add('hidden'),4500)}
-function renderLoansTable(){const shown=accounts.filter(a=>accountFilter==='both'||kindOf(a)===accountFilter),allRows=[],seen=new Set();for(const a of shown){const ownerKey=`${a.branch}-${a.accountNumber}`;for(const l of a.loans||[]){if(!l||(Number(l.balance)<=0&&Number(l.nextPayment)<=0)||l.accountKey&&l.accountKey!==ownerKey)continue;const fingerprint=[a.source,ownerKey,l.type,l.originalPrincipal,l.balance,l.endDate,l.nextPayment,l.nextPaymentDate,l.interest].join('|');if(seen.has(fingerprint))continue;seen.add(fingerprint);allRows.push({account:a,loan:l})}}allRows.sort((x,y)=>String(x.account.sourceLabel).localeCompare(String(y.account.sourceLabel),'he')||String(x.account.branch).localeCompare(String(y.account.branch),'he')||String(x.account.accountNumber).localeCompare(String(y.account.accountNumber),'he')||Number(y.loan.balance||0)-Number(x.loan.balance||0));const box=$('#allLoans'),hasMortgages=allRows.some(r=>r.loan.isMortgage),rows=hideMortgages?allRows.filter(r=>!r.loan.isMortgage):allRows,toggle=hasMortgages?`<button type="button" id="toggleMortgages" class="button secondary">${hideMortgages?'החזר משכנתאות':'הסר משכנתאות'}</button>`:'';if(!rows.length){box.innerHTML=`${toggle}<div class="empty">לא נמצאו הלוואות בחשבונות המוצגים.</div>`;return}const short=v=>{const s=String(v||'').replace(/\s+/g,' ').trim();return s&&s.length<=60?s:'—'},remaining=l=>{const m=String(l.installments||'').match(/(\d+)\s*\/\s*(\d+)/);if(m){const paid=Number(m[1]),total=Number(m[2]);return total>=paid?`${total-paid}/${total}`:'—'}const left=Number(l.remainingInstallments),total=Number(l.totalInstallments);
+function renderLoansTable(){const allRows=[],seen=new Set();for(const a of accounts){const ownerKey=`${a.branch}-${a.accountNumber}`;for(const l of a.loans||[]){if(!l||(Number(l.balance)<=0&&Number(l.nextPayment)<=0)||l.accountKey&&l.accountKey!==ownerKey)continue;if(accountFilter!=='both'&&loanKindOf(a,l)!==accountFilter)continue;
+const fingerprint=[a.source,ownerKey,l.type,l.originalPrincipal,l.balance,l.endDate,l.nextPayment,l.nextPaymentDate,l.interest].join('|');if(seen.has(fingerprint))continue;seen.add(fingerprint);allRows.push({account:a,loan:l})}}allRows.sort((x,y)=>String(x.account.sourceLabel).localeCompare(String(y.account.sourceLabel),'he')||String(x.account.branch).localeCompare(String(y.account.branch),'he')||String(x.account.accountNumber).localeCompare(String(y.account.accountNumber),'he')||Number(y.loan.balance||0)-Number(x.loan.balance||0));const box=$('#allLoans'),hasMortgages=allRows.some(r=>r.loan.isMortgage),rows=hideMortgages?allRows.filter(r=>!r.loan.isMortgage):allRows,toggle=hasMortgages?`<button type="button" id="toggleMortgages" class="button secondary">${hideMortgages?'החזר משכנתאות':'הסר משכנתאות'}</button>`:'';if(!rows.length){box.innerHTML=`${toggle}<div class="empty">לא נמצאו הלוואות בחשבונות המוצגים.</div>`;return}const short=v=>{const s=String(v||'').replace(/\s+/g,' ').trim();return s&&s.length<=60?s:'—'},remaining=l=>{const m=String(l.installments||'').match(/(\d+)\s*\/\s*(\d+)/);if(m){const paid=Number(m[1]),total=Number(m[2]);return total>=paid?`${total-paid}/${total}`:'—'}const left=Number(l.remainingInstallments),total=Number(l.totalInstallments);
   if(Number.isFinite(left)&&left>=0&&Number.isFinite(total)&&total>0)return `${left}/${total}`;
   // ⚠ 18.08.2026 — לאומי אינו מחזיר מספר תשלומים כלל: ברשומה שלו אין installments,
   // בעוד שפועלים מחזיר "8/71". לכן העמודה הופיעה ריקה דווקא בהלוואה של לאומי.
@@ -447,8 +515,479 @@ function renderLoansTable(){const shown=accounts.filter(a=>accountFilter==='both
     const a2=part(from),b2=part(to);return a2&&b2?(b2.y-a2.y)*12+(b2.m-a2.m):null};
   const allMonths=loanMonths(l.startDate,l.endDate),leftMonths=loanMonths(l.nextPaymentDate,l.endDate);
   if(Number.isFinite(allMonths)&&allMonths>0&&Number.isFinite(leftMonths)&&leftMonths>=0)return `~${leftMonths+1}/${allMonths+1}`;
-  return '—'};const monthly=rows.reduce((sum,row)=>sum+(Number(row.loan.nextPayment)||0),0);box.innerHTML=`${toggle}<div class="loans-table-wrap"><table class="loans-table"><thead><tr><th>בנק וחשבון</th><th>יתרה</th><th>תשלומים שנותרו</th><th>תשלום קרוב</th><th>תשלום סופי</th><th>ריבית</th><th>החזר קרוב</th></tr></thead><tbody>${rows.map(({account:a,loan:l})=>`<tr><td><b>${esc(a.sourceLabel||'בנק')}</b> · ${esc(a.branch)}-${esc(a.accountNumber)} ${l.isMortgage?'<span class="mortgage-tag">משכנתא</span>':''}</td><td>${l.balance==null?'—':money(l.balance)}</td><td dir="ltr">${esc(remaining(l))}</td><td>${esc(short(l.nextPaymentDate))}</td><td>${esc(short(l.endDate))}</td><td>${esc(short(l.interest))}</td><td><b>${l.nextPayment==null?'—':money(l.nextPayment)}</b></td></tr>`).join('')}</tbody></table></div><div class="loans-total"><span>סה״כ החזר חודשי</span><strong>${money(monthly)}</strong></div>`}
+  return '—'};const monthly=rows.reduce((sum,row)=>sum+(Number(row.loan.nextPayment)||0),0);box.innerHTML=`${toggle}<div class="loans-table-wrap"><table class="loans-table"><thead><tr><th>בנק וחשבון</th><th>יתרה</th><th>תשלומים שנותרו</th><th>תשלום קרוב</th><th>תשלום סופי</th><th>ריבית</th><th>החזר קרוב</th><th>סוג</th></tr></thead><tbody>${rows.map(({account:a,loan:l})=>`<tr><td><b>${esc(a.sourceLabel||'בנק')}</b> · ${esc(a.branch)}-${esc(a.accountNumber)} ${l.isMortgage?'<span class="mortgage-tag">משכנתא</span>':''}</td><td>${l.balance==null?'—':money(l.balance)}</td><td dir="ltr">${esc(remaining(l))}</td><td>${esc(short(l.nextPaymentDate))}</td><td>${esc(short(l.endDate))}</td><td title="${esc(l.interestNote||'')}">${esc(short(l.interest))}</td><td><b>${l.nextPayment==null?'—':money(l.nextPayment)}</b></td><td><select class="loan-kind" data-key="${encodeURIComponent(loanKeyOf(a,l))}" title="ברירת המחדל — לפי סוג החשבון (${kindOf(a)==='business'?'עסקי':'פרטי'})"><option value="" ${loanKinds[loanKeyOf(a,l)]?'':'selected'}>לפי החשבון</option><option value="business" ${loanKinds[loanKeyOf(a,l)]==='business'?'selected':''}>עסקי</option><option value="private" ${loanKinds[loanKeyOf(a,l)]==='private'?'selected':''}>פרטי</option></select></td></tr>`).join('')}</tbody></table></div><div class="loans-total"><span>סה״כ החזר חודשי</span><strong>${money(monthly)}</strong></div>`}
 
+
+
+// ── המסלקה ────────────────────────────────────────────────────────────
+// ⚠⚠ 27.08.2026 — טל: „תפתח עוד לשונית שתקלוט את נתוני המסלקה."
+// הנתונים כבר קיימים ומיוצרים חודשית בצינור של המסלקה
+// (`המסלקה/MMYY/joined_*.json`, ולפניו `maslaka_*.json`), ולכן **הקליטה
+// היא ייבוא הקובץ ולא גרידה נוספת של אתר** — מקור שכבר נבדק ומתוחזק,
+// במקום מתאם חדש שיישבר בשינוי הבא באתר.
+// ⚠ מה שנמדד בקובץ יולי בפועל (68 שורות פעילות + 11 סגורות):
+//   ברוטו 18,354,537.53 · הלוואות כנגד הקופות 13,163,225.78 · נטו ~5,191,311.75
+//   „סגורה" = קופה שנעלמה מול החודש הקודם, יתרה 0 — מוצגת בנפרד ולא בסך.
+var maslaka=null;
+// ⚠ סוג המוצר נגזר **מהקובץ עצמו** ולא מטבלה שאני ממציא: יש שורות שבהן
+// `type` מפורש, ומהן נבנית המפה ל-`sug_mutzar` המספרי עבור השורות החסרות.
+// כך המפה תמיד נכונה לקובץ שנטען, גם אם המסלקה תשנה קידוד.
+function maslakaTypeMap(rows){
+  const map={};
+  for(const r of rows){const k=String(r.sug_mutzar??'');if(k&&r.type&&!map[k])map[k]=r.type}
+  return map;
+}
+function maslakaRow(r,map){
+  const type=r.type||map[String(r.sug_mutzar??'')]||(r.sug_mutzar?`סוג ${r.sug_mutzar}`:'—');
+  const balance=Number(r.balance)||0,loan=Number(r.loan)||0;
+  return{person:r.person||'',inst:r.inst||r.yatzran||'',plan:r.plan||'',type,
+    acct:String(r.acct||r.acct_n||''),balance,loan,net:balance-loan,
+    ytd:r.ytd==null?null:Number(r.ytd),date:r.date||'',closed:!!r.closed};
+}
+// ⚠ הקובץ עשוי להיות מערך או עטוף באובייקט; שתי הצורות מתקבלות.
+function maslakaParse(text,name){
+  const raw=JSON.parse(text);
+  const arr=Array.isArray(raw)?raw:(Array.isArray(raw?.rows)?raw.rows:null);
+  if(!arr)throw Error('הקובץ אינו רשימת שורות מסלקה');
+  const map=maslakaTypeMap(arr);
+  const rows=arr.map(r=>maslakaRow(r,map));
+  if(!rows.length)throw Error('הקובץ ריק');
+  const dates=rows.map(r=>r.date).filter(Boolean).sort();
+  return{fileName:name,loadedAt:new Date().toISOString(),asOf:dates[dates.length-1]||'',rows};
+}
+const maslakaMonth=d=>{const m=String(d||'').match(/^(\d{4})(\d{2})(\d{2})$/);
+  return m?`${m[3]}/${m[2]}/${m[1]}`:String(d||'')};
+function renderMaslaka(){
+  const sourceEl=$('#maslakaSource'),sum=$('#maslakaSummary'),tbl=$('#maslakaTable');
+  if(!sum||!tbl)return;
+  if(!maslaka?.rows?.length){
+    if(sourceEl)sourceEl.textContent='טרם נטען קובץ';
+    sum.innerHTML='';
+    tbl.className='empty';
+    tbl.textContent='טען קובץ joined_*.json או maslaka_*.json מתיקיית המסלקה — הנתונים נשמרים מקומית בתוסף.';
+    return;
+  }
+  const rows=maslaka.rows,live=rows.filter(r=>!r.closed),closed=rows.filter(r=>r.closed);
+  const gross=live.reduce((s,r)=>s+r.balance,0),loans=live.reduce((s,r)=>s+r.loan,0);
+  if(sourceEl)sourceEl.textContent=`${maslaka.fileName} · ${live.length} קופות · נכון ל-${maslakaMonth(maslaka.asOf)||'—'}`;
+  const group=(key,list)=>{const m=new Map();
+    for(const r of list){const k=r[key]||'—';const v=m.get(k)||{balance:0,loan:0,n:0};
+      v.balance+=r.balance;v.loan+=r.loan;v.n++;m.set(k,v)}
+    return [...m.entries()].sort((a,b)=>b[1].balance-a[1].balance)};
+  const card=(label,value,note)=>`<div class="maslaka-card"><span>${esc(label)}</span><b>${money(value)}</b>${note?`<small>${esc(note)}</small>`:''}</div>`;
+  // ⚠ הנטו הוא העיקר: הצבירה לבדה מסתירה שכ-72% ממנה משועבדים להלוואות.
+  sum.innerHTML=`<div class="maslaka-cards">
+    ${card('צבירה ברוטו',gross,`${live.length} קופות`)}
+    ${card('הלוואות כנגד הקופות',loans,gross?`${(loans/gross*100).toFixed(1)}% מהצבירה`:'')}
+    ${card('נטו',gross-loans,'צבירה בניכוי הלוואות')}
+  </div>
+  <div class="maslaka-splits">${[['person','לפי אדם'],['type','לפי סוג מוצר'],['inst','לפי מוסד']].map(([key,title])=>
+    `<div class="maslaka-split"><h4>${title}</h4><table><tbody>${group(key,live).map(([k,v])=>
+      `<tr><td>${esc(k)}</td><td>${money(v.balance)}</td><td class="muted-cell">נטו ${money(v.balance-v.loan)}</td></tr>`).join('')}</tbody></table></div>`).join('')}</div>`;
+  const ytd=v=>v==null?'—':`${v.toFixed(2)}%`;
+  const body=[...live].sort((a,b)=>b.balance-a.balance).map(r=>
+    `<tr><td>${esc(r.person)}</td><td><b>${esc(r.inst)}</b></td><td>${esc(r.plan)}</td><td>${esc(r.type)}</td>
+     <td dir="ltr">${esc(r.acct)}</td><td>${money(r.balance)}</td><td>${r.loan?money(r.loan):'—'}</td>
+     <td><b>${money(r.net)}</b></td><td dir="ltr">${ytd(r.ytd)}</td></tr>`).join('');
+  tbl.className='';
+  tbl.innerHTML=`<div class="loans-table-wrap"><table class="loans-table"><thead><tr>
+    <th>אדם</th><th>מוסד</th><th>תוכנית</th><th>סוג</th><th>חשבון</th><th>יתרה</th><th>הלוואה</th><th>נטו</th><th>תשואה מתחילת שנה</th>
+    </tr></thead><tbody>${body}</tbody></table></div>`
+    // ⚠ קופות סגורות אינן נמחקות מהתצוגה ואינן נכנסות לסך — היעלמות היא מידע.
+    +(closed.length?`<p class="maslaka-closed">${closed.length} קופות נסגרו מול החודש הקודם: ${esc(closed.map(r=>`${r.person} · ${r.inst} ${r.plan}`).join(' · '))}</p>`:'');
+}
+async function maslakaLoadFiles(files){
+  const picked=[...files||[]];
+  if(!picked.length)return;
+  try{
+    // ⚠ נבחרו כמה קבצים → נטען העדכני ביותר לפי asOf, לא הראשון ברשימה.
+    const parsed=[];
+    for(const f of picked)parsed.push(maslakaParse(await f.text(),f.name));
+    parsed.sort((a,b)=>String(a.asOf).localeCompare(String(b.asOf)));
+    maslaka=parsed[parsed.length-1];
+    await chrome.storage.local.set({maslaka});
+    renderMaslaka();
+    toast(`נטענו ${maslaka.rows.length} שורות מ-${maslaka.fileName}`);
+  }catch(e){toast(`קריאת קובץ המסלקה נכשלה: ${e.message}`)}
+}
+
+
+// ── נדל"ן ─────────────────────────────────────────────────────────────
+// ⚠⚠ 27.08.2026 — טל: „תוסיף עוד לשונית נדל\"ן, שבה אפשר להוסיף נכסים
+// בשורות: כתובת, עיר ושווי."
+// ⚠ זה **המקור היחיד בתוסף שאין לו בנק מאחוריו** — אין סנכרון שיתקן טעות
+// ואין ממה לקרוא מחדש. לכן: שמירה מיידית על כל שינוי, מזהה יציב לכל שורה,
+// ומחיקה שמבקשת אישור. שורה שנמחקת כאן אבודה.
+var realEstate=[];
+const reId=()=>{try{return crypto.randomUUID()}catch(e){return 're-'+Math.random().toString(36).slice(2)}};
+const reNum=v=>{const n=Number(String(v??'').replace(/[^\d.-]/g,''));return Number.isFinite(n)?n:0};
+async function reSave(){await chrome.storage.local.set({realEstate});renderRealEstate()}
+async function reAdd(address,city,value){
+  const a=String(address||'').trim();
+  if(!a)return toast('צריך כתובת');
+  realEstate=[...realEstate,{id:reId(),address:a,city:String(city||'').trim(),value:reNum(value)}];
+  await reSave();toast('הנכס נוסף');
+}
+// ⚠ עריכה נשמרת על `change` ולא על כל הקשה — אחרת כל תו כותב לאחסון,
+// והשדה מאבד מיקוד באמצע ההקלדה כשהטבלה מצוירת מחדש.
+async function reEdit(id,field,value){
+  const row=realEstate.find(r=>r.id===id);if(!row)return;
+  row[field]=field==='value'?reNum(value):String(value||'').trim();
+  await chrome.storage.local.set({realEstate});
+  if(field==='value')renderRealEstate();   // רק הסכום צריך צביעה מחדש
+}
+async function reRemove(id){
+  const row=realEstate.find(r=>r.id===id);if(!row)return;
+  if(!confirm(`למחוק את ${row.address||'הנכס'}? אין מאיפה לשחזר.`))return;
+  realEstate=realEstate.filter(r=>r.id!==id);await reSave();toast('הנכס נמחק');
+}
+function renderRealEstate(){
+  const box=$('#realEstateTable');if(!box)return;
+  if(!realEstate.length){box.className='empty';
+    box.textContent='אין נכסים עדיין. הוסף כתובת, עיר ושווי בשורה שלמעלה.';return}
+  const total=realEstate.reduce((sum,r)=>sum+reNum(r.value),0);
+  box.className='';
+  box.innerHTML=`<div class="loans-table-wrap"><table class="loans-table re-table"><thead><tr>
+    <th>כתובת</th><th>עיר</th><th>שווי</th><th>הסרה</th></tr></thead><tbody>
+    ${realEstate.map(r=>`<tr data-id="${esc(r.id)}">
+      <td><input class="re-cell" data-field="address" value="${esc(r.address)}" placeholder="כתובת"></td>
+      <td><input class="re-cell" data-field="city" value="${esc(r.city)}" placeholder="עיר"></td>
+      <td><input class="re-cell re-value" data-field="value" type="number" step="1000" value="${esc(r.value)}"></td>
+      <td><button type="button" class="re-remove" title="מחיקת הנכס">✕</button></td></tr>`).join('')}
+    </tbody><tfoot><tr><td><b>סה״כ</b></td><td>${realEstate.length} נכסים</td>
+      <td><b>${money(total)}</b></td><td></td></tr></tfoot></table></div>`;
+}
+
+
+// ── מאזן נכסים · צד הנכסים ────────────────────────────────────────────
+// ⚠⚠ 27.08.2026 — טל: „תוסיף לשונית מאזן נכסים. תבנה קודם נכסים ואח״כ
+// התחייבויות", וצירף את `מאזן נכסים.xlsx` (גיליון „מאזנים שנתיים טל",
+// טורים 31.12.13 עד 14.07.26).
+// ⚠ מה שנקרא מהקובץ בפועל, ומה שהוא מלמד על המבנה:
+//   סה"כ רכוש 23,011,760 · סה"כ יתרות עו"ש 153,748 · סה"כ הלוואות −19,420,193
+//   ושורת „הלוואות פחות עוש ורכוש" = 3,745,315 — כלומר **הון = רכוש + יתרות − הלוואות**.
+//   ההלוואות מחולקות שם לשלוש: שפיצר בנקאיות, הלוואות נכסים, והלוואות גרייס
+//   כנגד קופות הגמל (12.7M — הגוש הגדול). זה המבנה שהצד השני ייבנה לפיו.
+// ⚠⚠ **ההבדל מהאקסל:** שם כל שורה מוקלדת ביד פעם בשנה. כאן רוב השורות
+// כבר קיימות חיות בתוסף — עו"ש מהחשבונות, חיסכון פנסיוני מהמסלקה, נדל"ן
+// מהלשונית שלו. לכן הן **נגזרות ולא מוקלדות**, ורק מה שהתוסף אינו יודע
+// (רכב, מזומן, חסכונות ילדים) נשאר ידני. מספר שמוקלד פעמיים מתיישן פעמיים.
+var balanceAssets=[];
+const baId=()=>{try{return crypto.randomUUID()}catch(e){return 'ba-'+Math.random().toString(36).slice(2)}};
+// ⚠ המאזן הוא תמונה כוללת ולכן **אינו מכבד את מסנן עסקי/פרטי** —
+// מאזן חלקי אינו מאזן. הדבר נאמר במפורש בתצוגה.
+function balanceAutoAssets(){
+  const rows=[];
+  // WHY 27.08.2026 - טל: "כל בנק וכל קופה יופיע סכום כולל, ורק בלחיצה על
+  // המכשיר יופיע פירוט". לכן השורות נבנות **פריט-פריט** עם שיוך לקבוצה
+  // ולמכשיר, והסיכום נעשה בתצוגה. קודם נבנה כאן סכום אחד מוכן, ואי אפשר
+  // היה לפרוט אותו בחזרה - **סכום שנבנה מוקדם מדי אינו ניתן לפתיחה.**
+  for(const a of accounts){
+    if(a.balance==null)continue;
+    rows.push({group:'עו״ש',inst:a.sourceLabel||'בנק',
+      name:`${a.branch}-${a.accountNumber}${a.nickname?` · ${a.nickname}`:''}`,
+      value:Number(a.balance)||0,source:a.sourceLabel||'בנק',note:''});
+  }
+  for(const r of (maslaka?.rows||[]).filter(x=>!x.closed))
+    rows.push({group:'חיסכון פנסיוני',inst:r.inst||'קופה',name:r.plan||'',
+      value:r.balance,source:'מסלקה',note:r.person||''});
+  for(const r of realEstate)
+    rows.push({group:'נדל״ן',inst:r.city||'ללא עיר',name:r.address||'נכס',
+      value:Number(r.value)||0,source:'נדל״ן',note:''});
+  return rows;
+}
+async function baSave(){await chrome.storage.local.set({balanceAssets});renderBalance()}
+async function baAdd(name,group,value){
+  const n=String(name||'').trim();
+  if(!n)return toast('צריך שם לפריט');
+  balanceAssets=[...balanceAssets,{id:baId(),name:n,group:String(group||'').trim()||'אחר',value:reNum(value)}];
+  await baSave();toast('הנכס נוסף למאזן');
+}
+async function baEdit(id,field,value){
+  const row=balanceAssets.find(r=>r.id===id);if(!row)return;
+  row[field]=field==='value'?reNum(value):String(value||'').trim();
+  await chrome.storage.local.set({balanceAssets});
+  if(field==='value')renderBalance();
+}
+async function baRemove(id){
+  const row=balanceAssets.find(r=>r.id===id);if(!row)return;
+  if(!confirm(`למחוק את ${row.name||'הפריט'} מהמאזן?`))return;
+  balanceAssets=balanceAssets.filter(r=>r.id!==id);await baSave();toast('הפריט הוסר');
+}
+
+// -- מאזן נכסים · צד ההתחייבויות ---------------------------------------
+// ⚠ שלוש הקבוצות הן של האקסל של טל, לא המצאה שלי: "סה"כ הלוואות שפיצר",
+// "סה"כ הלוואות נכסים" ו"סה"כ הלוואות גרייס". גם כאן רוב השורות נגזרות.
+// ⚠⚠ **הסיווג נעשה לפי מה שהתוסף כבר יודע, ולא לפי שם ההלוואה:**
+//   isMortgage או מקור btb -> הלוואת נכס · שאר הלוואות הבנקים -> שפיצר ·
+//   loan של קופה במסלקה -> גרייס. שם חופשי היה משתנה עם כל שינוי בבנק.
+// ⚠ כפילות שנבדקה במפורש: הלוואות הגרייס אינן מופיעות ברשימות ההלוואות
+// של הבנקים - הן ניתנות מחברות הגמל - ולכן אין ספירה כפולה מולן.
+var balanceLiabs=[];
+function balanceAutoLiabs(){
+  const rows=[];
+  for(const a of accounts)for(const l of a.loans||[]){
+    const bal=Number(l.balance)||0;if(bal<=0)continue;
+    const property=l.isMortgage||a.source==='btb';
+    rows.push({group:property?'הלוואות נכסים':'הלוואות בנקאיות',
+      inst:a.sourceLabel||'בנק',name:String(l.type||'הלוואה').slice(0,70),
+      value:bal,source:a.sourceLabel||'בנק',
+      note:l.nextPayment?`החזר ${money(l.nextPayment)}`:''});
+  }
+  // ⚠ הגוש הגדול באקסל (-12.7M) - הלוואות כנגד הקופות, קופה-קופה.
+  for(const r of (maslaka?.rows||[]).filter(x=>!x.closed&&x.loan>0))
+    rows.push({group:'הלוואות כנגד קופות',inst:r.inst||'קופה',
+      name:String(r.plan||'').slice(0,70),value:r.loan,source:'מסלקה',note:r.person||''});
+  // ⚠ חיוב אשראי עתידי אינו יושב ביתרת העו"ש, ולכן אינו נספר פעמיים.
+  const cards=accounts.flatMap(a=>a.cards||[]).reduce((sum,c)=>sum+(Number(c.amount)||0),0);
+  if(cards>0)rows.push({group:'חובות אחרים',inst:'כרטיסי אשראי',
+    name:'חיוב קרוב',value:cards,source:'כרטיסים',note:''});
+  return rows;
+}
+const blId=()=>{try{return crypto.randomUUID()}catch(e){return 'bl-'+Math.random().toString(36).slice(2)}};
+async function blSave(){await chrome.storage.local.set({balanceLiabs});renderBalance()}
+async function blAdd(name,group,value){
+  const n=String(name||'').trim();
+  if(!n)return toast('צריך שם להתחייבות');
+  // ⚠ נשמר כמספר חיובי והמאזן מחסיר אותו. מינוס שמוקלד ביד היה הופך לחיבור.
+  balanceLiabs=[...balanceLiabs,{id:blId(),name:n,group:String(group||'').trim()||'חובות אחרים',
+    value:Math.abs(reNum(value))}];
+  await blSave();toast('ההתחייבות נוספה');
+}
+async function blEdit(id,field,value){
+  const row=balanceLiabs.find(r=>r.id===id);if(!row)return;
+  row[field]=field==='value'?Math.abs(reNum(value)):String(value||'').trim();
+  await chrome.storage.local.set({balanceLiabs});
+  if(field==='value')renderBalance();
+}
+async function blRemove(id){
+  const row=balanceLiabs.find(r=>r.id===id);if(!row)return;
+  if(!confirm(`למחוק את ${row.name||'הפריט'} מהמאזן?`))return;
+  balanceLiabs=balanceLiabs.filter(r=>r.id!==id);await blSave();toast('ההתחייבות הוסרה');
+}
+// ⚠ טבלה אחת לשני הצדדים: התנהגות זהה, ולכן לא שני מימושים שיתפצלו בהמשך.
+// WHY: המאזן היה רשימה שטוחה ארוכה - 68 קופות ועוד הלוואות בטבלה אחת.
+// עכשיו שלוש רמות: קבוצה -> מכשיר -> פירוט, וכל רמה נפתחת בלחיצה.
+// ⚠ מצב הפתיחה נשמר ב-Set חי ולא באחסון: הוא מצב תצוגה רגעי, ושמירתו
+// הייתה כותבת לאחסון בכל לחיצה. רינדור מחדש שומר על מה שפתוח.
+var balanceOpen=new Set();
+function balanceTable(box,auto,manual,cls,totalLabel){
+  const all=[...auto.map(r=>({...r,manual:false,inst:r.inst||'אחר'})),
+             ...manual.map(r=>({...r,manual:true,group:r.group||'אחר',inst:'הוספות ידניות'}))];
+  if(!all.length){box.className='empty';box.textContent='אין עדיין שורות.';return 0}
+  const sum=list=>list.reduce((t,r)=>t+(Number(r.value)||0),0);
+  const total=sum(all);
+  const groups=[...new Set(all.map(r=>r.group))];
+  const caret=open=>`<span class="caret">${open?'▾':'▸'}</span>`;
+  const detail=r=>`<tr class="lvl3" ${r.manual?`data-id="${esc(r.id)}"`:''}>
+    <td class="indent2">${r.manual?`<input class="${cls}-cell" data-field="name" value="${esc(r.name)}">`:esc(r.name)}</td>
+    <td class="muted-cell">${esc(r.manual?'ידני':`אוטומטי · ${r.source}`)}${r.note?` · ${esc(r.note)}`:''}</td>
+    <td>${r.manual?`<input class="${cls}-cell re-value" data-field="value" type="number" step="1000" value="${esc(r.value)}">`:money(r.value)}</td>
+    <td>${r.manual?`<button type="button" class="${cls}-remove" title="הסרה">✕</button>`:''}</td></tr>`;
+  let html='';
+  for(const g of groups){
+    const inGroup=all.filter(r=>r.group===g),gKey=`${cls}|${g}`,gOpen=balanceOpen.has(gKey);
+    html+=`<tbody><tr class="lvl1 fold" data-key="${esc(gKey)}"><td colspan="2">${caret(gOpen)}${esc(g)}
+      <small>${inGroup.length} פריטים</small></td><td><b>${money(sum(inGroup))}</b></td><td></td></tr>`;
+    if(gOpen)for(const inst of [...new Set(inGroup.map(r=>r.inst))]){
+      const inInst=inGroup.filter(r=>r.inst===inst),iKey=`${gKey}|${inst}`,iOpen=balanceOpen.has(iKey);
+      // ⚠ מכשיר עם פריט אחד נפתח מיד: קיפול שמסתיר שורה בודדת מוסיף לחיצה ולא מידע.
+      const single=inInst.length===1;
+      html+=`<tr class="lvl2 ${single?'':'fold'}" ${single?'':`data-key="${esc(iKey)}"`}>
+        <td class="indent1">${single?'':caret(iOpen)}${esc(inst)}${single?'':`<small>${inInst.length}</small>`}</td>
+        <td class="muted-cell">${single?esc(inInst[0].manual?'ידני':`אוטומטי · ${inInst[0].source}`):''}</td>
+        <td>${money(sum(inInst))}</td><td></td></tr>`;
+      if(single||iOpen)for(const r of inInst)if(!single||r.manual)html+=detail(r);
+    }
+    html+='</tbody>';
+  }
+  box.className='';
+  box.innerHTML=`<div class="loans-table-wrap"><table class="loans-table ba-table folding"><thead><tr>
+    <th>קבוצה / מכשיר / פריט</th><th>מקור</th><th>סכום</th><th></th></tr></thead>
+    ${html}
+    <tfoot><tr><td colspan="2"><b>${esc(totalLabel)}</b></td><td><b>${money(total)}</b></td><td></td></tr></tfoot>
+    </table></div>`;
+  return total;
+}
+function renderBalance(){
+  const cards=$('#balanceCards'),assetsBox=$('#balanceAssets'),liabBox=$('#balanceLiabs');
+  if(!assetsBox)return;
+  const assets=balanceTable(assetsBox,balanceAutoAssets(),balanceAssets,'ba','סך הנכסים');
+  const liabs=liabBox?balanceTable(liabBox,balanceAutoLiabs(),balanceLiabs,'bl','סך ההתחייבויות'):0;
+  // ⚠ ההון העצמי הוא השורה שבגללה המאזן קיים - היא מודגשת ולא נחבאת בתחתית.
+  const equity=assets-liabs;
+  if(cards)cards.innerHTML=`<div class="maslaka-cards">
+    <div class="maslaka-card"><span>סך הנכסים</span><b>${money(assets)}</b></div>
+    <div class="maslaka-card"><span>סך ההתחייבויות</span><b>${money(liabs)}</b>
+      <small>${assets?`${(liabs/assets*100).toFixed(1)}% מהנכסים`:''}</small></div>
+    <div class="maslaka-card ${equity<0?'negative':'equity'}"><span>הון עצמי</span><b>${money(equity)}</b>
+      <small>נכסים בניכוי התחייבויות</small></div>
+  </div><p class="balance-note">המאזן מציג את התמונה המלאה ואינו מכבד את מסנן "עסקי / פרטי". שורות "אוטומטי" נגזרות מהלשוניות האחרות ומתעדכנות איתן.</p>`;
+}
+
+
+// ── גיבוי ושחזור — AUDIT סעיף 1: הסיכון הבלתי-הפיך היחיד ─────────────
+// כל הנתונים חיים בפרופיל כרום אחד; הסרת תוסף/פרופיל שנפגם מוחקים הכול,
+// והבנקים מוגבלים אחורה כך שאין ממה לשחזר. הייצוא הוא קובץ JSON אחד:
+// כל chrome.storage + כל צילומי השיקים. השחזור דורס — ולכן שואל פעמיים.
+async function exportAllData(scope='both',fromMs=NaN,toMs=NaN){
+  const storage=await chrome.storage.local.get(null);
+  // ⚠⚠ 28.08.2026 - טל: "אין צילומי שקים". הסיבה שזה עבר בשקט: catch ריק
+  // בלע את הכשל והייצוא הוכרז כהצלחה. עכשיו כשל בקריאת הצילומים **מבטל את
+  // הייצוא ואומר למה** - וגם ספירה שאינה תואמת את המסד נחשבת כשל.
+  let cheques;
+  try{cheques=await chequeAll()}
+  catch(e){return toast(`קריאת צילומי השיקים נכשלה (${e.message}) — הייצוא בוטל כדי לא לייצר גיבוי חסר`)}
+  let dbCount=null;try{dbCount=await chequeCount()}catch(e){}
+  if(dbCount!=null&&dbCount!==cheques.length)
+    return toast(`במסד ${dbCount} צילומים אך נקראו ${cheques.length} — הייצוא בוטל. רענן את הדף ונסה שוב`);
+  let cardMonths=[];try{cardMonths=await cardHistAll()}catch(e){toast(`אזהרה: היסטוריית הכרטיסים לא נקראה (${e.message})`)}
+
+  // ── היקף: עסקי / פרטי / הכול ─────────────────────────────────────────
+  // ⚠ קובץ ממוקד הוא **לשיתוף וצפייה** (למשל עסקי בלבד לרואה החשבון), לא
+  // לשחזור: שחזור של קובץ חלקי היה מוחק את החצי השני. הייבוא מסרב לו.
+  const kindOfA=a=>accountKinds[accountKey(a)]||(a.source==='private'||a.source==='discount-private'||String(a.source).startsWith('fibi-')?'private':'business');
+  let payloadStorage=storage,keptCheques=cheques,keptMonths=cardMonths;
+  if(scope!=='both'){
+    // ⚠⚠ 28.08.2026 - טל: "הלוואה שהוגדרה פרטי יצאה בייצוא עסקי." הסינון
+    // היה ברמת החשבון בלבד, וההלוואות נסעו עם החשבון. עכשיו הוא מכבד את
+    // loanKinds בשני הכיוונים:
+    //   - הלוואה שנדרסה **החוצה** מההיקף - נחתכת מהחשבון שלה.
+    //   - הלוואה שנדרסה **פנימה** (למשל עסקית בחשבון פרטי) - נכנסת, אבל
+    //     **רק היא**: החשבון מצורף מרוקן - בלי תנועות, יתרה וכרטיסים -
+    //     כי שאר החשבון שייך להיקף השני, ולדלוף איתו זה בדיוק הבאג ההפוך.
+    const lk=storage.loanKinds||{};
+    const kindOfLoan=(a,l)=>lk[`${a.selectionKey||accountKey(a)}|${l.type||''}|${l.endDate||''}`]||kindOfA(a);
+    const keptAccounts=(storage.accounts||[]).filter(a=>kindOfA(a)===scope)
+      .map(a=>({...a,loans:(a.loans||[]).filter(l=>kindOfLoan(a,l)===scope)}));
+    const crossAccounts=(storage.accounts||[]).filter(a=>kindOfA(a)!==scope)
+      .filter(a=>(a.loans||[]).some(l=>kindOfLoan(a,l)===scope))
+      .map(a=>({...a,loans:(a.loans||[]).filter(l=>kindOfLoan(a,l)===scope),
+        transactions:[],futureTransactions:[],cards:[],balance:null,creditLimit:null,availableCredit:null,
+        chequeCount:0,status:`${a.status||''} · רק הלוואות (החשבון עצמו ${scope==='business'?'פרטי':'עסקי'})`.trim()}));
+    // ⚠ מפתחות הצילומים - מהחשבונות המלאים בלבד; חשבון-רק-הלוואות לא מדליף שיקים.
+    const keys=new Set(keptAccounts.map(a=>a.selectionKey||accountKey(a)));
+    keptAccounts.push(...crossAccounts);
+    keptCheques=cheques.filter(c=>keys.has(c.selectionKey));
+    const digits=v=>String(v||'').replace(/\D/g,'');
+    const suffixes=new Set(keptAccounts.flatMap(a=>(a.cards||[]).map(c=>digits(c.suffix))).filter(Boolean));
+    keptMonths=cardMonths.filter(r=>{const d=digits(r.suffix);
+      return [...suffixes].some(x=>x.endsWith(d)||d.endsWith(x))});
+    // המסלקה, הנדל"ן והמאזן הידני הם פרטיים — נכנסים רק בהיקף פרטי.
+    payloadStorage={accounts:keptAccounts,accountKinds:storage.accountKinds||{},dataVersion:storage.dataVersion||2,
+      ...(scope==='private'?{maslaka:storage.maslaka||null,realEstate:storage.realEstate||[],
+        balanceAssets:storage.balanceAssets||[],balanceLiabs:storage.balanceLiabs||[]}:{}),
+      ...(storage.sanityAlerts?{sanityAlerts:storage.sanityAlerts}:{})};
+  }
+  // ── טווח תאריכים ─────────────────────────────────────────────────────
+  // ⚠ הטווח חל על הנתונים ה**תנועתיים** בלבד: תנועות, צילומים, חודשי
+  // כרטיסים. יתרות, הלוואות, מסלקה ונדל"ן הם תמונת-מצב — חיתוך שלהם לפי
+  // תאריך היה שקר (יתרה של אתמול אינה "יתרת ינואר").
+  // כל הפורמטים בתוסף הם יום-קודם (dd.mm / dd/mm), כולל 'ה׳ 20/08/26'.
+  const rangeSet=Number.isFinite(fromMs)||Number.isFinite(toMs);
+  if(rangeSet){
+    const lo=Number.isFinite(fromMs)?fromMs:-Infinity,hi=Number.isFinite(toMs)?toMs:Infinity;
+    const txMs=d=>{const m=String(d||'').match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
+      if(!m)return null;const y=m[3].length===2?2000+Number(m[3]):Number(m[3]);
+      return Date.UTC(y,Number(m[2])-1,Number(m[1]))};
+    const inR=d=>{const ms=txMs(d);return ms!=null&&ms>=lo&&ms<=hi};
+    const filtered=(payloadStorage.accounts||[]).map(a=>({...a,
+      transactions:(a.transactions||[]).filter(t=>inR(t.date)),
+      futureTransactions:(a.futureTransactions||[]).filter(t=>inR(t.date))}));
+    payloadStorage={...payloadStorage,accounts:filtered};
+    // צילום שהתנועה שלו נחתכה — נחתך איתה.
+    const validChq=new Set();
+    for(const a of filtered)for(const t of a.transactions||[])
+      if(t.cheque&&t.reference)validChq.add(`${a.selectionKey}|${t.reference}`);
+    keptCheques=keptCheques.filter(c=>validChq.has(c.id));
+    // חודשי כרטיסים לפי חפיפת חודש (month='MM.YYYY').
+    const ym=ms=>{const d=new Date(ms);return d.getUTCFullYear()*12+d.getUTCMonth()};
+    const loYm=Number.isFinite(fromMs)?ym(fromMs):-Infinity,hiYm=Number.isFinite(toMs)?ym(toMs):Infinity;
+    // ⚠⚠ 28.08.2026 - המסד שומר חודש כ-'062026' (בלי נקודה); התבנית הישנה
+    // זרקה את **כל** חודשי הכרטיסים מייצוא עם טווח (נמדד: cardMonths:0
+    // בקובץ העסקי של טל, מול 22 בגיבוי המלא). שני הפורמטים מתקבלים.
+    keptMonths=keptMonths.filter(r=>{const m=String(r.month||'').match(/^(\d{2})\.?(\d{4})$/);
+      if(!m)return false;const v=Number(m[2])*12+Number(m[1])-1;return v>=loYm&&v<=hiYm});
+  }
+  // ⚠ טווח הופך גם "הכול" לקובץ חלקי: לא גיבוי, לא לשחזור, לא מאפס תזכורת.
+  const partial=scope!=='both'||rangeSet;
+  const iso=ms=>Number.isFinite(ms)?new Date(ms).toISOString().slice(0,10):'';
+  const payload={format:'banks-extension-backup',dataVersion:storage.dataVersion||2,scope,
+    range:rangeSet?{from:iso(fromMs),to:iso(toMs)}:null,
+    exportedAt:new Date().toISOString(),storage:payloadStorage,cheques:keptCheques,cardMonths:keptMonths};
+  const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  const scopeName={both:'',business:'-business',private:'-private'}[scope]||'';
+  const rangeName=rangeSet?`-${iso(fromMs)||'עד'}_${iso(toMs)||'היום'}`:'';
+  a.download=`banks-backup${scopeName}${rangeName}-${new Date().toISOString().slice(0,10)}.json`;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  // ⚠ רק גיבוי מלא מאפס את שעון התזכורת — קובץ חלקי אינו גיבוי.
+  if(!partial)await chrome.storage.local.set({lastBackupAt:new Date().toISOString()});
+  renderBackupState();
+  const txTotal=(payloadStorage.accounts||[]).reduce((n,x)=>n+(x.transactions||[]).length,0);
+  toast(!partial
+    ?`הגיבוי ירד: ${keptCheques.length} צילומים, ${keptMonths.length} חודשי כרטיסים + כל הנתונים`
+    :`ייצוא ${scope==='business'?'עסקי':scope==='private'?'פרטי':'מלא'}${rangeSet?` בטווח ${iso(fromMs)||'…'} עד ${iso(toMs)||'…'}`:''}: ${payloadStorage.accounts.length} חשבונות, ${txTotal} תנועות, ${keptCheques.length} צילומים — לצפייה, לא לשחזור`);
+}
+async function importAllData(file){
+  let data;try{data=JSON.parse(await file.text())}catch(e){return toast('הקובץ אינו JSON תקין')}
+  if(data?.format!=='banks-extension-backup')return toast('זה אינו קובץ גיבוי של התוסף');
+  // ⚠ קובץ ממוקד משחזר רק חצי — ומחיקת clear() הייתה מוחקת את החצי השני.
+  if((data.scope&&data.scope!=='both')||data.range)return toast('זהו קובץ ייצוא חלקי (היקף או טווח) — מיועד לצפייה בלבד. שחזור נעשה רק מגיבוי מלא ללא טווח');
+  if(!confirm(`לשחזר גיבוי מ-${String(data.exportedAt||'').slice(0,10)}? הנתונים הנוכחיים יוחלפו במלואם.`))return;
+  await chrome.storage.local.clear();
+  await chrome.storage.local.set(data.storage||{});
+  let put=0;for(const c of data.cheques||[]){try{await chequePut(c);put++}catch(e){}}
+  let months=0;for(const r of data.cardMonths||[]){try{await cardHistPut(r);months++}catch(e){}}
+  toast(`שוחזר: ${put} צילומים ו-${months} חודשי כרטיסים — טוען מחדש`);setTimeout(()=>location.reload(),900);
+}
+// ⚠ ניקוי יתומים ידני בלבד, לעולם לא אוטומטי: מחיקת צילום היא בלתי הפיכה,
+// ותקלת סנכרון רגעית שמעלימה תנועות הייתה גוררת מחיקה אוטומטית של אמת.
+async function pruneOrphanCheques(){
+  const st=await chrome.storage.local.get({accounts:[]});
+  const valid=new Set();
+  for(const a of st.accounts||[])for(const t of a.transactions||[])
+    if(t.cheque&&t.reference)valid.add(chequeId(a.selectionKey,t.reference));
+  const all=await chequeAll();
+  const orphans=all.filter(c=>!valid.has(c.id));
+  if(!orphans.length)return toast(`אין יתומים — כל ${all.length} הצילומים מפנים לתנועות שמורות`);
+  if(!confirm(`${orphans.length} צילומים אינם מפנים לאף תנועה שמורה (מתוך ${all.length}). למחוק אותם? אין שחזור.`))return;
+  for(const c of orphans)await chequeDelete(c.id);
+  toast(`נמחקו ${orphans.length} צילומים יתומים`);
+}
+async function renderBackupState(){
+  const el=$('#backupState'),pr=$('#btbPrimeState');if(!el)return;
+  const st=await chrome.storage.local.get({lastBackupAt:'',btbPrime:0.05,btbPrimeSetAt:''});
+  const days=st.lastBackupAt?Math.round((Date.now()-Date.parse(st.lastBackupAt))/86400000):null;
+  // ⚠ ההתרעה חייבת להיראות: אין גיבוי = הסיכון הגדול ביותר במערכת.
+  el.textContent=days==null?'⚠ מעולם לא יוצא גיבוי — הכול בפרופיל הזה בלבד':
+    days>30?`⚠ הגיבוי האחרון לפני ${days} יום`:`גיבוי אחרון לפני ${days} יום`;
+  el.className=days==null||days>30?'backup-warn':'backup-ok';
+  if(pr){const age=st.btbPrimeSetAt?Math.round((Date.now()-Date.parse(st.btbPrimeSetAt))/86400000):null;
+    pr.textContent=`פריים ${(Number(st.btbPrime)*100).toFixed(2)}%${age==null?' (ברירת מחדל)':age>60?` (⚠ לפני ${age} יום)`:''}`;}
+}
+$('#exportAll')?.addEventListener('click',()=>{
+  const f=$('#exportFrom')?.value,t=$('#exportTo')?.value;
+  const fromMs=f?Date.parse(f+'T00:00:00Z'):NaN,toMs=t?Date.parse(t+'T23:59:59Z'):NaN;
+  if(Number.isFinite(fromMs)&&Number.isFinite(toMs)&&fromMs>toMs)return toast('טווח הפוך — "מ־" מאוחר מ"עד"');
+  exportAllData($('#exportScope')?.value||'both',fromMs,toMs).catch(e=>toast(`הייצוא נכשל: ${e.message}`))});
+$('#importAll')?.addEventListener('change',e=>{const f=e.target.files?.[0];e.target.value='';if(f)importAllData(f).catch(err=>toast(`השחזור נכשל: ${err.message}`))});
+$('#downloadViewer')?.addEventListener('click',async()=>{
+  // דף הצפייה עצמאי לגמרי — שומרים אותו ליד הגיבוי וכל מחשב יפתח את שניהם.
+  const t=await (await fetch('viewer.html')).text();
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/html'}));
+  a.download='banks-viewer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  toast('דף הצפייה ירד — שמור אותו יחד עם קובץ הגיבוי');});
+$('#pruneCheques')?.addEventListener('click',()=>pruneOrphanCheques().catch(e=>toast(`הניקוי נכשל: ${e.message}`)));
+$('#editPrime')?.addEventListener('click',async()=>{
+  const st=await chrome.storage.local.get({btbPrime:0.05});
+  const v=prompt('ריבית הפריים של בנק ישראל (באחוזים):',(Number(st.btbPrime)*100).toFixed(2));
+  if(v==null)return;const n=Number(String(v).replace(',','.'));
+  if(!Number.isFinite(n)||n<=0||n>20)return toast('ערך פריים לא סביר');
+  await chrome.storage.local.set({btbPrime:n/100,btbPrimeSetAt:new Date().toISOString()});
+  renderBackupState();toast(`הפריים עודכן ל-${n.toFixed(2)}% — ייכנס לתוקף בסנכרון BTB הבא`);
+});
+renderBackupState();
 
 // ── טבעת התקדמות הסנכרון ─────────────────────────────────────────────────
 // האחוז מגיע מ-syncProgress שנכתב ב-background (שלב מתוך סך). הערכת הזמן נגזרת

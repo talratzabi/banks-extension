@@ -23,3 +23,89 @@
 .control-check{cursor:pointer}
 .control-check input{width:16px;height:16px;accent-color:#3157d5;cursor:pointer}
 @media(max-width:640px){.control-row{justify-content:stretch}.control{flex:1 1 100%;justify-content:space-between}}
+
+
+/* ── לשונית המסלקה ──────────────────────────────────────────────── */
+.maslaka-load{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.maslaka-pick{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;
+  background:#0f2f4f;color:#fff;cursor:pointer;font-weight:600;font-size:14px}
+.maslaka-pick input{max-width:190px;color:#fff;font-size:12px}
+#maslakaSource{color:#5a6b7c;font-size:13px}
+#maslakaClear{padding:6px 12px;border-radius:999px;border:1px solid #d3dbe3;background:#fff;cursor:pointer}
+.maslaka-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px}
+.maslaka-card{background:#f6f9fc;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px;
+  display:flex;flex-direction:column;gap:4px}
+.maslaka-card span{color:#5a6b7c;font-size:13px}
+.maslaka-card b{font-size:20px}
+.maslaka-card small{color:#7d8b99}
+.maslaka-splits{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:18px}
+.maslaka-split h4{margin:0 0 6px;font-size:14px;color:#0f2f4f}
+.maslaka-split table{width:100%;border-collapse:collapse;font-size:13px}
+.maslaka-split td{padding:4px 6px;border-bottom:1px solid #eef2f6}
+.maslaka-split td:nth-child(2){text-align:left;font-variant-numeric:tabular-nums}
+.maslaka-split .muted-cell{color:#7d8b99;text-align:left;font-variant-numeric:tabular-nums}
+.maslaka-closed{margin-top:12px;color:#7d8b99;font-size:13px;line-height:1.6}
+
+
+/* ── לשונית נדל"ן ───────────────────────────────────────────────── */
+.re-add{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px}
+.re-add label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#5a6b7c}
+.re-add input{padding:8px 10px;border:1px solid #d3dbe3;border-radius:8px;font-size:14px;min-width:150px}
+.re-add input#reAddress{min-width:240px}
+.re-add button{padding:9px 18px;border:0;border-radius:999px;background:#0f2f4f;color:#fff;
+  font-weight:600;cursor:pointer;font-size:14px}
+.re-table input.re-cell{width:100%;padding:6px 8px;border:1px solid transparent;border-radius:6px;
+  background:transparent;font:inherit;color:inherit}
+.re-table input.re-cell:hover{border-color:#e3eaf1}
+.re-table input.re-cell:focus{border-color:#0f2f4f;background:#fff;outline:none}
+.re-table input.re-value{text-align:left;font-variant-numeric:tabular-nums}
+.re-table .re-remove{border:0;background:transparent;color:#b03030;cursor:pointer;font-size:15px;padding:4px 8px}
+.re-table tfoot td{border-top:2px solid #e3eaf1;padding-top:10px}
+
+
+/* ── מאזן נכסים ─────────────────────────────────────────────────── */
+.balance-note{color:#7d8b99;font-size:13px;margin:-6px 0 18px}
+.ba-table .auto-row{background:#f8fbfd}
+.ba-table input.ba-cell{width:100%;padding:6px 8px;border:1px solid transparent;border-radius:6px;
+  background:transparent;font:inherit;color:inherit}
+.ba-table input.ba-cell:hover{border-color:#e3eaf1}
+.ba-table input.ba-cell:focus{border-color:#0f2f4f;background:#fff;outline:none}
+.ba-table .ba-remove{border:0;background:transparent;color:#b03030;cursor:pointer;font-size:15px;padding:4px 8px}
+.ba-table tfoot td{border-top:2px solid #e3eaf1;padding-top:10px;font-size:16px}
+
+.ba-table .group-row td{background:#eef3f8;font-weight:700;color:#0f2f4f;
+  font-variant-numeric:tabular-nums;border-top:1px solid #dde5ed}
+.ba-table input.bl-cell{width:100%;padding:6px 8px;border:1px solid transparent;border-radius:6px;
+  background:transparent;font:inherit;color:inherit}
+.ba-table input.bl-cell:hover{border-color:#e3eaf1}
+.ba-table input.bl-cell:focus{border-color:#0f2f4f;background:#fff;outline:none}
+.ba-table .bl-remove{border:0;background:transparent;color:#b03030;cursor:pointer;font-size:15px;padding:4px 8px}
+.maslaka-card.equity{background:#eef7f0;border-color:#cfe6d6}
+.maslaka-card.negative{background:#fdf0f0;border-color:#f0d2d2}
+.maslaka-card.negative b{color:#b03030}
+
+/* קיפול המאזן */
+.ba-table.folding tr.lvl1>td{background:#eef3f8;font-weight:700;color:#0f2f4f;cursor:pointer}
+.ba-table.folding tr.lvl1:hover>td{background:#e4ecf4}
+.ba-table.folding tr.lvl2>td{background:#f8fbfd;font-weight:600}
+.ba-table.folding tr.lvl2.fold>td{cursor:pointer}
+.ba-table.folding tr.lvl2.fold:hover>td{background:#eff5fa}
+.ba-table.folding tr.lvl3>td{font-weight:400}
+.ba-table.folding td.indent1{padding-right:22px}
+.ba-table.folding td.indent2{padding-right:44px}
+.ba-table.folding .caret{display:inline-block;width:16px;color:#5a6b7c}
+.ba-table.folding small{color:#7d8b99;font-weight:400;margin-inline-start:8px}
+
+/* שורת הגיבוי */
+.backup-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px}
+.backup-row button{padding:6px 14px;border-radius:999px;border:1px solid #d3dbe3;background:#fff;cursor:pointer}
+.backup-row #exportAll{background:#0f2f4f;color:#fff;border:0;font-weight:600}
+.import-pill{padding:6px 12px;border-radius:999px;border:1px dashed #b9c5d1;cursor:pointer}
+.import-pill input{max-width:170px;font-size:12px}
+.backup-warn{color:#b03030;font-weight:700}
+.backup-ok{color:#3d7a4e}
+
+.scope-pick{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#5a6b7c}
+.scope-pick select{padding:5px 8px;border:1px solid #d3dbe3;border-radius:8px}
+
+.loan-kind{padding:4px 6px;border:1px solid #d3dbe3;border-radius:8px;font-size:12px;background:#fff}

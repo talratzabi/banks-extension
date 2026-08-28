@@ -1,0 +1,272 @@
+{
+  "extension/background.js": {
+    "mtime": 1787893407.195009,
+    "seen": 1787902538.2787333,
+    "ast_hash": "2a1bd98dc0a51970d3770b45e0440cbe",
+    "semantic_hash": ""
+  },
+  "extension/btb-content.js": {
+    "mtime": 1787890856.6447892,
+    "seen": 1787902538.2787333,
+    "ast_hash": "d5ffc0da21776e8ac00c30cea0ad0b48",
+    "semantic_hash": ""
+  },
+  "extension/cal-content.js": {
+    "mtime": 1787890856.6468053,
+    "seen": 1787902538.2787333,
+    "ast_hash": "1216abadf1bd31993ecf77e971b44fb1",
+    "semantic_hash": ""
+  },
+  "extension/card-history.js": {
+    "mtime": 1787894159.2294753,
+    "seen": 1787902538.2787333,
+    "ast_hash": "bf619a8089f232b3e4ce87808c33fe98",
+    "semantic_hash": ""
+  },
+  "extension/cheque-store.js": {
+    "mtime": 1787894664.2129047,
+    "seen": 1787902538.2787333,
+    "ast_hash": "5d46b924084d7a2f295d78fe0c85b542",
+    "semantic_hash": ""
+  },
+  "extension/dashboard.js": {
+    "mtime": 1787900222.1228497,
+    "seen": 1787902538.2787333,
+    "ast_hash": "ff446a90425d8f50e33380276bd1c3af",
+    "semantic_hash": ""
+  },
+  "extension/discount-content.js": {
+    "mtime": 1787890856.64882,
+    "seen": 1787902538.2787333,
+    "ast_hash": "3203d956e4d560cf30c941eac3b5ea98",
+    "semantic_hash": ""
+  },
+  "extension/fibi-content.js": {
+    "mtime": 1787890856.6506486,
+    "seen": 1787902538.2787333,
+    "ast_hash": "7ce35e71e7d16e3f1fce5160d9df619a",
+    "semantic_hash": ""
+  },
+  "extension/isracard-content.js": {
+    "mtime": 1787890856.651984,
+    "seen": 1787902538.2787333,
+    "ast_hash": "5c81bf78fa4bc9e21b3143c49365e3df",
+    "semantic_hash": ""
+  },
+  "extension/leumi-content.js": {
+    "mtime": 1787890856.653423,
+    "seen": 1787902538.2787333,
+    "ast_hash": "26ddd529617853b1512ff9c934563dc2",
+    "semantic_hash": ""
+  },
+  "extension/manifest.json": {
+    "mtime": 1787900387.312301,
+    "seen": 1787902538.2787333,
+    "ast_hash": "677b90278e64dfd4356e41195c91ede2",
+    "semantic_hash": ""
+  },
+  "extension/max-content.js": {
+    "mtime": 1787890856.653423,
+    "seen": 1787902538.2787333,
+    "ast_hash": "4734250242cdf31b6b0d2fc88b37abaa",
+    "semantic_hash": ""
+  },
+  "extension/mizrahi-content.js": {
+    "mtime": 1787890856.653423,
+    "seen": 1787902538.2787333,
+    "ast_hash": "a1d5abe6068fbca9d4d6a50de39126d1",
+    "semantic_hash": ""
+  },
+  "extension/poalim-content.js": {
+    "mtime": 1787890856.653423,
+    "seen": 1787902538.2787333,
+    "ast_hash": "aa18babab0ff43a8d1c3049ae0543843",
+    "semantic_hash": ""
+  },
+  "extension/popup.js": {
+    "mtime": 1787431348.0542033,
+    "seen": 1787902538.2787333,
+    "ast_hash": "6122ec06819b575f966b15879e9decb2",
+    "semantic_hash": ""
+  },
+  "extension/probe-content.js": {
+    "mtime": 1787846086.1845927,
+    "seen": 1787902538.2787333,
+    "ast_hash": "f99dc9679c994c21723351a68cfe670e",
+    "semantic_hash": ""
+  },
+  "extension/yahav-content.js": {
+    "mtime": 1787890856.653423,
+    "seen": 1787902538.2787333,
+    "ast_hash": "9e467aaf4a08a7ef8e074a3a25cd471f",
+    "semantic_hash": ""
+  },
+  "extension/yahav.js": {
+    "mtime": 1787850507.8359563,
+    "seen": 1787902538.2787333,
+    "ast_hash": "842d67bc4c3abc36a040f690464e5ae8",
+    "semantic_hash": ""
+  },
+  "tools/cdp.py": {
+    "mtime": 1787325965.1912875,
+    "seen": 1787902538.2787333,
+    "ast_hash": "700630b00ced7936a8bd0458e35cf362",
+    "semantic_hash": ""
+  },
+  "tools/months.js": {
+    "mtime": 1787326009.6850295,
+    "seen": 1787902538.2787333,
+    "ast_hash": "08b52f5d7ea82c15ead8625584188f40",
+    "semantic_hash": ""
+  },
+  "tools/probe-cap.js": {
+    "mtime": 1787325965.2241247,
+    "seen": 1787902538.2787333,
+    "ast_hash": "ba957dbc7d48d3d199a5dd8b61d051f5",
+    "semantic_hash": ""
+  },
+  "tools/probe-dates.js": {
+    "mtime": 1787250268.495565,
+    "seen": 1787902538.2787333,
+    "ast_hash": "5283d12249c504e5aa5f9e68fb22ab82",
+    "semantic_hash": ""
+  },
+  "tools/time-daterange.js": {
+    "mtime": 1787251712.4259286,
+    "seen": 1787902538.2787333,
+    "ast_hash": "8a665495b49a3df2e88940f73a2cbd55",
+    "semantic_hash": ""
+  },
+  "tools/try-daterange.js": {
+    "mtime": 1787250298.8038435,
+    "seen": 1787902538.2787333,
+    "ast_hash": "b8ecb159ec8157018787d2ea0e14dcac",
+    "semantic_hash": ""
+  },
+  ".claude/agents/\u05ea\u05d5\u05e1\u05e3.md": {
+    "mtime": 1787829106.6521676,
+    "seen": 1787902538.2787333,
+    "ast_hash": "be9b8d4a87a605e50436d0669806f5c8",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1786951143.9834986,
+    "seen": 1787902538.2787333,
+    "ast_hash": "dc4ca87f40297e4465dc5848d7de87ea",
+    "semantic_hash": ""
+  },
+  "AUDIT.md": {
+    "mtime": 1787893609.0281453,
+    "seen": 1787902538.2787333,
+    "ast_hash": "a18ababb58054a23fba1a012755e7cfe",
+    "semantic_hash": ""
+  },
+  "BANK_API_CONTRACT.md": {
+    "mtime": 1786773988.0281715,
+    "seen": 1787902538.2787333,
+    "ast_hash": "ababac2b047e7f89b38fac57ff8c706b",
+    "semantic_hash": ""
+  },
+  "HANDOFF.md": {
+    "mtime": 1787901567.6672664,
+    "seen": 1787902538.2787333,
+    "ast_hash": "fee8de8c5072b7bb1ff26570c29f60ca",
+    "semantic_hash": ""
+  },
+  "PROJECT-HISTORY-AND-RULES.md": {
+    "mtime": 1787682803.9591184,
+    "seen": 1787902538.2787333,
+    "ast_hash": "c315ce00df0124ce193d907fe14ac858",
+    "semantic_hash": ""
+  },
+  "extension/README.md": {
+    "mtime": 1786990318.6577368,
+    "seen": 1787902538.2787333,
+    "ast_hash": "86f4264118cfb002e72f7603bbe929b2",
+    "semantic_hash": ""
+  },
+  "extension/dashboard.html": {
+    "mtime": 1787894913.6567082,
+    "seen": 1787902538.2787333,
+    "ast_hash": "4eae10838a2b08381cda67dbde6d59c3",
+    "semantic_hash": ""
+  },
+  "extension/popup.html": {
+    "mtime": 1786787859.365781,
+    "seen": 1787902538.2787333,
+    "ast_hash": "4139be841d0ce32326e2763dfa489279",
+    "semantic_hash": ""
+  },
+  "extension/tests.html": {
+    "mtime": 1787893536.7745001,
+    "seen": 1787902538.2787333,
+    "ast_hash": "a2d17d9965b2fc29ec7d33d34ffb4827",
+    "semantic_hash": ""
+  },
+  "extension/viewer.html": {
+    "mtime": 1787900324.5695508,
+    "seen": 1787902538.2787333,
+    "ast_hash": "c53d05a73669ff8b549eff1186a5c426",
+    "semantic_hash": ""
+  },
+  "tools/README-debug.md": {
+    "mtime": 1787246862.1840744,
+    "seen": 1787902538.2787333,
+    "ast_hash": "fa9ac60ee333687b215f7ed3611600e0",
+    "semantic_hash": ""
+  },
+  "extension/icons/bank-128.png": {
+    "mtime": 1786779505.263924,
+    "seen": 1787902538.2787333,
+    "ast_hash": "ba2561037c912c5792773ea1774f5399",
+    "semantic_hash": ""
+  },
+  "extension/icons/bank-16.png": {
+    "mtime": 1786779505.2604947,
+    "seen": 1787902538.2787333,
+    "ast_hash": "8f1c26198ecbd8ba3f1fe7634d607e4a",
+    "semantic_hash": ""
+  },
+  "extension/icons/bank-32.png": {
+    "mtime": 1786779505.2614956,
+    "seen": 1787902538.2787333,
+    "ast_hash": "47d7fe5a82611f6b61c29dd86298e366",
+    "semantic_hash": ""
+  },
+  "extension/icons/bank-48.png": {
+    "mtime": 1786779505.2614956,
+    "seen": 1787902538.2787333,
+    "ast_hash": "88c0b9b8f7ecca3341ef8bbeb5838b80",
+    "semantic_hash": ""
+  },
+  "extension/icons/cal.png": {
+    "mtime": 1786789077.524891,
+    "seen": 1787902538.2787333,
+    "ast_hash": "1e1418fe726920e2784223fb7e4b8ab4",
+    "semantic_hash": ""
+  },
+  "extension/icons/isracard.png": {
+    "mtime": 1786787998.2627947,
+    "seen": 1787902538.2787333,
+    "ast_hash": "0609b79585609e855458460d24ef3e5e",
+    "semantic_hash": ""
+  },
+  "extension/icons/leumi.png": {
+    "mtime": 1786787414.0259395,
+    "seen": 1787902538.2787333,
+    "ast_hash": "c837fef5942374da1f8d89633380d7fa",
+    "semantic_hash": ""
+  },
+  "extension/icons/mizrahi.png": {
+    "mtime": 1786788519.0091856,
+    "seen": 1787902538.2787333,
+    "ast_hash": "7d488a5a2284ad7bb2b485bc3e2bac04",
+    "semantic_hash": ""
+  },
+  "extension/icons/poalim-business.png": {
+    "mtime": 1786787284.1043706,
+    "seen": 1787902538.2787333,
+    "ast_hash": "97b01b2099a6ef8599781992234dea4c",
+    "semantic_hash": ""
+  }
+}

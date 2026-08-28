@@ -1,4 +1,72 @@
 importScripts('cheque-store.js','card-history.js','yahav.js');
+
+// ═════════ תשתית יציבות — 28.08.2026, לפי AUDIT.md ═════════
+// סעיף 3: גרסת נתונים. כל שינוי מבנה עתידי מקבל כאן בלוק מיגרציה מפורש.
+// גרסה שהקוד אינו מכיר — נעצרת ואומרת, לא מנחשת.
+const DATA_VERSION=2;
+async function migrateData(){try{
+  const st=await chrome.storage.local.get({dataVersion:0});
+  if(st.dataVersion===DATA_VERSION)return;
+  if(st.dataVersion>DATA_VERSION){await chrome.storage.local.set({syncStatus:
+    `הנתונים נכתבו על ידי גרסה חדשה יותר (v${st.dataVersion}) — עדכן את התוסף לפני סנכרון`});return}
+  // v0/v1 -> v2: אין שינוי מבנה, רק החתמה. הרשומות הקיימות תקינות כמו שהן.
+  await chrome.storage.local.set({dataVersion:DATA_VERSION});
+}catch(e){}}
+migrateData();
+
+// סעיף 2: מנעול כתיבה גלובלי על accounts. 12 אתרי קרא-שנה-כתוב רצו בלי
+// סנכרון ביניהם, והאחרון דרס את קודמיו בשקט. כל חלון RMW עובר עכשיו כאן.
+// ⚠ המנעול על **חלון הקריאה-כתיבה בלבד**, לא על סנכרון שלם (דקות) —
+// אחרת stashLeumi שבתוך syncLeumi היה נתקע על עצמו.
+const accountsMutex=(()=>{let q=Promise.resolve();
+  return fn=>{const r=q.then(fn,fn);q=r.then(()=>{},()=>{});return r}})();
+
+// סעיף 6: catch ריק משתיק — אבל דחייה לא-מטופלת לא תיעלם יותר.
+// נשמרות 20 האחרונות בלבד, כדי לא ליצור בעצמנו גידול בלתי מוגבל (סעיף 4).
+async function logWorkerError(kind,message){try{
+  const st=await chrome.storage.local.get({workerErrors:[]});
+  await chrome.storage.local.set({workerErrors:[...(st.workerErrors||[]),
+    {at:new Date().toISOString(),kind,message:String(message||'').slice(0,200)}].slice(-20)});
+}catch(e){}}
+self.addEventListener('unhandledrejection',e=>{logWorkerError('unhandledrejection',e?.reason?.message||e?.reason)});
+self.addEventListener('error',e=>{logWorkerError('error',e?.message||e)});
+
+// סעיף 4: מפתחות האבחון של מקור נמחקים בתחילת הסנכרון שלו. רשומת אבחון
+// ישנה שנשארת מתחזה לממצא טרי — זה בדיוק מה שקרה עם "message channel
+// closed" של דיסקונט מ-18.08 שבלבל את האבחון עשרה ימים אחר כך.
+const SOURCE_DIAG_KEYS={
+  leumi:['leumiDebug','leumiAttempts','leumiLoanAttempts','leumiTiming','leumiChequeReport',
+    'leumiChequeWindows','leumiRangeApplied','leumiDelta','leumiRejectedOptions','leumiLoanMismatch',
+    'leumiLoanDuplicate','leumiLoadRows','leumiGap','leumiBfcache','leumiRangeProbe','leumiDateMenu',
+    'leumiRadios','leumiGridProbe','leumiAccountMatch','chequeError'],
+  btb:['btbProbe'],fibi:['fibiPages'],mizrahi:['mizrahiRangeProbe'],discount:['discountTabNote'],
+};
+async function clearSourceDiags(source){try{await chrome.storage.local.remove(SOURCE_DIAG_KEYS[source]||[])}catch(e){}}
+
+// סעיף 9: מצב הסנכרון חי בזיכרון ה-worker ומת איתו — ריצה שנקטעה השאירה
+// "בתהליך" קפוא לנצח. דגל באחסון + אזעקה הופכים מוות שקט להודעה.
+async function markSyncInFlight(on,what){try{
+  if(on){await chrome.storage.local.set({syncInFlight:{at:Date.now(),what:String(what||'')}});
+    chrome.alarms?.create('syncWatch',{periodInMinutes:1});}
+  else{await chrome.storage.local.remove('syncInFlight');chrome.alarms?.clear('syncWatch');}
+}catch(e){}}
+chrome.alarms?.onAlarm.addListener(async a=>{if(a.name!=='syncWatch')return;
+  try{const st=await chrome.storage.local.get({syncInFlight:null});
+    if(!st.syncInFlight){chrome.alarms.clear('syncWatch');return}
+    // ⚠ 20 דקות — מעל כל תקציב קיים. מעבר לזה הריצה מתה בלי לדווח.
+    if(Date.now()-st.syncInFlight.at>20*60*1000){
+      await chrome.storage.local.set({syncStatus:
+        `הסנכרון (${st.syncInFlight.what}) נקטע — תהליך הרקע הופסק באמצע. מה שנשמר עד הקטיעה נשאר; הרץ שוב.`});
+      await chrome.storage.local.remove('syncInFlight');chrome.alarms.clear('syncWatch');}
+  }catch(e){}});
+// עליית worker כשהדגל דלוק ועתיק => הריצה הקודמת מתה בלי finally.
+(async()=>{try{const st=await chrome.storage.local.get({syncInFlight:null});
+  if(st.syncInFlight&&Date.now()-st.syncInFlight.at>90*1000){
+    await chrome.storage.local.set({syncStatus:
+      `הסנכרון (${st.syncInFlight.what}) נקטע — תהליך הרקע אותחל באמצע. מה שנשמר נשאר; הרץ שוב.`});
+    await chrome.storage.local.remove('syncInFlight');}}catch(e){}})();
+// ═════════ סוף תשתית ═════════
+
 // התקנה או עדכון מבטלים תהליך חלקי ומנקים בורר זמני ישן. במהלך זיהוי פעיל
 // הרשימה נשמרת; היא אינה אמורה לחזור לאחר רענון או בזמן חיבור לבנק אחר.
 // ⚠ 18.08.2026 — `pendingSources` נוסף לאיפוס. discover מסירה ממנו בנק **רק בהצלחה**
@@ -156,6 +224,8 @@ async function reconcileUnassignedCards(){
   if(reconcileBusy)return 0;
   reconcileBusy=true;
   try{
+    // ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
+    return await accountsMutex(async()=>{
     const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{}});
     const accounts=(st.accounts||[]).map(a=>({...a,cards:[...(a.cards||[])]}));
     const patch={};let moved=0;
@@ -174,7 +244,7 @@ async function reconcileUnassignedCards(){
     if(!moved)return 0;
     patch.accounts=accounts;
     await chrome.storage.local.set(patch);
-    return moved;
+    return moved;});
   }finally{reconcileBusy=false}
 }
 chrome.storage.onChanged.addListener((changes,area)=>{
@@ -283,6 +353,8 @@ async function deleteCardEverywhere(suffix){
   const key=String(suffix||'').replace(/\D/g,'');
   if(!key)return{ok:false,error:'לא צוין מספר כרטיס'};
   const removed=await cardHistDeleteCard(suffix);
+  // ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
+  return await accountsMutex(async()=>{
   const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{},isracardActiveSince:{},hiddenCards:[]});
   const digits=c=>String((c&&c.suffix)||c||'').replace(/\D/g,'');
   const hit=c=>{const d=digits(c);return d&&(d.endsWith(key)||key.endsWith(d))};
@@ -299,7 +371,7 @@ async function deleteCardEverywhere(suffix){
   await chrome.storage.local.set({accounts,isracardUnassigned:strip(st.isracardUnassigned),
     calUnassigned:strip(st.calUnassigned),maxUnassigned:strip(st.maxUnassigned),
     isracardAssignments:assignments,isracardActiveSince:activeSince,hiddenCards});
-  return{ok:true,removed,cards};
+  return{ok:true,removed,cards};});
 }
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   // ⚠ 18.08.2026 — דגל העצירה נוקה רק ב-beginProgress ובסיום syncSelected, ולכן
@@ -341,6 +413,10 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
       chequePut({id,selectionKey:key,reference:String(m.reference),front:m.front,back:m.back||'',savedAt:new Date().toISOString()})
         .then(()=>{chequeCtx.savedRefs.add(String(m.reference))}).catch(()=>{})}
     reply({ok:true});return}
+  // WHY: הפעימה היא ההוכחה היחידה שהעמוד חי. בלעדיה "ממתין" ו"מת" נראים זהה.
+  if(m?.type==='LEUMI_SYNC_PROGRESS'){leumiBeat={at:Date.now(),stage:m.stage||'',rows:m.rows||0};
+    chrome.storage.local.set({syncStatus:`לאומי: ${m.stage||'קורא תנועות'} — ${m.rows||0} שורות`});
+    reply?.({ok:true});return}
   if(m?.type==='LEUMI_CHEQUE_PROGRESS'){chequeCtx.done++;const at=chequeCtx.base+chequeCtx.done,tot=chequeCtx.total||m.total;chrome.storage.local.set({syncStatus:`לאומי: שומר צילומי שיקים ${at}/${tot}`+(chequeCtx.base?` · ${chequeCtx.base} כבר היו שמורים`:'')+(chequeCtx.noRef?` · ${chequeCtx.noRef} ללא אסמכתא`:'')});reply({ok:true});return}
 // ⚠ ערוץ שני לגשש של דיסקונט: אם כתיבת האחסון **מן הדף** נבלעת
 // (הקשר מת), ההודעה לרקע עדיין עשויה לעבור — ולהפך. שני ערוצים
@@ -762,8 +838,10 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   // בחירה מפורשת של המשתמש בדשבורד, ונוסף 18.08.2026 כי גם כרטיס בודד לוקח דקה
   // ארוכה כשאין מה לקרוא מחדש. הדילוג נשען על cardHistStats, שמחזיק months לכל סיומת.
   let todo=wanted;
+  let histStats=null; // AUDIT (קטנות): cardHistStats סורק את כל המסד — נקרא פעם אחת וישרת גם את haveMonths למטה.
   if(onlyMissing){
-    const stats=await cardHistStats().catch(()=>({}));
+    histStats=await cardHistStats().catch(()=>({}));
+    const stats=histStats;
     todo=wanted.filter(month=>!active.every(c=>(stats[String(c.suffix)]?.months||[]).includes(month)));
     if(!todo.length){await endProgress();await chrome.storage.local.set({syncStatus:`ישראכרט: כל ${wanted.length} החודשים כבר שמורים ל${active.length>1?`-${active.length} הכרטיסים`:`כרטיס ${active[0].suffix}`} — אין מה להשלים`});
       return{ok:true,loaded:0,failed:[],skipped:wanted.length}}
@@ -793,7 +871,7 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   // ⚠ נקרא **פעם אחת** לפני הלולאה: `cardHistStats` סורק את כל המסד, ובתוך
   // לולאה של 12×8 זה היה 96 סריקות.
   const haveMonths={};
-  if(onlyMissing){const stats=await cardHistStats().catch(()=>({}));
+  if(onlyMissing){const stats=histStats||await cardHistStats().catch(()=>({}));
     for(const c of active)haveMonths[String(c.suffix)]=new Set(stats[String(c.suffix)]?.months||[]);}
   for(const month of todo){
     const out=[];
@@ -854,7 +932,7 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   }finally{isracardHistoryBusy=false;await restoreSyncTabs()}
 }
 async function syncSelected(selectionKeys){
-  if(!selectionKeys.length)throw Error('לא נבחרו חשבונות');if(running)throw Error('תהליך אחר כבר מתבצע');running=true;
+  if(!selectionKeys.length)throw Error('לא נבחרו חשבונות');if(running)throw Error('תהליך אחר כבר מתבצע');running=true;await markSyncInFlight(true,'חשבונות נבחרים');
   try{
     const grouped={business:[],private:[],leumi:[],'discount-business':[],'discount-private':[],mizrahi:[]};for(const selectionKey of selectionKeys){const parts=String(selectionKey).split('|');if(parts.length===2&&grouped[parts[0]])grouped[parts[0]].push(parts[1]);else grouped.business.push(selectionKey)}
     const saved=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],discoveredAccounts:[]});const syncedSources=['business','private','leumi','discount-business','discount-private','mizrahi'].filter(source=>grouped[source].length);
@@ -869,7 +947,7 @@ async function syncSelected(selectionKeys){
     // קידומת. בלעדיו החשבון הישן לא היה מזוהה כמוחלף, והנקרא היה נוסף לצידו ככפילות.
     const requested=new Set(selectionKeys.map(k=>{const key=String(k);return key.includes('|')?key:`business|${key}`}));
     const wasRequested=a=>{const source=a?.source||'business';return requested.has(String(a?.selectionKey||''))||(a?.entityId!=null&&requested.has(`${source}|${a.entityId}`))||requested.has(`${source}|${a?.branch||''}-${a?.accountNumber||''}`)};
-    const untouched=saved.accounts.filter(a=>!wasRequested(a)),fresh=[];
+    const fresh=[];
     for(const source of syncedSources)fresh.push(...(source==='leumi'?await syncLeumi(grouped[source]):source==='discount-business'?await syncDiscountBusiness(grouped[source]):source==='discount-private'?await syncDiscountPrivate(grouped[source]):source==='mizrahi'?await syncMizrahiSelected(grouped[source]):await syncSource(source,grouped[source])));
     // ⚠ 18.08.2026 — „דיסקונט לא מסיים את הסנכרון": הסנכרון דווקא הסתיים („הסתיים
     // בהצלחה: 10 חשבונות · 6 תנועות חדשות"), אבל discoverDiscountBusiness המשיך
@@ -890,7 +968,25 @@ async function syncSelected(selectionKeys){
     // בשיקים ובטווח שנשלח לאתר דיסקונט), ו-viewSince הוא **סינון תצוגה**
     // בדשבורד. שיקול המקום שיכול היה להצדיק מחיקה אינו קיים: יש
     // unlimitedStorage, ו-503 תנועות שוקלות 80KB.
-    const marked=[...untouched,...markedFresh];
+    // WHY (AUDIT סעיף 2): 'untouched' חושב עד כה מקריאה שנעשתה לפני דקות,
+    // וכל מה שנכתב לאחסון בזמן הסנכרון — שיוך כרטיסים, ה-stash של לאומי,
+    // סנכרון מקביל — נדרס כאן בשקט. עכשיו הרשימה נקראת מחדש ברגע השמירה,
+    // בתוך המנעול, והסינון wasRequested רץ עליה.
+    let marked,sanityAlerts=[];const savedResult=await accountsMutex(async()=>{
+    const accountsNow=((await chrome.storage.local.get({accounts:[]})).accounts)||[];
+    marked=[...accountsNow.filter(a=>!wasRequested(a)),...markedFresh];
+    // AUDIT סעיף 8: שער שפיות. כשבנק משנה עיצוב, שדות חוזרים ריקים ונשמרים
+    // כאמת — "200 שורות, 200 עתידיות" של 27.08 היה בדיוק זה. ההשוואה מול
+    // מה שהיה שמור הופכת שקט חשוד להתרעה. לא חוסמים שמירה — מסמנים ואומרים.
+    {const prevById=new Map(accountsNow.map(a=>[a.id,a]));sanityAlerts=[];
+    for(const a of markedFresh){const old=prevById.get(a.id);if(!old)continue;
+      const oldTx=(old.transactions||[]).length,newTx=(a.transactions||[]).length;
+      const bad=[];
+      if(old.balance!=null&&a.balance==null)bad.push('היתרה נעלמה');
+      if(oldTx>=20&&newTx<oldTx*0.2)bad.push(`התנועות צנחו ${oldTx}→${newTx}`);
+      if((old.loans||[]).length>0&&(a.loans||[]).length===0)bad.push(`${old.loans.length} הלוואות נעלמו`);
+      if(bad.length){sanityAlerts.push(`${a.sourceLabel||a.source} ${a.branch}-${a.accountNumber}: ${bad.join(' · ')}`);
+        a.status=`${a.status||'מסונכרן'} · ⚠ ${bad.join(' · ')}`;}}}
     // ⚠ אותה תקלה בבחירה עצמה: הסינון לפי מקור מחק מ-selectedAccountKeys את
 // מפתחות הישויות שלא סונכרנו בריצה הזאת, וכך הן נשרו גם מן הסנכרון
 // האוטומטי. ביטול בחירה נעשה בדשבורד ונכתב לאחסון ישירות, ולכן כאן איחוד פשוט.
@@ -903,8 +999,11 @@ const now=new Date().toISOString(),baseStatus=syncedSources.includes('leumi')?le
 // קודם נמחקה הרשימה כולה, ולכן סיום סנכרון בבנק אחד הרג בורר של בנק
 // אחר שהמתין לבחירה. `syncedSources` כבר קיים כאן, ומדויק לצורך.
 discoveredAccounts:((await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts||[]).filter(a=>a&&!syncedSources.includes(a.source)),
-selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
-  }catch(e){await chrome.storage.local.set({syncStatus:e.message===ABORT_MESSAGE?`${ABORT_MESSAGE} — מה שנקרא עד כאן נשמר`:`שגיאה: ${e.message}`});throw e}finally{running=false;await endProgress();await clearAbort();await restoreSyncTabs()}
+selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});
+    if(sanityAlerts.length)await chrome.storage.local.set({sanityAlerts:{at:now,alerts:sanityAlerts},
+      syncStatus:`${baseStatus} · ⚠ ${sanityAlerts.length} בדיקות שפיות נכשלו — ראה סטטוס החשבונות`});
+    else await chrome.storage.local.remove('sanityAlerts');});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
+  }catch(e){await chrome.storage.local.set({syncStatus:e.message===ABORT_MESSAGE?`${ABORT_MESSAGE} — מה שנקרא עד כאן נשמר`:`שגיאה: ${e.message}`});throw e}finally{running=false;await markSyncInFlight(false);await endProgress();await clearAbort();await restoreSyncTabs()}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
 function transactionSyncKey(t){return JSON.stringify([t?.date||'',t?.action||'',t?.details||'',t?.reference||'',Number(t?.debit)||0,Number(t?.credit)||0,t?.balance==null?'':Number(t.balance)])}
@@ -1096,8 +1195,10 @@ async function syncFibi(tabId){
     const bankNumber=v=>String(v??'').replace(/\D/g,'').replace(/^0+(?=\d)/,'');
     if(bankNumber(s.data.branch)!==bankNumber(t.data.branch)||bankNumber(s.data.accountNumber)!==bankNumber(t.data.accountNumber))throw Error(`החשבון השתנה במהלך הסנכרון (${s.data.branch}-${s.data.accountNumber} לעומת ${t.data.branch}-${t.data.accountNumber})`);
     const loanAccountKey=`${t.data.branch}-${t.data.accountNumber}`,account={...s.data,...loanResult.data,...t.data,loans:(loanResult.data.loans||[]).map(l=>({...l,accountKey:loanAccountKey})),nickname:owner.firstName||`חשבון ${t.data.accountNumber}`,owner:owner.fullName||'',source,sourceLabel:label,selectionKey:`${source}|${loanAccountKey}`,id:`${source}-${loanAccountKey}`,lastSync:now,status:'מסונכרן'};
-    const accounts=state.accounts.filter(a=>a.source!==source);accounts.push(account);const names=(await chrome.storage.local.get({fibiConnectionNames:{}})).fibiConnectionNames;names[source]=owner.firstName||t.data.accountNumber;
-    await chrome.storage.local.set({accounts,fibiConnectionNames:names,pendingFibiSlot:'',syncStatus:`${label} סונכרן`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();
+    // WHY (AUDIT סעיף 2): state נקרא בתחילת הסנכרון, לפני דקות. קוראים מחדש.
+    await accountsMutex(async()=>{
+    const accounts=(((await chrome.storage.local.get({accounts:[]})).accounts)||[]).filter(a=>a.source!==source);accounts.push(account);const names=(await chrome.storage.local.get({fibiConnectionNames:{}})).fibiConnectionNames;names[source]=owner.firstName||t.data.accountNumber;
+    await chrome.storage.local.set({accounts,fibiConnectionNames:names,pendingFibiSlot:'',syncStatus:`${label} סונכרן`,lastAutoSync:now});});if(!autoBusy)await chrome.runtime.openOptionsPage();
   }catch(e){await chrome.storage.local.set({pendingFibiSlot:'',syncStatus:`שגיאה בבינלאומי: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{running=false;await restoreSyncTabs()}
 }
 
@@ -1158,6 +1259,11 @@ try{return await runDiscoverLeumi(tabId,state)}finally{leumiBusy=false;await res
 // ⚠ תקרה מוחלטת נשמרת בכוונה: בלעדיה סנכרון תקוע ממתין לנצח, וזה גרוע
 // יותר מכישלון מוצהר.
 const leumiSyncBudget=n=>Math.min(1200000,180000+Math.max(1,n)*240000);
+// WHY 28.08.2026 - 120 שניות היו **קצרות מדי לעבודה תקינה**: הלולאה בדף
+// היא 45 שניות לכל חשבון, ובשניים היא חורגת מהתקרה בזמן שהיא מצליחה.
+// התקרה גדלה לפי מספר החשבונות, והשומר (45 שניות שקט) הוא זה שמזהה מוות -
+// **תקרה גדולה עם שומר בטוחה יותר מתקרה קטנה בלי שומר.**
+leumiLoanBudget=n=>Math.min(600000,120000+Math.max(1,n)*90000);
 async function runDiscoverLeumi(tabId,state){
 // הזיהוי רץ בעבר על הדף שבמקרה היה פתוח, ולכן נחת על gate-keeper והחזיר "לא נמצאה רשימת החשבונות".
 await prepareLeumiRoute(tabId,LEUMI_TX_URL);await delay(1200);
@@ -1196,6 +1302,10 @@ async function prepareLeumiRoute(tabId,url){const path=new URL(url).pathname;
 // התוצאה הייתה כישלון. מזריקים מחדש — בלי לנווט ובלי להרוס את הסשן.
 try{await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),5000,'בדיקת סקריפט לאומי')}
 catch{try{await chrome.scripting.executeScript({target:{tabId},files:['leumi-content.js']});await delay(400)}catch{}}
+// ⚠ אחרי שגיאת bfcache הדף עשוי לענות ל-ping ועדיין להיות מנותק. הזרקה
+// מחדש היא זולה, והיא מה שמחזיר את מאזין ה-unload שמונע כניסה חוזרת למטמון.
+if(leumiForceInject){leumiForceInject=false;
+  try{await chrome.scripting.executeScript({target:{tabId},files:['leumi-content.js']});await delay(300)}catch{}}
 let goWhy='';
 try{const go=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_GO',path}),30000,'ניווט בתפריט לאומי');
 if(go?.ok){const ping=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_PING'}),8000,'בדיקת דף לאומי');
@@ -1528,19 +1638,43 @@ async function startBtb(){
     await chrome.windows.create({url:BTB_LOGIN,type:'popup',width:560,height:780,focused:true});
     return{ok:true,status:'waiting_login'}}
   await returnToDashboard(tab.id,true);
-  return runBtb(tab.id);
+  const r=await runBtb(tab.id);
+  // ⚠ לשונית BTB פתוחה אך מנותקת — בדיוק המצב שנפל. פותחים את אותו חלון
+  // התחברות שכבר עבד כשלא הייתה לשונית כלל, במקום להחזיר „נכשל".
+  if(r?.status==='waiting_login')
+    await chrome.windows.create({url:BTB_LOGIN,type:'popup',width:560,height:780,focused:true});
+  return r;
 }
 let btbBusy=false;
 async function runBtb(tabId){
   if(btbBusy)return{ok:false,error:'סנכרון BTB כבר מתבצע'};
   btbBusy=true;
   try{
+    await clearSourceDiags('btb');
     await chrome.storage.local.set({syncStatus:'BTB: קורא את פרטי ההלוואה'});
     let tab=await chrome.tabs.get(tabId);
     if(!String(tab.url||'').includes('borrowers.btbisrael.co.il')){
       await chrome.tabs.update(tabId,{url:'https://borrowers.btbisrael.co.il/dashboard'});
       await waitTab(tabId,'borrowers.btbisrael.co.il');
     }
+    // ⚠⚠ 27.08.2026 — טל: „הסנכרון נכשל · פרטי ההלוואה לא נקראו מדף BTB."
+    // `btbProbe` הכריע: הקוד היה תקין והדף היה **מסך ההתחברות** של
+    // auth.btbisrael („אנא הזינו מספר תעודת זהות"). זו בדיוק ההערה של טל
+    // מ-24.08 על בנק מנותק: „אם הבנק לא מנותק למה אין הודעה, רק בדיעבד הבנתי".
+    // **ניתוק חייב להיאמר במפורש ומיד — לא להתחפש לכשל קריאה אחרי 25 שניות.**
+    const LOGIN_URL=/auth\.btbisrael|\/signin/i;
+    const LOGIN_TEXT=/הזינו מספר תעודת זהות|כניסה לאזור האישי/;
+    const needsLogin=async read=>{
+      const cur=await chrome.tabs.get(tabId).catch(()=>null);
+      return LOGIN_URL.test(String(cur?.url||''))||LOGIN_TEXT.test(String(read?.data?.__diag?.head||''));
+    };
+    // ⚠ המסך נפתח ב-startBtb ולא כאן, כי `finally` מריץ restoreSyncTabs
+    // שמחזיר חלונות למקומם — מיקוד שנעשה כאן היה נמחק מיד אחר כך.
+    const sayLogin=async()=>{
+      await chrome.storage.local.set({syncStatus:'BTB: החיבור נותק — התחבר במסך שנפתח ולחץ שוב על „התחלת סנכרון"'});
+      return{ok:true,status:'waiting_login'};
+    };
+    if(await needsLogin(null))return await sayLogin();
     // ⚠ המתנה לתוכן ולא למספר שניות — הלקח מ-1.20.1.
     let read=null;const deadline=Date.now()+25000;
     while(Date.now()<deadline){
@@ -1548,6 +1682,7 @@ async function runBtb(tabId){
       await delay(600);
       try{read=await chrome.tabs.sendMessage(tabId,{type:'BTB_READ'})}catch(e){read=null}
       if(read?.ok&&(read.data.balance!=null||read.data.number))break;
+      if(await needsLogin(read))return await sayLogin();
       await delay(1200);
     }
     await chrome.storage.local.set({btbProbe:{at:new Date().toISOString(),data:read?.data||null,error:read?.error||''}});
@@ -1578,16 +1713,31 @@ async function runBtb(tabId){
     // נתנה 3.20%, מספר שנראה סביר ולכן לא עורר חשד — **אבל הוא נגזר מנתון
     // שהתיישן.** גזירה מאותו תשלום מול היתרה האמיתית נותנת **8.00% בדיוק.**
     // **נתון שנראה סביר אינו נתון נכון.** המקור החוזי גובר על הגזירה.
-    const BTB_PRIME=0.05,BTB_SPREAD=0.03;   // ⚠ פריים משתנה — לעדכן כשבנק ישראל זז
+    // AUDIT סעיף 7: הפריים אינו קבוע בקוד יותר — הוא נקרא מהאחסון, ניתן
+    // לעדכון מהדשבורד, ומזדקן בקול: אחרי 60 יום בלי עדכון מופיעה התרעה.
+    const primeSt=await chrome.storage.local.get({btbPrime:0.05,btbPrimeSetAt:''});
+    const BTB_PRIME=Number(primeSt.btbPrime)||0.05,BTB_SPREAD=0.03;
+    const primeAge=primeSt.btbPrimeSetAt?Math.round((Date.now()-Date.parse(primeSt.btbPrimeSetAt))/86400000):null;
+    const primeStale=primeAge==null||primeAge>60;
     const contractual=BTB_PRIME+BTB_SPREAD;
-    const rateText=`${(contractual*100).toFixed(2)}% (פריים ${(BTB_PRIME*100).toFixed(2)}% + ${(BTB_SPREAD*100).toFixed(2)}%, מההסכם)`;
+    // ⚠ העמודה צרה ועוברת דרך `short()`, ולכן המספר לבדו בתא והמקור בריחוף.
+    // מחרוזת ארוכה הייתה נחתכת ל„8.00% (פריים 5.0…" — גרוע מלא להציג כלום.
+    const rateText=`${(contractual*100).toFixed(2)}%`;
+    const effective=Math.pow(1+contractual/12,12)-1;
+    const rateNote=`פריים ${(BTB_PRIME*100).toFixed(2)}% + ${(BTB_SPREAD*100).toFixed(2)}% — מההסכם החתום · אפקטיבית ${(effective*100).toFixed(2)}%${primeStale?' · ⚠ הפריים לא עודכן מעל 60 יום — עדכן בשורת הגיבוי בדשבורד':''}`;
     // ⚠ מתי מפחיתים? רק כשמדובר בפירעון ולא בתשלום חודשי רגיל, **וכל עוד לא
     // הגיע מועד העדכון**. סף של פי 2 מהתשלום הרגיל מפריד ביניהם; בלעדיו היינו
     // מפחיתים גם תשלום שוטף ומציגים יתרה נמוכה מדי.
     const dmy=v=>{const m=String(v||'').match(/(\d{2})[.\/](\d{2})[.\/](\d{4})/);
       return m?Date.UTC(+m[3],+m[2]-1,+m[1]):null};
     const lump=Number(d.lastPayment)||0,regular=Number(d.nextPayment)||0,dueMs=dmy(d.nextPaymentDate);
-    const lumpPending=lump>0&&regular>0&&lump>=regular*2&&!!dueMs&&Date.now()<dueMs;
+    // ⚠⚠ 27.08.2026 — התנאי הקודם היה `!!dueMs&&Date.now()<dueMs`, ולכן **תאריך
+    // שלא נקרא ביטל את כל ההיגיון**: היתרה נשארה 685,056.68 והריבית 8% הוצגה
+    // לצד יתרה שמכחישה אותה. תאריך חסר אינו ראיה לכך שהפירעון כבר נקלט.
+    // המבחן הכלכלי גובר: אם התשלום אינו מכסה את הריבית על היתרה המוצגת,
+    // אותה יתרה **אינה יכולה** להיות נכונה — וזה נכון גם בלי שום תאריך.
+    const impossible=regular>0&&d.balance*(contractual/12)>=regular;
+    const lumpPending=lump>0&&regular>0&&lump>=regular*2&&((!!dueMs&&Date.now()<dueMs)||impossible);
     const trueBalance=lumpPending?Number((d.balance-lump).toFixed(2)):d.balance;
     // ההחזר הצפוי אחרי שהפירעון ייושם, אם התקופה נשמרת
     // ⚠ טל: „ההחזר הבא הוא נכון" — כלומר התשלום אינו יורד, **התקופה מתקצרת.**
@@ -1601,27 +1751,32 @@ async function runBtb(tabId){
     const loan={type:`הלוואת BTB${d.number?` #${d.number}`:''}`,balance:trueBalance,
       // ⚠ מה שהאתר הציג נשמר לצד האמת, כדי שתמיד אפשר יהיה להסביר את הפער.
       shownBalance:d.balance,lumpPending,monthsLeft,coverageWarning,
-      rateSource:'הסכם BTB — פריים + 3%',
+      interestNote:rateNote,rateSource:'הסכם BTB — פריים + 3%',
       originalPrincipal:d.originalPrincipal,startDate:d.startDate,endDate:d.endDate,
       nextPayment:d.nextPayment,nextPaymentDate:d.nextPaymentDate,interest:rateText,
       // ⚠ הפירעון החד-פעמי נשמר על ההלוואה — הוא מסביר את הפער בין הסכום
       // המקורי ליתרה, ובלעדיו התשלום החודשי נראה בלתי אפשרי.
-      lastPayment:d.lastPayment,lastPaymentDate:d.lastPaymentDate,      rateContractual:{prime:BTB_PRIME,spread:BTB_SPREAD,nominal:contractual},
+      lastPayment:d.lastPayment,lastPaymentDate:d.lastPaymentDate,      rateContractual:{prime:BTB_PRIME,spread:BTB_SPREAD,nominal:contractual,effective},
       installments:d.totalInstallments||null,totalInstallments:d.totalInstallments||null,
-      remainingInstallments:(d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null,
+      // ⚠ המונה שבאתר (35/360) מפגר בדיוק כמו היתרה, ולכן 325 סותר את 8%.
+      // כשיש חישוב מן היתרה האמיתית — הוא מה שמוצג, והמספר של האתר נשמר לצדו.
+      siteRemainingInstallments:(d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null,
+      remainingInstallments:monthsLeft??((d.totalInstallments&&d.paidInstallments!=null)?d.totalInstallments-d.paidInstallments:null),
       accountKey:`BTB-${number}`};
     const now=new Date().toISOString();
     const account={source:'btb',sourceLabel:'BTB',branch:'BTB',accountNumber:number,
       id:`btb-${number}`,selectionKey:`btb|BTB-${number}`,nickname:`BTB — הלוואה ${number}`,
       owner:'',balance:null,creditLimit:null,availableCredit:null,transactions:[],cards:[],
       loans:[loan],lastSync:now,status:d.active?'מסונכרן':'מסונכרן — ההלוואה אינה פעילה'};
+    // ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
+    await accountsMutex(async()=>{
     const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});
     const accounts=[...state.accounts.filter(a=>a.source!=='btb'),account];
     const selectedAccountKeys=[...new Set([...state.selectedAccountKeys,account.selectionKey])];
     await chrome.storage.local.set({accounts,selectedAccountKeys,lastAutoSync:now,
       syncStatus:lumpPending
         ?`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${trueBalance} (פירעון ${lump} טרם עודכן באתר)`
-        :`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${trueBalance}`});
+        :`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${trueBalance}`});});
     if(!autoBusy)await chrome.runtime.openOptionsPage();
     return{ok:true,balance:d.balance,number};
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה ב-BTB: ${e.message}`});throw e}
@@ -1684,8 +1839,59 @@ function dbgText(asked,d){if(!d)return' | אבחון: לא התקבל צילום
 async function syncLeumi(keys){const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(!tabs[0])throw Error('החיבור ללאומי אינו פעיל');
 // היתרות שנקראו מבורר החשבונות בזיהוי משמשות נפילה לאחור, כדי שכרטיס יתרה שלא רונדר
 // לא יפיל את הסנכרון כולו אחרי שלושה ניסיונות של שתי דקות וחצי כל אחד.
+await clearSourceDiags('leumi');
 const disc=(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts;
-const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)balances[`${a.branch}-${a.accountNumber}`]=a.balance;const tabId=leumiTab(tabs).id,txUrl=LEUMI_TX_URL,loanUrl=LEUMI_LOAN_URL;let r,lastError='',lastDebug=null;for(let attempt=1;attempt<=3;attempt++){await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא תנועות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,txUrl);r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_SYNC_SELECTED',keys,balances}),leumiSyncBudget(keys.length),'קריאת תנועות בלאומי');if(r?.ok&&r.accounts?.length===keys.length&&r.accounts.every(a=>a.balance!=null&&Array.isArray(a.transactions)))break;lastError=r?.error||'לא התקבלו תנועות ויתרות מלאות';lastDebug=r?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}r=null}if(!r){await chrome.storage.local.set({leumiDebug:{stage:'transactions',asked:txUrl,error:lastError,text:dbgText(txUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת תנועות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}let lr;lastError='';lastDebug=null;for(let attempt=1;attempt<=3;attempt++){await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא הלוואות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,loanUrl);lr=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_LOANS_SELECTED',keys}),120000,'קריאת הלוואות בלאומי');if(lr?.ok&&lr.accounts?.length===keys.length&&lr.accounts.every(a=>Array.isArray(a.loans)))break;lastError=lr?.error||'לא התקבל פירוט הלוואות מלא';lastDebug=lr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}lr=null}if(!lr){await chrome.storage.local.set({leumiDebug:{stage:'loans',asked:loanUrl,error:lastError,text:dbgText(loanUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת הלוואות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}// ⚠⚠ 22.08.2026 — טל: „הסנכרון בלאומי לא נראה לי תקין." הוא צדק, ונמדד:
+const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)balances[`${a.branch}-${a.accountNumber}`]=a.balance;const tabId=leumiTab(tabs).id,txUrl=LEUMI_TX_URL,loanUrl=LEUMI_LOAN_URL;let r,lastError='',lastDebug=null;
+// WHY 27.08.2026 - "למה הסנכרון של לאומי נורא איטי". במקום להתווכח על
+// ההערכה, כל שלב נמדד ונרשם ל-leumiTiming. הריצה הבאה תענה בעצמה.
+const t0=Date.now();const stageMs={};const stamp=(k,from)=>{stageMs[k]=Date.now()-from};const attempts=[];for(let attempt=1;attempt<=3;attempt++){const attemptStart=Date.now();await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא תנועות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,txUrl);// WHY: לדף עצמו יש המתנה מוצהרת של 45 שניות (openCurrentAccount), והשומר
+// ב-45 ירה **באותו רגע** ובלע את ההודעה המדויקת שלו ("רשת התנועות לא
+// נטענה") לטובת "הפסיק להגיב" הכללי. 75 שניות נותנות לדף לומר את שלו קודם.
+// ⚠ שומר שמקדים את השגיאה האמיתית גרוע משומר שאין - הוא מוחק ראיה.
+r=await withHeartbeat(chrome.tabs.sendMessage(tabId,{type:'LEUMI_SYNC_SELECTED',keys,balances}),leumiSyncBudget(keys.length),'קריאת תנועות בלאומי',75000);if(r?.ok&&r.accounts?.length===keys.length&&r.accounts.every(a=>a.balance!=null&&Array.isArray(a.transactions)))break;lastError=r?.error||'לא התקבלו תנועות ויתרות מלאות';lastDebug=r?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}
+// WHY: עד עכשיו רק הסיבה של הניסיון האחרון שרדה, ולכן לא היה אפשר לדעת
+// אם הראשון נפל אחרת. שלוש הסיבות והזמנים נשמרים.
+if(BFCACHE.test(String(lastError||'')))leumiForceInject=true;
+attempts.push({attempt,seconds:Math.round((Date.now()-attemptStart)/1000),error:String(lastError||'').slice(0,160)});
+await chrome.storage.local.set({leumiAttempts:attempts});
+// WHY: נמדד - שלושת הניסיונות נפלו על **אותה שגיאה בדיוק**, 48 ו-47 שניות.
+// חזרה שלישית על תנאים זהים אינה ניסיון נוסף, היא רק המתנה נוספת.
+// ⚠ שתי שגיאות שונות כן מצדיקות ניסיון שלישי - זה עשוי להיות רעש חולף.
+if(attempts.length>=2&&!BFCACHE.test(String(lastError||''))&&attempts[attempts.length-1].error===attempts[attempts.length-2].error){
+  lastError=`${lastError} (שני ניסיונות נפלו זהה — הופסק)`;r=null;break}
+r=null}if(!r){await chrome.storage.local.set({leumiDebug:{stage:'transactions',asked:txUrl,error:lastError,text:dbgText(txUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת תנועות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}`)}stamp('transactions',t0);
+// WHY 28.08.2026 - טל: "לא הצליח, אין עדכון". והמדידה הראתה שהכול **כן**
+// נקרא: 200 שורות תנועות, ושתי הלוואות משני חשבונות, עד "סוגר הרחבה".
+// ואז הריצה נעלמה - **וכל העבודה נזרקה.** הסיבה מבנית: `syncLeumi` מחזיר
+// את התוצאה, והשמירה לאחסון מתרחשת **פעם אחת בלבד, בסוף כל הזרימה**.
+// 113 שניות של תנועות תקינות אבדו בגלל שלב שבא אחריהן.
+// ⚠⚠ הכלל: **מה שנקרא בהצלחה נשמר מיד.** שלב מאוחר שנכשל רשאי לגרוע
+// העשרה, לא למחוק עבודה שכבר הושלמה. זה גם מקצר את החשיפה: כל הודעה
+// בודדת קצרה יותר, ו-service worker שנרדם באמצע אינו מוחק הכול.
+// ⚠ השמירה הזאת עוקפת את markNewTransactions/applyCollectSince שרצים
+// אצל הקורא - וזה בסדר: היא רשת ביטחון, והשמירה הסופית תדרוס אותה
+// דרך המסלול המלא.
+const stashLeumi=async list=>{try{await accountsMutex(async()=>{
+  const st=await chrome.storage.local.get({accounts:[]});
+  const ids=new Set(list.map(a=>a.id));
+  await chrome.storage.local.set({accounts:[...st.accounts.filter(a=>!ids.has(a.id)),...list]});});
+}catch(e){}};
+{const now0=new Date().toISOString();
+ const partial=r.accounts.map(a=>({...a,owner:a.nickname,source:'leumi',sourceLabel:'לאומי',
+   selectionKey:`leumi|${a.key}`,id:`leumi-${a.key}`,lastSync:now0,
+   status:'מסונכרן — תנועות ויתרות (הלוואות בהמשך)'}));
+ await stashLeumi(partial);leumiStashed=partial.length;
+ const txSoFar=partial.reduce((sum,a)=>sum+(a.transactions?.length||0),0);
+ await chrome.storage.local.set({syncStatus:`לאומי: ${partial.length} חשבונות ו-${txSoFar} תנועות נשמרו — ממשיך להלוואות`});}
+const tLoans=Date.now();let lr;lastError='';lastDebug=null;const loanAttempts=[];for(let attempt=1;attempt<=3;attempt++){const loanStart=Date.now();await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא הלוואות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,loanUrl);lr=await withHeartbeat(chrome.tabs.sendMessage(tabId,{type:'LEUMI_LOANS_SELECTED',keys}),leumiLoanBudget(keys.length),'קריאת הלוואות בלאומי',45000);if(lr?.ok&&lr.accounts?.length===keys.length&&lr.accounts.every(a=>Array.isArray(a.loans)))break;lastError=lr?.error||'לא התקבל פירוט הלוואות מלא';lastDebug=lr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}
+// ⚠ נמדד: שלושת הניסיונות נפלו על אותה שגיאה, 120/120/121 שניות.
+// חזרה שלישית על תנאים זהים אינה ניסיון - היא רק עוד שתי דקות.
+if(BFCACHE.test(String(lastError||'')))leumiForceInject=true;
+loanAttempts.push({attempt,seconds:Math.round((Date.now()-loanStart)/1000),error:String(lastError||'').slice(0,160)});
+await chrome.storage.local.set({leumiLoanAttempts:loanAttempts});
+if(loanAttempts.length>=2&&!BFCACHE.test(String(lastError||''))&&loanAttempts[loanAttempts.length-1].error===loanAttempts[loanAttempts.length-2].error){
+  lastError=`${lastError} (שני ניסיונות נפלו זהה — הופסק)`;lr=null;break}
+lr=null}if(!lr){await chrome.storage.local.set({leumiDebug:{stage:'loans',asked:loanUrl,error:lastError,text:dbgText(loanUrl,lastDebug),...(lastDebug||{})}});throw Error(`קריאת הלוואות לאומי נכשלה לאחר 3 ניסיונות: ${String(lastError||'').slice(0,120)}${leumiStashed?` — אבל ${leumiStashed} חשבונות עם התנועות והיתרות כבר נשמרו`:''}`)}// ⚠⚠ 22.08.2026 — טל: „הסנכרון בלאומי לא נראה לי תקין." הוא צדק, ונמדד:
 // חשבון 921-348300 נשמר עם status „מסונכרן ומאומת" — ובפועל 28 תנועות
 // שמשתרעות על 06.07 עד 02.08 בלבד, בעוד היום 22.08. שרשרת היתרות שלהן
 // **תקינה לחלוטין** (0 שברים ב-27 מעברים), כלומר הקריאה נכונה אבל **חסרה**:
@@ -1705,31 +1911,108 @@ const gapOf=a=>{const rows=a.transactions||[];if(!rows.length||a.balance==null)r
   const last=rows[rows.length-1],diff=Math.round(((Number(a.balance)||0)-(Number(last.balance)||0))*100)/100;
   return Math.abs(diff)<0.01?null:{diff,until:last.date||'',rows:rows.length}};
 const money=n=>Number(n).toLocaleString('he-IL',{minimumFractionDigits:2,maximumFractionDigits:2});
+// ⚠ רשת שנייה, בלתי תלויה באימות שבדף: אם שני חשבונות חזרו עם **אותן
+// הלוואות בדיוק**, אחד מהם קיבל את של השני. שומרים לראשון, ומרוקנים את
+// השני במקום להציג את אותה הלוואה פעמיים תחת שני בעלים.
+{const fp=a=>JSON.stringify((a.loans||[]).map(l=>[l.type,l.balance,l.endDate,l.nextPayment]));
+ const byFp=new Map();
+ for(const a of (lr.accounts||[])){const f=fp(a);if(!(a.loans||[]).length)continue;
+   if(byFp.has(f)){a.loans=[];a.loansTotal=0;a.loanCount=0;a.loanDuplicateOf=byFp.get(f);
+     try{await chrome.storage.local.set({leumiLoanDuplicate:{key:a.key,sameAs:byFp.get(f),at:new Date().toISOString()}})}catch{}}
+   else byFp.set(f,a.key);}}
 const loansByKey=new Map((lr.accounts||[]).map(a=>[a.key,a])),now=new Date().toISOString(),gaps={},
 result=r.accounts.map(a=>{const gap=gapOf(a);if(gap)gaps[a.key]=gap;
   return{...a,...(loansByKey.get(a.key)||{}),owner:a.nickname,source:'leumi',sourceLabel:'לאומי',
   selectionKey:`leumi|${a.key}`,id:`leumi-${a.key}`,lastSync:now,
   status:gap?`מסונכרן חלקית — התנועות עד ${gap.until}, פער ${money(gap.diff)} ₪ עד היתרה`:'מסונכרן ומאומת'}});
 await chrome.storage.local.set({leumiGap:Object.keys(gaps).length?{at:now,accounts:gaps}:null,leumiRangeProbe:r.rangeProbe||null,leumiDateMenu:r.dateMenu||null,leumiRadios:r.radios||null,leumiGridProbe:r.grid||null});const txCount=result.reduce((sum,a)=>sum+(a.transactions?.length||0),0),loanCount=result.reduce((sum,a)=>sum+(a.loans?.length||0),0),chequeCount=result.reduce((sum,a)=>sum+(a.chequeCount||0),0);
+    // ⚠ הלוואה שנקראה בלי תשלום קרוב נאמרת. "הסתיים" על נתון חלקי הוא
+    // בדיוק ההבטחה החצאית שתוקנה ב-22.08.
+    const missingPay=result.reduce((sum,a)=>sum+(Number(a.missingPayment)||0),0);
 // שמירת הצילומים לא מסכנת את הסנכרון: אם היא נכשלת, היתרות והתנועות כבר בידינו.
+stamp('loans',tLoans);const tCheques=Date.now();
+// ⚠ ההלוואות נשמרות לפני קציר השיקים, שהוא השלב הארוך והפחות קריטי.
+// עד עכשיו כשל בקציר היה מאבד גם אותן.
+await stashLeumi(result);
 let saved=0;try{saved=await harvestLeumiCheques(tabId,result,txUrl)}catch(e){await chrome.storage.local.set({chequeError:e.message})}
-await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}`});return result}
+stamp('cheques',tCheques);stageMs.total=Date.now()-t0;
+await chrome.storage.local.set({leumiTiming:{at:new Date().toISOString(),seconds:
+  Object.fromEntries(Object.entries(stageMs).map(([k,v])=>[k,Math.round(v/100)/10]))}});
+// WHY: אם נשארו צילומים, זה נאמר. "הסתיים" בלי לומר שמשהו נדחה הוא
+// בדיוק ההבטחה החצאית שתוקנה ב-22.08 בשורת הסטטוס של לאומי.
+const rep=(await chrome.storage.local.get({leumiChequeReport:null})).leumiChequeReport;
+const left=Number(rep?.remaining)||0;
+await chrome.storage.local.set({syncStatus:`הסתיים ואומת: ${result.length} חשבונות, ${txCount} תנועות, ${loanCount} הלוואות, ${chequeCount} הפקדות שיקים${saved?`, ${saved} צילומי שיקים נשמרו מקומית`:''}${left?` — נותרו ${left} צילומים לסנכרון הבא`:''}${missingPay?` · ${missingPay} הלוואות ללא תשלום קרוב (ההרחבה לא נפתחה)`:''}`});return result}
 let chequeCtx={base:0,total:0,noRef:0,done:0,selectionKey:'',savedRefs:new Set()};
 let notFoundAll=[];
+// WHY 27.08.2026 - טל: "ואיך מסדרים את זה".
+// הזיכרון והיציאה המוקדמת מתקנים את **המצב היציב**, אבל לא את הריצה
+// הראשונה: 129 שיקים כפול כמה שניות זה עדיין סנכרון ארוך, והמשתמש ממתין
+// לתנועות וליתרות שכבר מוכנות מזמן.
+// **הצילומים אינם חוסמים כלום** - היתרות, התנועות וההלוואות כבר נשמרו
+// לפני שהקציר מתחיל. לכן הוא מקבל **תקציב זמן** ולא כמות: קוצר עד
+// CHEQUE_BUDGET_MS ואז עוצר בנקודה נקייה וממשיך בסנכרון הבא.
+// זה בדיוק הכלל שנלמד בבינלאומי: "תקרת סבבים אינה תקרת זמן" - כאן
+// התקרה היא זמן, כי הזמן הוא מה שהמשתמש מרגיש.
+const CHEQUE_BUDGET_MS=90000;
 async function harvestLeumiCheques(tabId,accounts,txUrl){const have=await chequeKeys();let saved=0,routed=false,asked=0,failed=0,why='',stuck=0;
+const budgetStart=Date.now();let outOfTime=0;const bfRetried=new Set();
 {let total=0,noRef=0,already=0;
 for(const a of accounts)for(const t of(a.transactions||[]))if(t.cheque){total++;
 if(!t.reference)noRef++;else if(have.has(chequeId(a.selectionKey,t.reference)))already++}
 chequeCtx={base:already,total,noRef,done:0,selectionKey:'',savedRefs:new Set()}}
 const chequeSince=await collectSinceMs();
-  for(const a of accounts){const wanted=(a.transactions||[]).filter(t=>t.cheque&&t.reference&&keepSince(t.date,chequeSince)&&!have.has(chequeId(a.selectionKey,t.reference))).map(t=>({date:t.date,reference:t.reference}));
+  // WHY 27.08.2026 - טל: "למה הסנכרון של לאומי נורא איטי".
+  // שיק שנשמר פעם אחת מדולג (have), אבל שיק ש**אין לו צילום בבנק** לא נשמר
+  // לעולם - ולכן נוסה מחדש בכל סנכרון, לנצח. במדידה שרשומה בקוד:
+  // asked 94 - saved 64 - notFound 30, כלומר כשליש מהעבודה חוזרת לריק.
+  // עכשיו נזכר מתי ניסינו, ומדלגים ל-30 יום. לא לתמיד: צילום עשוי להתווסף.
+  const missingRaw=(await chrome.storage.local.get({leumiChequeMissing:{}})).leumiChequeMissing||{};
+  // AUDIT סעיף 4: הרשומות עצמן פגות אחרי 90 יום — לא רק הדילוג. בלעדיה
+  // המפה גדלה לנצח, שיק אחד בכל פעם.
+  const EXPIRE_MS=90*24*3600*1000;
+  const missing=Object.fromEntries(Object.entries(missingRaw).filter(([,v])=>{
+    const at=typeof v==='number'?v:(v?.at||0);return Date.now()-at<EXPIRE_MS}));
+  const RETRY_MS=30*24*3600*1000,nowMs=Date.now();
+  let skippedMissing=0;
+  for(const a of accounts){const wanted=(a.transactions||[]).filter(t=>{
+      if(!t.cheque||!t.reference)return false;
+      if(!keepSince(t.date,chequeSince))return false;
+      const id=chequeId(a.selectionKey,t.reference);
+      if(have.has(id))return false;
+      // WHY 28.08.2026 - טל: "לא צילם חלק מהשיקים החדשים".
+      // ⚠ הזיכרון שהוספתי ב-1.38.0 רשם **כישלון אחד** כ"אין צילום" ודילג
+      // ל-30 יום. אבל הריצות האחרונות נפלו על bfcache באמצע הקציר -
+      // כישלון **חולף** - ושיק חדש היה נקבר לחודש בגלל תקלה רגעית.
+      // **מכה אחת אינה ראיה.** שתיים כן, וגם הן נבדקות מחדש אחרי 30 יום.
+      // (התאימות לאחור נשמרת: ערך מספרי ישן נקרא כמכה אחת.)
+      const rec=missing[id],tried=typeof rec==='number'?{at:rec,n:1}:rec;
+      if(tried&&(tried.n||1)>=2&&nowMs-(tried.at||0)<RETRY_MS){skippedMissing++;return false}
+      return true}).map(t=>({date:t.date,reference:t.reference}));
 // ניווט אחד לכל הקציר; מעבר בין חשבונות נעשה בתוך הדף ולא בטעינה מחדש.
 if(!wanted.length)continue;asked+=wanted.length;chequeCtx.selectionKey=a.selectionKey;
 if(!routed){try{await prepareLeumiRoute(tabId,txUrl);routed=true}catch(e){why=`המעבר לדף התנועות נכשל: ${e.message}`;break}}
 // באצוות, כדי שכשל באמצע לא יזרוק את מה שכבר ירד
-for(let i=0;i<wanted.length;i+=6){if(abortFlag){why=why||ABORT_MESSAGE;break}const batch=wanted.slice(i,i+6);let r=null;
+for(let i=0;i<wanted.length;i+=6){if(abortFlag){why=why||ABORT_MESSAGE;break}
+// WHY: הבדיקה **בין אצוות** ולא באמצע אחת - אצווה שנקטעת באמצע מאבדת
+// את מה שכבר צולם בה. עצירה נקייה בלבד.
+if(Date.now()-budgetStart>CHEQUE_BUDGET_MS){outOfTime+=wanted.length-i;
+  why=why||'תקציב הזמן לצילומים נגמר - יימשך בסנכרון הבא';break}
+const batch=wanted.slice(i,i+6);let r=null;
 try{r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'LEUMI_CHEQUE_IMAGES',wanted:batch,key:a.key,offset:i,total:wanted.length}),300000,'צילומי שיקים בלאומי')}catch(e){why=why||e.message}
 if(!r?.ok){
+      // WHY 28.08.2026 - הסנכרון הסתיים (163.7 שניות, 2 חשבונות, 2 הלוואות)
+      // אבל `leumiChequeReport` הראה asked:3 saved:0 failed:3 עם
+      // why: "back/forward cache". כלומר **רק שלב השיקים** עדיין נופל שם -
+      // הוא זה שמנווט בין חלונות תאריכים בתוך הקציר.
+      // ⚠ שגיאת bfcache אינה "האצווה נכשלה" אלא "הערוץ נסגר": הזרקה מחדש
+      // מחזירה את הסקריפט **ואת מאזין ה-unload איתו**, ואותה אצווה עשויה
+      // להצליח. לכן ניסיון חוזר אחד לאצווה, בלי להתקדם.
+      if(BFCACHE.test(String(r?.error||why||''))&&!bfRetried.has(i)){
+        bfRetried.add(i);
+        try{await chrome.scripting.executeScript({target:{tabId},files:['leumi-content.js']});await delay(500);
+            await prepareLeumiRoute(tabId,txUrl)}catch(e){}
+        i-=6;continue}
       // ⚠ מה שנשמר חי אינו כישלון, גם אם האצווה כולה לא חזרה.
       failed+=batch.filter(x=>!chequeCtx.savedRefs.has(String(x.reference))).length;
       why=why||r?.error||'הדף לא החזיר צילומים';
@@ -1740,9 +2023,20 @@ if(!r?.ok){
       continue}
     stuck=0;
 if(r?.images&&r.images.__notFound){notFoundAll.push(...r.images.__notFound);delete r.images.__notFound}
+    // WHY: שני סוגי כישלון נרשמים לזיכרון - שורה שלא נמצאה ושיק שנלחץ ולא
+    // החזיר צילום. שניהם עולים זמן בכל ריצה, ושניהם לא ישתנו מחר.
+    // ⚠ רק "נלחץ ולא הגיע צילום" נספר. "השורה לא נמצאה" הוא כשל **חלון**
+    // ולא כשל צילום - החלון עשוי לכסות את התאריך בריצה הבאה, ורישום שלו
+    // כ"אין צילום" היה מסתיר שיקים תקינים.
+    for(const ref of (r?.images?.__noImage||[])){
+      const id=chequeId(a.selectionKey,ref),prev=missing[id];
+      const n=(typeof prev==='number'?1:(prev?.n||0))+1;
+      missing[id]={at:nowMs,n};}
+    if(r?.images)delete r.images.__noImage;
 for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue;await chequePut({id:chequeId(a.selectionKey,reference),selectionKey:a.selectionKey,reference,front:img.front,back:img.back||'',savedAt:new Date().toISOString()});chequeCtx.savedRefs.add(String(reference));saved++}}}
   saved=Math.max(saved,chequeCtx.savedRefs.size);
-await chrome.storage.local.set({leumiChequeReport:{total:chequeCtx.total,already:chequeCtx.base,noReference:chequeCtx.noRef,asked,saved,failed,notFound:notFoundAll.length,notFoundRefs:notFoundAll.slice(0,15),why,at:new Date().toISOString()}});
+await chrome.storage.local.set({leumiChequeMissing:missing,
+  leumiChequeReport:{total:chequeCtx.total,already:chequeCtx.base,noReference:chequeCtx.noRef,asked,saved,failed,skippedMissing,remaining:outOfTime,notFound:notFoundAll.length,notFoundRefs:notFoundAll.slice(0,15),why,at:new Date().toISOString()}});
 if(asked&&!saved)await chrome.storage.local.set({syncStatus:`לאומי: לא נשמר אף צילום שיק מתוך ${asked} מבוקשים — ${why||'ללא סיבה'}`});
 return saved}
 async function openLeumiCheque(m){const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(!tabs[0])throw Error('יש להתחבר ללאומי כדי להציג צילום שיק');await chrome.tabs.update(tabs[0].id,{url:'https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/checks/cleared-checks/'});await delay(1600);const r=await chrome.tabs.sendMessage(tabs[0].id,{type:'LEUMI_OPEN_CHEQUE',branch:m.branch,accountNumber:m.accountNumber,date:m.date,amount:m.amount});if(!r?.ok)throw Error(r?.error||'צילום השיק לא נמצא');return{ok:true}}
@@ -1781,9 +2075,50 @@ function keepAlive(on){
   kaDepth=Math.max(0,kaDepth-1);
   if(!kaDepth&&kaTimer){clearInterval(kaTimer);kaTimer=null}
 }
+// WHY 27.08.2026 - "עדיין איטי". התקרה של 7 דקות היא **גג ולא גילוי**:
+// כשהניסיון עתיד להיכשל, ממתינים את כל 7 הדקות רק כדי לגלות זאת, וכפול 3
+// ניסיונות זה 21 דקות. עם פעימה אפשר לוותר אחרי 45 שניות של שקט - והתקרה
+// נשארת רק כרשת ביטחון אחרונה.
+// ⚠ שקט אינו איטיות: כל עוד יש פעימה, ההמתנה נמשכת ללא הגבלת סבבים.
+var leumiBeat=null,leumiForceInject=false,leumiStashed=0;
+const withHeartbeat=(promise,ms,what,idleMs=45000)=>{keepAlive(true);
+  leumiBeat={at:Date.now(),stage:'',rows:0};
+  let timer=null;
+  const idle=new Promise((_,reject)=>{timer=setInterval(()=>{
+    const quiet=Date.now()-(leumiBeat?.at||0);
+    if(quiet>idleMs)reject(Error(`${what} הפסיק להגיב — ${Math.round(quiet/1000)} שניות בלי סימן חיים${leumiBeat?.rows?` (נעצר על ${leumiBeat.rows} שורות)`:''}`));
+  },2000)});
+  return Promise.race([promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(Error(`${what} לא השיב תוך ${Math.round(ms/1000)} שניות`)),ms)),
+    idle])
+    .finally(()=>{clearInterval(timer);keepAlive(false)})};
+// ⚠ שגיאת bfcache אינה "אותה שגיאה" לצורך העצירה אחרי שניים: היא תלוית
+// תזמון ניווט, וניסיון נוסף אחרי הזרקה מחדש **כן** עשוי להצליח.
+const BFCACHE=/back\/forward cache|message channel (is )?closed|Extension context invalidated/i;
 const withTimeout=(promise,ms,what)=>{keepAlive(true);
   return Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(Error(`${what} לא השיב תוך ${Math.round(ms/1000)} שניות`)),ms))])
     .finally(()=>keepAlive(false))};
+// WHY 28.08.2026 - טל: "דיסקונט פרטי לא עובד".
+// השגיאה שנשמרה: "Could not establish connection. Receiving end does not exist."
+// ⚠ `prepareDiscountContent` **הצליח** - ואז ההודעה הבאה נכשלה: ה-SPA של
+// דיסקונט מרנדר מחדש אחרי שינוי ה-hash, והסקריפט נהרג **בין ההזרקה
+// לשליחה**. זה מרוץ, לא היעדר סקריפט, ולכן הפתרון הוא ניסיון חוזר עם
+// הזרקה מחדש - ולא הזרקה אחת "חזקה יותר".
+// ⚠⚠ והממצא: מתוך שש קריאות ההודעה בזרימת דיסקונט פרטי, **חמש עטופות
+// ב-try או ב-withTimeout ואחת הייתה חשופה.** מספיק אחת כדי להפיל הכול.
+const NO_RECEIVER=/Could not establish connection|Receiving end does not exist/i;
+async function discountSend(tabId,msg,what,tries=3){
+  let last='';
+  for(let n=1;n<=tries;n++){
+    try{return await withTimeout(chrome.tabs.sendMessage(tabId,msg),20000,what)}
+    catch(e){last=String(e?.message||e);
+      // ⚠ שגיאה שאינה "אין מאזין" אינה מרוץ - ניסיון שני ודי, בלי להתעקש.
+      if(!NO_RECEIVER.test(last)&&n>=2)break;
+      try{await prepareDiscountContent(tabId)}catch(err){last=String(err?.message||err)}
+      await delay(600);}
+  }
+  throw Error(`${what}: ${last}`);
+}
 async function prepareDiscountContent(tabId){let last='';for(let attempt=1;attempt<=5;attempt++){
 try{const p=await chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_PING'});if(p?.ok)return}catch(e){last=e.message}
 try{await chrome.scripting.executeScript({target:{tabId},files:['discount-content.js']})}catch(e){last=e.message}
@@ -1823,7 +2158,7 @@ async function discoverDiscountPrivate(tabId){try{await chrome.storage.local.set
 async function syncDiscountPrivate(keys){
 const state=await chrome.storage.local.get({discountPrivateTabId:null});let tab=null;if(state.discountPrivateTabId)try{tab=await chrome.tabs.get(state.discountPrivateTabId)}catch{}if(!tab){const tabs=await chrome.tabs.query({url:['https://start.telebank.co.il/apollo/retail3/*']});tab=tabs.find(t=>t.active)||tabs[0]}if(!tab)throw Error('החיבור לדיסקונט פרטי אינו פעיל');
 const saved=await chrome.storage.local.get({discoveredAccounts:[]}),names=new Map(saved.discoveredAccounts.filter(a=>a.source==='discount-private').map(a=>[String(a.key).replace(/^discount-private\|/,''),a.owner||a.nickname]));const out=[],now=new Date().toISOString();
-for(let i=0;i<keys.length;i++){const key=keys[i];await chrome.storage.local.set({syncStatus:`דיסקונט פרטי: עובר לחשבון ${i+1} מתוך ${keys.length}`});await chrome.tabs.update(tab.id,{url:'https://start.telebank.co.il/apollo/retail3/#/MY_ACCOUNT_HOMEPAGE'});await delay(1600);await prepareDiscountContent(tab.id);await chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_SELECT_PRIVATE_ACCOUNT',key});const wanted=String(key).replace(/\D/g,'').padStart(10,'0');for(let w=0;w<25;w++){await delay(700);await prepareDiscountContent(tab.id);let st=null;try{st=await chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE'})}catch{}if(`${st?.branch||''}${st?.accountNumber||''}`===wanted)break}
+for(let i=0;i<keys.length;i++){const key=keys[i];await chrome.storage.local.set({syncStatus:`דיסקונט פרטי: עובר לחשבון ${i+1} מתוך ${keys.length}`});await chrome.tabs.update(tab.id,{url:'https://start.telebank.co.il/apollo/retail3/#/MY_ACCOUNT_HOMEPAGE'});await delay(1600);await discountSend(tab.id,{type:'DISCOUNT_SELECT_PRIVATE_ACCOUNT',key},'בחירת חשבון בדיסקונט פרטי');const wanted=String(key).replace(/\D/g,'').padStart(10,'0');for(let w=0;w<25;w++){await delay(700);await prepareDiscountContent(tab.id);let st=null;try{st=await chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE'})}catch{}if(`${st?.branch||''}${st?.accountNumber||''}`===wanted)break}
 await chrome.storage.local.set({syncStatus:`דיסקונט פרטי: קורא תנועות חשבון ${i+1}`});await chrome.tabs.update(tab.id,{url:'https://start.telebank.co.il/apollo/retail3/#/OSH_LENTRIES_ALTAMIRA'});for(let w=0;w<30;w++){await delay(1000);await prepareDiscountContent(tab.id);let st=null;try{st=await chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_STATE'})}catch{}if(st?.rows>0)break}const r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_SYNC_SELECTED',keys:[key],private:true}),90000,'קריאת תנועות דיסקונט פרטי');if(!r?.ok||!(r.accounts||[]).length)throw Error(r?.error||`לא נקראו תנועות בחשבון ${key}`);
 await chrome.storage.local.set({syncStatus:`דיסקונט פרטי: קורא הלוואות חשבון ${i+1}`});await chrome.tabs.update(tab.id,{url:'https://start.telebank.co.il/apollo/retail3/#/LOANS_WORLD'});await delay(2200);await prepareDiscountContent(tab.id);let regular={loans:[]};try{regular=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_READ_LOANS'}),30000,'קריאת הלוואות')}catch{}
 await chrome.storage.local.set({syncStatus:`דיסקונט פרטי: קורא משכנתאות חשבון ${i+1}`});await chrome.tabs.update(tab.id,{url:'https://start.telebank.co.il/apollo/retail3/#/MORTGAGES_WORLD'});await delay(2500);await prepareDiscountContent(tab.id);let mortgage={loans:[]};try{mortgage=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_READ_MORTGAGES'}),30000,'קריאת משכנתאות')}catch{}
@@ -1913,10 +2248,12 @@ async function setMizrahiRange(tabId){
 async function readMizrahiTransactions(tabId){let rows=[];try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const rows=[];for(const row of document.querySelectorAll('[role="row"],tr')){const cells=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>({text:clean(x.innerText),label:clean(x.getAttribute('aria-label'))})),dateCell=cells.find(c=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.text));if(!dateCell)continue;const actionCell=cells.find(c=>/סוג תנועה/.test(c.label)),amountCell=cells.find(c=>/זכות\s*\/\s*חובה/.test(c.label)),balanceCell=cells.find(c=>/יתרה/.test(c.label));const amount=money(amountCell?.text),balance=money(balanceCell?.text);rows.push({date:dateCell.text,action:actionCell?.text||'',details:'',debit:amount!=null&&amount<0?Math.abs(amount):null,credit:amount!=null&&amount>=0?amount:null,balance})}return rows}});rows=results.flatMap(x=>Array.isArray(x.result)?x.result:[])}catch{}if(!rows.length)rows=mizrahiFrameData.get(tabId)?.transactions||[];return rows}
 async function readMizrahiSummary(tabId){const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const buttons=[...document.querySelectorAll('button')].map(x=>clean(x.innerText)),hit=buttons.find(t=>/\b\d{3}\s*-\s*\d{5,9}\b/.test(t));if(!hit)return null;const m=hit.match(/\b(\d{3})\s*-\s*(\d{5,9})\b/);if(!m)return null;const text=clean(document.body?.innerText),owner=hit.replace(m[0],'').trim()||'חשבון מזרחי',balance=money((text.match(/יתרת עו["״']ש\s*([\d,.-]+)\s*₪/)||[])[1]),creditLimit=money((text.match(/מסגרת אשראי בחשבון\s*([\d,.-]+)\s*₪/)||[])[1]);return{branch:m[1],accountNumber:m[2],owner,nickname:owner,balance,creditLimit}}});return results.map(x=>x.result).find(Boolean)||null}
 async function startMizrahi(){if(mizrahiBusy)return{ok:false,error:'סנכרון מזרחי־טפחות כבר מתבצע'};await chrome.storage.local.set({pendingMizrahi:true,syncStatus:'מזרחי־טפחות: בודק את החיבור ומזהה חשבונות'});const tab=await mizrahiTab();if(!tab){await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: פותח את חלון ההתחברות'});const opened=await chrome.tabs.create({url:MIZRAHI_HOME,active:true});try{await waitTab(opened.id,'mizrahi-tefahot.co.il')}catch{}const shown=await openMizrahiLogin(opened.id);await chrome.storage.local.set({syncStatus:shown?'ממתין להתחברות למזרחי־טפחות — הזן משתמש וסיסמה בחלונית שנפתחה':'ממתין להתחברות למזרחי־טפחות — נפתח דף ההתחברות'});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMizrahi(tab.id).catch(async e=>{await chrome.storage.local.set({pendingMizrahi:false,syncStatus:`שגיאה במזרחי־טפחות: ${e.message}`});await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
-async function runMizrahi(tabId){if(mizrahiBusy)return;mizrahiBusy=true;try{await prepareMizrahi(tabId);const detected=await readMizrahiSummary(tabId);if(!detected)throw Error('לא זוהה חשבון פעיל בעמוד מזרחי');const found=[{...detected,key:`mizrahi|${detected.branch}-${detected.accountNumber}`,source:'mizrahi',sourceLabel:'מזרחי־טפחות',balance:null}];const result=await syncMizrahiSelected([`${detected.branch}-${detected.accountNumber}`],tabId);const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});const accounts=[...state.accounts.filter(a=>a.source!=='mizrahi'),...result],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('mizrahi|')),result[0].selectionKey])];await chrome.storage.local.set({accounts,
+async function runMizrahi(tabId){if(mizrahiBusy)return;mizrahiBusy=true;try{await prepareMizrahi(tabId);const detected=await readMizrahiSummary(tabId);if(!detected)throw Error('לא זוהה חשבון פעיל בעמוד מזרחי');const found=[{...detected,key:`mizrahi|${detected.branch}-${detected.accountNumber}`,source:'mizrahi',sourceLabel:'מזרחי־טפחות',balance:null}];const result=await syncMizrahiSelected([`${detected.branch}-${detected.accountNumber}`],tabId);// ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
+await accountsMutex(async()=>{
+const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});const accounts=[...state.accounts.filter(a=>a.source!=='mizrahi'),...result],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('mizrahi|')),result[0].selectionKey])];await chrome.storage.local.set({accounts,
   // ⚠ מוחק רק את מזרחי. הוחל לפי דפוס; לא נמדדה תקלה כאן.
   discoveredAccounts:(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts.filter(a=>a&&a.source!=='mizrahi'),
-  selectedAccountKeys,pendingMizrahi:false,syncStatus:`מזרחי־טפחות: הסנכרון הסתיים — ${result[0].transactions.length} תנועות ו־${result[0].loans.length} הלוואות`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{mizrahiBusy=false;await restoreSyncTabs()}}
+  selectedAccountKeys,pendingMizrahi:false,syncStatus:`מזרחי־טפחות: הסנכרון הסתיים — ${result[0].transactions.length} תנועות ו־${result[0].loans.length} הלוואות`});});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{mizrahiBusy=false;await restoreSyncTabs()}}
 async function syncMizrahiSelected(keys,knownTabId=null){const tab=knownTabId?await chrome.tabs.get(knownTabId):await mizrahiTab();if(!tab)throw Error('החיבור למזרחי־טפחות אינו פעיל');if(keys.length!==1)throw Error('בחיבור מזרחי הנוכחי ניתן לסנכרן חשבון פעיל אחד בכל פעם');await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: קובע את טווח התאריכים'});if(!tab.url?.includes('root-main-osh-p428New')){await chrome.tabs.update(tab.id,{url:MIZRAHI_TX});await waitTab(tab.id,'root-main-osh-p428New')}await prepareMizrahi(tab.id);await delay(1200);await setMizrahiRange(tab.id);await delay(4200);const account=await readMizrahiSummary(tab.id),transactions=await readMizrahiTransactions(tab.id);if(!account)throw Error('פרטי החשבון הפעיל לא זוהו בעמוד מזרחי');if(`${account.branch}-${account.accountNumber}`!==keys[0])throw Error(`החשבון הפעיל הוא ${account.branch}-${account.accountNumber}, ולא החשבון שנבחר`);if(!transactions.length)throw Error('לא נקראו תנועות ישירות מטבלת שלושת החודשים — הסנכרון נעצר ולא נשמרו נתונים חלקיים');let loans=[];await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: נקראו ${transactions.length} תנועות; קורא הלוואות`});try{await chrome.tabs.update(tab.id,{url:MIZRAHI_LOANS});await waitTab(tab.id,'legacy-Loan-P060');await prepareMizrahi(tab.id);await delay(2200);const lr=await chrome.tabs.sendMessage(tab.id,{type:'MIZRAHI_LOANS'});if(lr?.ok)loans=lr.loans||[]}catch{}const now=new Date().toISOString(),availableCredit=account.balance==null||account.creditLimit==null?null:account.balance+account.creditLimit;return[{...account,availableCredit,transactions,loans,source:'mizrahi',sourceLabel:'מזרחי־טפחות',selectionKey:`mizrahi|${account.branch}-${account.accountNumber}`,id:`mizrahi-${account.branch}-${account.accountNumber}`,lastSync:now,status:loans.length?'מסונכרן':'מסונכרן ללא פירוט הלוואות'}]}
 
 const ISRACARD_HOME='https://web.isracard.co.il/StatusPage';
@@ -1983,13 +2320,15 @@ await beginProgress(active.length);
 for(let i=0;i<active.length;i++){const card=active[i];await syncStep(`ישראכרט: קורא כרטיס ${i+1} מתוך ${active.length} · ${card.suffix}`,`כרטיס ${card.suffix} · ${chargeMonthLabel}`);await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?cardSuffix=${encodeURIComponent(card.suffix)}`});await waitIsracardReady(tabId,card.suffix);let read={ok:true,transactions:[]};try{read=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_TRANSACTIONS_V3'})}catch{}
 const nowDate=new Date(),previous=new Date(nowDate.getFullYear(),nowDate.getMonth(),1),monthAndYear=`${String(previous.getMonth()+1).padStart(2,'0')}.${previous.getFullYear()}`;await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?monthAndYear=${monthAndYear}&cardSuffix=${encodeURIComponent(card.suffix)}`});await delay(1400);await prepareIsracard(tabId);await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SELECT_MONTH_V3',month:monthAndYear});await waitIsracardReady(tabId,card.suffix,monthAndYear);let previousRead={total:0};try{previousRead=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_TRANSACTIONS_V3'})}catch{}details.push({...card,transactions:read?.transactions||[],previousCharge:Number(previousRead?.total)||0,previousChargeMonth:monthAndYear})}
 await endProgress();
+// ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
+return await accountsMutex(async()=>{
 const state=await chrome.storage.local.get({accounts:[],isracardAssignments:{}}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),assigned=[],unassigned=[];
 const normalized=v=>String(v||'').replace(/\D/g,'');
 for(const card of details){const target=accountForCard(accounts,card,state.isracardAssignments[card.suffix]);
 if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>normalized(c.suffix).endsWith(card.suffix));if(index>=0){const old=target.cards[index];target.cards[index]={...old,...card,transactions:old.transactions?.length?old.transactions:card.transactions}}else target.cards.push(card);assigned.push({suffix:card.suffix,accountId:target.id})}
 const now=new Date().toISOString();// כל סנכרון רגיל נשמר גם כחודש בהיסטוריה — כך היא נבנית מעצמה מהיום ואילך.
 try{await storeCardMonth(mmYYYY(new Date()),details)}catch(e){}
-await chrome.storage.local.set({accounts,isracardUnassigned:unassigned,isracardLastCards:details,syncStatus:`ישראכרט: הסנכרון הסתיים — נקראו ${details.length} כרטיסים, ${assigned.length} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,assigned:assigned.length,unassigned:unassigned.length}}
+await chrome.storage.local.set({accounts,isracardUnassigned:unassigned,isracardLastCards:details,syncStatus:`ישראכרט: הסנכרון הסתיים — נקראו ${details.length} כרטיסים, ${assigned.length} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,assigned:assigned.length,unassigned:unassigned.length}});}
 const CAL_HOME='https://digital-web.cal-online.co.il/dashboard',CAL_TX='https://digital-web.cal-online.co.il/transactions-all';
 let calBusy=false;
 // ⚠ כתובת הכניסה של כאל יושבת על digital-web — בדיוק המארח שמועדף כאן כסשן.
@@ -2018,9 +2357,11 @@ async function runCal(tabId,requestedSuffix=''){
     // כל החודשים כבר נשמרו בנפרד ב-IndexedDB. בכרטיס החיוב הקרוב מציגים רק
     // את דף החיוב הנוכחי; איחוד כל העסקאות כאן גרם לכל השנה להיראות כחודש אחד.
     if(!monthly.length)throw Error('לא נקראו דפי חיוב חודשיים מכאל');const details=[{...monthly[0],amount:home.amount??monthly[0].amount,chargeDate:home.chargeDate||monthly[0].chargeDate,transactions:monthly[0].transactions||[]}];
+    // ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
+    return await accountsMutex(async()=>{
     const state=await chrome.storage.local.get({accounts:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[],digits=v=>String(v||'').replace(/\D/g,'');let assigned=0;
     for(const card of details){let target=accounts.find(a=>(a.cards||[]).some(c=>digits(c.suffix).endsWith(card.suffix)));if(!target&&home.debitAccount){const wanted=digits(home.debitAccount);const matches=accounts.filter(a=>wanted.endsWith(digits(a.accountNumber))||digits(a.accountNumber).endsWith(wanted));if(matches.length===1)target=matches[0]}if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>digits(c.suffix).endsWith(card.suffix));if(index>=0)target.cards[index]={...target.cards[index],...card};else target.cards.push(card);assigned++}
-    const now=new Date().toISOString(),savedCal=await chrome.storage.local.get({calLastCards:[],calUnassigned:[]}),merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]},monthCount=monthly.length;autoLoginRuns.set(`cal|${tabId}`,Date.now());await chrome.storage.local.set({accounts,calLastCards:merge(savedCal.calLastCards,details),calUnassigned:merge(savedCal.calUnassigned,unassigned),pendingCal:false,pendingCalSuffix:'',syncStatus:`כאל: הסנכרון הסתיים — ${details.length} כרטיסים, ${monthCount} דפי חיוב חודשיים נשמרו, ${assigned} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:monthCount,assigned,unassigned:unassigned.length}
+    const now=new Date().toISOString(),savedCal=await chrome.storage.local.get({calLastCards:[],calUnassigned:[]}),merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]},monthCount=monthly.length;autoLoginRuns.set(`cal|${tabId}`,Date.now());await chrome.storage.local.set({accounts,calLastCards:merge(savedCal.calLastCards,details),calUnassigned:merge(savedCal.calUnassigned,unassigned),pendingCal:false,pendingCalSuffix:'',syncStatus:`כאל: הסנכרון הסתיים — ${details.length} כרטיסים, ${monthCount} דפי חיוב חודשיים נשמרו, ${assigned} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:monthCount,assigned,unassigned:unassigned.length}});
   }finally{calBusy=false;await restoreSyncTabs()}
 }
 const MAX_TX='https://www.max.co.il/transaction-details/personal';
@@ -2050,9 +2391,12 @@ async function runMax(tabId,requestedSuffix=''){
       break;
     }
   }
-  if(!monthly.length)throw Error('לא נקראו עסקאות חודשיות מ‑MAX');const latestBySuffix=new Map();for(const c of monthly)if(!latestBySuffix.has(c.suffix))latestBySuffix.set(c.suffix,c);const nowLabel=firstRead.label,nowKey=firstRead.key;await chrome.storage.local.set({syncStatus:`MAX: החיוב הקרוב — ${nowLabel}`});await chrome.tabs.sendMessage(tabId,{type:'MAX_SELECT_MONTH',label:nowLabel});await delay(1800);await prepareMax(tabId);let currentPage=await chrome.tabs.sendMessage(tabId,{type:'MAX_READ'});if(!currentPage?.ok||currentPage.month!==nowKey)currentPage={ok:true,month:nowKey,total:0,cards:{}};const details=[...latestBySuffix.keys()].map(suffix=>{const transactions=currentPage.cards?.[suffix]||[],onlyCard=latestBySuffix.size===1,amount=onlyCard&&Number.isFinite(Number(currentPage.total))?Number(currentPage.total):transactions.reduce((s,t)=>s+Math.abs(Number(t.amount)||0),0);return{...latestBySuffix.get(suffix),amount,transactions,month:currentPage.month}}),state=await chrome.storage.local.get({accounts:[],maxLastCards:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[];let assigned=0;const digits=v=>String(v||'').replace(/\D/g,'');
+  if(!monthly.length)throw Error('לא נקראו עסקאות חודשיות מ‑MAX');const latestBySuffix=new Map();for(const c of monthly)if(!latestBySuffix.has(c.suffix))latestBySuffix.set(c.suffix,c);const nowLabel=firstRead.label,nowKey=firstRead.key;await chrome.storage.local.set({syncStatus:`MAX: החיוב הקרוב — ${nowLabel}`});await chrome.tabs.sendMessage(tabId,{type:'MAX_SELECT_MONTH',label:nowLabel});await delay(1800);await prepareMax(tabId);let currentPage=await chrome.tabs.sendMessage(tabId,{type:'MAX_READ'});if(!currentPage?.ok||currentPage.month!==nowKey)currentPage={ok:true,month:nowKey,total:0,cards:{}};const details=[...latestBySuffix.keys()].map(suffix=>{const transactions=currentPage.cards?.[suffix]||[],onlyCard=latestBySuffix.size===1,amount=onlyCard&&Number.isFinite(Number(currentPage.total))?Number(currentPage.total):transactions.reduce((s,t)=>s+Math.abs(Number(t.amount)||0),0);return{...latestBySuffix.get(suffix),amount,transactions,month:currentPage.month}});
+  // ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
+  return await accountsMutex(async()=>{
+  const state=await chrome.storage.local.get({accounts:[],maxLastCards:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[];let assigned=0;const digits=v=>String(v||'').replace(/\D/g,'');
   for(const card of details){const target=accounts.find(a=>(a.cards||[]).some(c=>digits(c.suffix).endsWith(card.suffix)));if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>digits(c.suffix).endsWith(card.suffix));if(index>=0)target.cards[index]={...target.cards[index],...card};else target.cards.push(card);assigned++}
-  const merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]};autoLoginRuns.set(`max|${tabId}`,Date.now());await chrome.storage.local.set({accounts,maxLastCards:merge(state.maxLastCards,details),maxUnassigned:unassigned,pendingMax:false,pendingMaxSuffix:'',syncStatus:`MAX: הסנכרון הסתיים — ${details.length} כרטיסים, ${seen.size} דפי חיוב חודשיים נשמרו, ${assigned} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:new Date().toISOString()});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:seen.size,assigned,unassigned:unassigned.length}
+  const merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]};autoLoginRuns.set(`max|${tabId}`,Date.now());await chrome.storage.local.set({accounts,maxLastCards:merge(state.maxLastCards,details),maxUnassigned:unassigned,pendingMax:false,pendingMaxSuffix:'',syncStatus:`MAX: הסנכרון הסתיים — ${details.length} כרטיסים, ${seen.size} דפי חיוב חודשיים נשמרו, ${assigned} שויכו לחשבונות${unassigned.length?`, ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:new Date().toISOString()});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:seen.size,assigned,unassigned:unassigned.length}});
  }finally{maxBusy=false;await restoreSyncTabs()}
 }
 async function startDiscountBusiness(){const saved=await chrome.storage.local.get({discoveredAccounts:[]});

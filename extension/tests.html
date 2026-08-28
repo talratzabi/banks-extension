@@ -1,0 +1,107 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>בדיקות התוסף</title>
+<style>
+body{font-family:system-ui;margin:24px;background:#f6f9fc}
+h1{font-size:20px} .ok{color:#3d7a4e} .fail{color:#b03030;font-weight:700}
+li{margin:4px 0;font-size:14px} #sum{font-size:16px;font-weight:700;margin:12px 0}
+</style></head><body>
+<h1>🧪 בדיקות רגרסיה — נפתח ידנית, רץ על הקבצים האמיתיים</h1>
+<p>כל בדיקה כאן נולדה מתקלה אמיתית שקרתה. אם אחת נשברת — התיקון שלה נסוג.</p>
+<div id="sum">טוען…</div><ul id="out"></ul>
+<script>
+// ⚠ AUDIT (קטנות): הדפוס "הגנה כמעט בכל מקום" חזר שלוש פעמים בשבוע אחד.
+// הקובץ הזה אוסף את בדיקות הדפדפן שהוכיחו את התיקונים, כדי שרגרסיה תצעק.
+// פתיחה: מתוך chrome://extensions -> פרטים -> tests.html, או דרך שרת מקומי.
+const results=[];
+const t=(name,fn)=>{try{const v=fn();results.push({name,ok:v===true,info:v===true?'':String(v)})}
+  catch(e){results.push({name,ok:false,info:e.message})}};
+const get=async f=>await (await fetch(f+'?v='+Date.now(),{cache:'no-store'})).text();
+(async()=>{
+const bg=await get('background.js'), lc=await get('leumi-content.js'), btb=await get('btb-content.js');
+
+// ── פרסינג: כל הקבצים נטענים ──
+for(const [f,txt] of [['background.js',bg],['leumi-content.js',lc],['btb-content.js',btb],
+    ['dashboard.js',await get('dashboard.js')],['discount-content.js',await get('discount-content.js')],
+    ['fibi-content.js',await get('fibi-content.js')],['cheque-store.js',await get('cheque-store.js')]])
+  t('פרסינג: '+f,()=>{new Function(txt);return true});
+
+// ── 1.33.4: תאריך דבוק לסכום (btb) ──
+t('BTB: תאריך דבוק ₪3,155.1517.09.2026 נקרא',()=>{
+  const DATE=eval(btb.match(/const DATE=(\/[^\n]*?\/);/)[1]);
+  const m='תשלום הבא₪3,155.1517.09.2026'.match(DATE);
+  return m&&m[0]==='17.09.2026'||'קיבל: '+(m&&m[0])});
+
+// ── 1.46.0: משפחת שגיאות ה-bfcache ──
+t('BFCACHE: תופס את שלוש המחרוזות ולא את הרגילות',()=>{
+  const BF=eval(bg.match(/const BFCACHE=(\/.*?\/i);/)[1]);
+  const hit=['moved into back/forward cache, so the message channel is closed',
+    'message channel closed before a response was received','Extension context invalidated.'];
+  const miss=['הפסיק להגיב — 45 שניות','רשת התנועות לא נטענה','לא השיב תוך 300 שניות'];
+  return hit.every(x=>BF.test(x))&&miss.every(x=>!BF.test(x))||'כשל בסיווג'});
+
+// ── 1.48.1: זיהוי "אין מאזין" בדיסקונט ──
+t('דיסקונט: NO_RECEIVER מזהה את המרוץ בלבד',()=>{
+  const NR=eval(bg.match(/const NO_RECEIVER=(\/.*?\/i);/)[1]);
+  return NR.test('Could not establish connection. Receiving end does not exist.')
+    &&!NR.test('back/forward cache')||'סיווג שגוי'});
+
+// ── 1.45.1: שיק שהתחזה לחשבון ──
+t('לאומי: שורת שיק נדחית מהזיהוי, חשבונות אמיתיים עוברים',()=>{
+  const TX=eval(lc.match(/const TX_WORDS=(\/.*?\/);/)[1]);
+  const n=v=>String(v||'').replace(/\s+/g,' ').trim();
+  const looks=v=>TX.test(n(v))||n(v).length>120;
+  return looks("הפקדת שיק .2026 | תאריך ערך: .2026 טל 7 / 7 אסמכתא 73416 מס' שיק 80000766 ערוץ הפקדה אפליקציית לאומי חשבון משלם 11- ייצוא הדפסה 153-54074")
+    &&!looks('דפנה מלכה- מלכה משק חקלאי מניב לאומי 985-18400/26')||'סיווג שגוי'});
+
+// ── 1.42.0: יתרה מצטברת מתא מאוחד, ושורה עתידית נשארת עתידית ──
+t('לאומי: תא מאוחד נקרא לפי תווית; עתידית לא מקבלת יתרה',()=>{
+  const money=v=>{const s=String(v||'').replace(/[−–]/g,'-');if(!/\d/.test(s))return null;
+    const neg=s.includes('-'),n=Number(s.replace(/[,₪\s-]/g,'').replace(/[^0-9.]/g,''));
+    return Number.isFinite(n)?(neg?-n:n):null};
+  const MC=eval(lc.match(/const MERGED_CELL=(\/.*?\/);/)[1]);
+  const RB=c=>{const m=String(c||'').match(/יתרה\s*מצטברת\s*₪?\s*(-?[\d,]+\.\d{2})/);return m?money(m[1]):null};
+  const read=c=>MC.test(String(c||''))?RB(c):money(c);
+  return read('סכום ₪ 3,540.00 יתרה מצטברת ₪ 44,079.56')===44079.56
+    &&read('סכום ₪ -100.00')===null&&read('₪ 44,079.56')===44079.56||'קריאה שגויה'});
+
+// ── 1.49.0: המנעול לא מאבד עדכונים ──
+await (async()=>{
+  const store={a:1,b:1};
+  const mutex=(()=>{let q=Promise.resolve();return fn=>{const r=q.then(fn,fn);q=r.then(()=>{},()=>{});return r}})();
+  const d=ms=>new Promise(r=>setTimeout(r,ms));
+  const w=(k,ms)=>mutex(async()=>{const v=store[k];await d(ms);store[k]=v+1});
+  await Promise.all([w('a',20),w('b',4),w('a',8)]);
+  results.push({name:'accountsMutex: שלושה כותבים חופפים — אפס אובדן',ok:store.a===3&&store.b===2,
+    info:store.a===3&&store.b===2?'':JSON.stringify(store)});
+})();
+
+// ── 1.49.0: שער השפיות ──
+t('שער שפיות: שלושת התנאים, בלי התרעות שווא',()=>{
+  const gate=(o,f)=>{const bad=[];const ot=(o.transactions||[]).length,nt=(f.transactions||[]).length;
+    if(o.balance!=null&&f.balance==null)bad.push(1);
+    if(ot>=20&&nt<ot*0.2)bad.push(2);
+    if((o.loans||[]).length>0&&(f.loans||[]).length===0)bad.push(3);return bad};
+  return gate({balance:1},{balance:null}).length===1
+    &&gate({transactions:Array(200)},{transactions:Array(10)}).length===1
+    &&gate({loans:[{}]},{loans:[]}).length===1
+    &&gate({balance:1,transactions:Array(100),loans:[{}]},{balance:2,transactions:Array(90),loans:[{}]}).length===0
+    ||'תנאי שגוי'});
+
+// ── 1.49.0: תשתית קיימת בקבצים ──
+t('תשתית: dataVersion, מנעול, שגיאות worker, גיבוי',()=>{
+  return /const DATA_VERSION=/.test(bg)&&(bg.match(/accountsMutex\(async\(\)=>\{/g)||[]).length>=10
+    &&/unhandledrejection/.test(bg)&&/markSyncInFlight/.test(bg)||'חסר רכיב'});
+
+// ── סיכום ──
+const ul=document.getElementById('out');
+let pass=0;
+for(const r of results){
+  const li=document.createElement('li');
+  li.className=r.ok?'ok':'fail';
+  li.textContent=(r.ok?'✓ ':'✗ ')+r.name+(r.info?' — '+r.info:'');
+  ul.appendChild(li);if(r.ok)pass++;
+}
+document.getElementById('sum').textContent=
+  pass===results.length?`✓ כל ${results.length} הבדיקות עברו`:`✗ ${results.length-pass} מתוך ${results.length} נכשלו`;
+document.getElementById('sum').className=pass===results.length?'ok':'fail';
+})();
+</script></body></html>

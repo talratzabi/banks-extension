@@ -29,3 +29,17 @@ async function chequeGet(id){ return wrap((await chequeStore('readonly')).get(id
 async function chequePut(record){ return wrap((await chequeStore('readwrite')).put(record)) }
 async function chequeKeys(){ return new Set(await wrap((await chequeStore('readonly')).getAllKeys())) }
 async function chequeCount(){ return wrap((await chequeStore('readonly')).count()) }
+// AUDIT סעיפים 1+4: ייצוא מלא לגיבוי, ומחיקה לניקוי יתומים. המחיקה אינה
+// נקראת אוטומטית משום מקום — רק מכפתור מפורש בדשבורד, אחרי אישור.
+async function chequeAll(){
+  // ⚠ 28.08.2026 - טל: "אין צילומי שקים" בגיבוי. getAll על חנות של ~12MB
+  // עלול להיכשל/להיחתך בחלק מהסביבות; סמן קורא רשומה-רשומה ואינו תלוי בזה.
+  try{const viaGetAll=await wrap((await chequeStore('readonly')).getAll());
+    if(Array.isArray(viaGetAll)&&viaGetAll.length)return viaGetAll;}catch(e){}
+  const st=await chequeStore('readonly');const out=[];
+  await new Promise((resolve,reject)=>{const c=st.openCursor();
+    c.onsuccess=()=>{const cur=c.result;if(!cur)return resolve();out.push(cur.value);cur.continue()};
+    c.onerror=()=>reject(c.error)});
+  return out;
+}
+async function chequeDelete(id){ return wrap((await chequeStore('readwrite')).delete(id)) }

@@ -1,4 +1,24 @@
 (()=>{
+// WHY 28.08.2026 - חיסון מאותה תקלה שאכלה יומיים בלאומי:
+//   "The page keeping the extension port is moved into back/forward cache,
+//    so the message channel is closed."
+// דף שנכנס ל-bfcache **סוגר את כל ערוצי ההודעות של התוסף**, והתשובה
+// לעולם אינה מגיעה - בלי שגיאה ובלי סיבה. זה נראה בדיוק כמו "הדף מת".
+// ⚠ זו אינה תקלה של לאומי אלא של **כל מתאם שמנווט תוך כדי עבודה**.
+// ואכן: "message channel closed" רשום ב-statusBySource של דיסקונט עסקי
+// מ-18.08 ולא הובן אז.
+// דף שיש לו מאזין unload אינו כשיר ל-bfcache. מאזין ריק אחד, ותו לא.
+// ⚠ pageshow עם persisted=true נרשם, כדי שאם זה יקרה בכל זאת - נדע.
+// WHY: הרישום חייב להיות חד-פעמי. ההזרקה מחדש (שהיא חלק מהתיקון!)
+// רצה **לפני** שומר הטעינה הכפולה בקבצים האלה, ובלי הדגל הזה כל
+// הזרקה הייתה מוסיפה מאזין נוסף. דגל על window פותר בלי להזיז קוד.
+try{if(!window.__bfcacheGuard){window.__bfcacheGuard=1;
+  window.addEventListener('unload',()=>{});
+  window.addEventListener('pageshow',e=>{if(e.persisted){
+    try{chrome.storage.local.set({bfcacheSeen:{source:'max',at:new Date().toISOString(),
+      url:String(location.href).slice(0,140)}})}catch(err){}}});
+}}catch(e){}
+
 // שומר הזרקה עמיד למות הקשר — ראה discount-content.js
 if(window.__maxSyncLoaded){try{if(window.__maxSyncLoaded())return}catch(e){}}
 // ⚠ ההפניה נתפסת כאן ולא נקראת מחדש בכל בדיקה: קריאה מחדש

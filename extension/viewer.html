@@ -1,0 +1,443 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>צפייה בגיבוי הבנקים</title>
+<style>
+/* דף עצמאי לחלוטין: אין תלות בתוסף, ברשת או בשרת. נפתח מ-file:// בכל מחשב. */
+*{box-sizing:border-box}
+body{font-family:system-ui,'Segoe UI',Arial;margin:0;background:#f2f6fa;color:#15202b}
+header{background:#0f2f4f;color:#fff;padding:16px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+header h1{font-size:19px;margin:0}
+header small{opacity:.75}
+#drop{margin:22px auto;max-width:680px;border:2px dashed #9fb2c4;border-radius:14px;padding:38px;text-align:center;background:#fff;cursor:pointer}
+#drop.hover{border-color:#0f2f4f;background:#eef4fa}
+#drop input{display:none}
+main{max-width:1180px;margin:0 auto;padding:16px 20px 60px}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 18px}
+nav button{padding:8px 16px;border-radius:999px;border:1px solid #cfdae4;background:#fff;cursor:pointer;font-size:14px}
+nav button.on{background:#0f2f4f;color:#fff;border-color:#0f2f4f;font-weight:600}
+section{display:none}section.on{display:block}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:10px 0 18px}
+.card{background:#fff;border:1px solid #e2eaf1;border-radius:12px;padding:12px 14px}
+.card span{color:#5a6b7c;font-size:13px;display:block}
+.card b{font-size:19px}
+.panel{background:#fff;border:1px solid #e2eaf1;border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.panel h3{margin:0 0 8px;font-size:16px;color:#0f2f4f}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#eef3f8;color:#0f2f4f;padding:7px 8px;text-align:right;position:sticky;top:0}
+td{padding:6px 8px;border-bottom:1px solid #eef2f6;vertical-align:top}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.neg{color:#b03030}.pos{color:#2f6b3f}
+.wrap{max-height:420px;overflow:auto;border:1px solid #eef2f6;border-radius:8px}
+.acct-head{display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:10px;flex-wrap:wrap}
+.acct-head:hover{background:#f6f9fc}
+.muted{color:#7d8b99;font-size:12px}
+#search{padding:8px 12px;border:1px solid #cfdae4;border-radius:999px;min-width:240px;font-size:14px}
+.m-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:8px}
+.m-col h4{margin:0 0 6px;font-size:13px;color:#0f2f4f}
+.m-col table{font-size:12.5px}
+.m-bar{margin:0 0 10px;font-size:14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.acct-sum{cursor:pointer;list-style:none}
+.acct-sum::-webkit-details-marker{display:none}
+.acct-sum:hover{background:#f6f9fc}
+.acct-tot{display:flex;gap:16px;font-size:12.5px;padding:3px 2px 5px;border-bottom:1px solid #eef2f6}
+.m-bar select{padding:6px 10px;border:1px solid #cfdae4;border-radius:8px}
+.m-cardwrap>td{padding:0 8px 6px 8px;background:#f8fbfd}
+.m-cardsub summary{cursor:pointer;font-size:12px;color:#0f2f4f;padding:3px 0;list-style:none}
+.m-cardsub summary::-webkit-details-marker{display:none}
+.m-row{border-bottom:1px solid #eef2f6}
+.m-row summary{display:flex;justify-content:space-between;gap:10px;padding:5px 2px;cursor:pointer;font-size:12.5px;list-style:none}
+.m-row summary::-webkit-details-marker{display:none}
+.m-row summary:hover{background:#f6f9fc}
+.m-row[open] summary span:first-child{font-weight:700}
+.m-sub{margin:2px 0 8px 0;background:#f8fbfd;border-radius:6px}
+.m-sub td{padding:4px 8px;font-size:12px}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{background:#e2ebf3}
+tr.has-chq{cursor:pointer}
+tr.has-chq:hover td{background:#eef4fa}
+#chqModalImgs img{width:100%;border-radius:8px;border:1px solid #e2eaf1}
+.warn{background:#fdf0f0;border:1px solid #f0d2d2;border-radius:10px;padding:10px 14px;color:#8a2a2a;margin:10px 0}
+footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:#7d8b99;font-size:12px}
+@media print{header,nav,#drop{display:none}section{display:block!important}}
+</style></head><body>
+<header><h1>📦 צפייה בגיבוי הבנקים</h1><small id="meta">טען קובץ גיבוי כדי להתחיל</small></header>
+<div id="drop"><b>גרור לכאן את קובץ הגיבוי</b> (banks-backup-*.json)<br>
+<span class="muted">או לחץ לבחירה. שום דבר לא נשלח לשום מקום — הכול נשאר במחשב הזה.</span>
+<input type="file" id="file" accept=".json"></div>
+<main id="app" hidden>
+<nav id="tabs"></nav>
+<section data-v="sum"><div class="cards" id="sumCards"></div><div id="sanity"></div></section>
+<section data-v="accounts">
+ <div class="m-bar"><label>הצג: <select id="accMonthPick"><option value="">כל החודשים</option></select></label>
+ <input id="search" placeholder="חיפוש בכל התנועות — שם, סכום, אסמכתא…"></div>
+ <div id="accts"></div></section>
+<section data-v="monthly"><div class="m-bar"><label>הצג: <select id="monthPick"><option value="">כל החודשים</option></select></label></div><p class="muted">שורה לכל חודש — הכנסות, הוצאות ונטו מתנועות העו״ש. לחיצה פותחת פירוט: לפי חשבון, לפי סוג פעולה, התנועות הגדולות ופירוט האשראי. הסיווג לפי שם הפעולה שהבנק מסר.</p><div id="monthly"></div></section>
+<section data-v="loans"><div class="panel"><h3>הלוואות מכל המקורות</h3><div class="wrap" id="loans"></div></div></section>
+<section data-v="cards"><div id="cardsBox"></div></section>
+<section data-v="maslaka"><div class="cards" id="masCards"></div><div class="panel"><div class="wrap" id="masTable"></div></div></section>
+<section data-v="other"><div id="otherBox"></div></section>
+</main>
+<div id="chqModal" style="display:none;position:fixed;inset:0;background:rgba(10,25,40,.72);z-index:50;align-items:center;justify-content:center;padding:20px">
+ <div class="chq-box" style="background:#fff;border-radius:14px;max-width:760px;width:100%;max-height:92vh;overflow:auto;padding:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+   <b id="chqModalCap"></b><button id="chqClose" style="border:0;background:#eef3f8;border-radius:999px;width:32px;height:32px;cursor:pointer;font-size:16px">×</button></div>
+  <div id="chqModalImgs" style="display:grid;gap:10px"></div>
+  <p class="muted" style="margin:10px 0 0">Esc או לחיצה מחוץ לחלון סוגרות</p>
+ </div></div>
+<footer>דף צפייה בלבד — אינו משנה את הגיבוי. לשחזור מלא לתוסף: דשבורד ← שורת הגיבוי ← „שחזור מקובץ".</footer>
+<script>
+'use strict';
+// ⚠ אותם כללי בטיחות כמו בדשבורד: כל ערך שמקורו בבנק עובר esc().
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>n==null||n===''?'—':Number(n).toLocaleString('he-IL',{minimumFractionDigits:2,maximumFractionDigits:2})+' ₪';
+const $=s=>document.querySelector(s);
+let DATA=null,CHQ=new Map(); // id -> רשומת צילום
+// ⚠ 28.08.2026 - טל: "מיון לפי תאריך, אסמכתא, פעולה וסכום". מצב מיון אחד
+// לכל טבלאות החשבונות; לחיצה על כותרת מחליפה עמודה/כיוון, לחיצה שלישית
+// מחזירה את סדר הבנק המקורי - הסדר המקורי הוא מידע בעצמו.
+let SORT={key:null,dir:1},LASTQ='';
+const txMs=d=>{const m=String(d||'').match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
+  if(!m)return null;const y=m[3].length===2?2000+Number(m[3]):Number(m[3]);
+  return Date.UTC(y,Number(m[2])-1,Number(m[1]))};
+const signedAmt=t=>t.debit!=null&&t.debit!==''?-Math.abs(Number(t.debit)||0):(Number(t.credit)||Number(t.amount)||0);
+// ⚠ מפתח החודש מוגדר פעם אחת ומשרת גם את החשבונות וגם את הניתוח החודשי —
+// טל: "שיהיה תואם בדיוק לסכומים בניתוח חודשי". נוסחה אחת = אין סטייה.
+const mKeyMs=ms=>{const d=new Date(ms);return `${String(d.getUTCMonth()+1).padStart(2,'0')}.${d.getUTCFullYear()}`};
+// ⚠⚠ 28.08.2026 - השורש של "תנועות ישראכרט לא נפתחות": מסד הכרטיסים שומר
+// את החודש כ-'062026' (בלי נקודה), והצופה ציפה ל-'06.2026'. כל ההיסטוריה
+// נפלה בסינון פורמט. נרמול אחד בכניסה - שני הפורמטים מתקבלים.
+const normMonth=m=>{const x=String(m||'').match(/^(\d{2})\.?(\d{4})$/);return x?`${x[1]}.${x[2]}`:null};
+const txMonth=t=>{const ms=txMs(t.date);return ms==null?null:mKeyMs(ms)};
+let ACC_PICK='';
+function sortTx(list){
+  if(!SORT.key)return list;
+  const v=t=>SORT.key==='date'?(txMs(t.date)??-Infinity)
+    :SORT.key==='amount'?signedAmt(t)
+    :SORT.key==='reference'?(Number(String(t.reference||'').replace(/\D/g,''))||0)
+    :`${t.action||t.merchant||''} ${t.details||''}`.trim();
+  return [...list].sort((a,b)=>{const x=v(a),y=v(b);
+    const c=typeof x==='string'?String(x).localeCompare(String(y),'he'):x-y;
+    return SORT.dir*c});
+}
+
+// ⚠ 28.08.2026 - טל: "בלחיצה על התנועה עם השיק ייפתח הצילום, ללא לשונית
+// צילומי שיקים". הצילום שייך לתנועה - לא לגלריה נפרדת.
+const TABS=[['sum','סיכום'],['accounts','חשבונות ותנועות'],['monthly','ניתוח חודשי'],
+ ['loans','הלוואות'],['cards','כרטיסי אשראי'],['maslaka','מסלקה'],['other','נדל״ן ועוד']];
+
+function show(v){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+ document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.dataset.v===v));}
+
+function load(data){
+  if(data?.format!=='banks-extension-backup'){alert('זה אינו קובץ גיבוי של תוסף הבנקים');return}
+  DATA=data;
+  CHQ=new Map((data.cheques||[]).map(c=>[c.id,c]));
+  const st=data.storage||{};
+  const scopeTxt={business:' · היקף: עסקי בלבד',private:' · היקף: פרטי בלבד'}[data.scope]||'';
+  const rangeTxt=data.range?` · טווח: ${data.range.from||'ההתחלה'} עד ${data.range.to||'היום'}`:'';
+  $('#meta').textContent=`גיבוי מ-${String(data.exportedAt||'').replace('T',' ').slice(0,16)} · גרסת נתונים ${data.dataVersion||'?'}${scopeTxt}${rangeTxt}`;
+  $('#drop').style.display='none';$('#app').hidden=false;
+  $('#tabs').innerHTML=TABS.map(([v,t])=>`<button data-v="${v}">${t}</button>`).join('');
+  $('#tabs').onclick=e=>{const b=e.target.closest('button');if(b)show(b.dataset.v)};
+
+  const accts=st.accounts||[];
+  const txCount=accts.reduce((s,a)=>s+(a.transactions||[]).length,0);
+  const loans=collectLoans(st);
+  const balSum=accts.reduce((s,a)=>s+(Number(a.balance)||0),0);
+  const mas=(st.maslaka?.rows||[]).filter(r=>!r.closed);
+  const masGross=mas.reduce((s,r)=>s+(Number(r.balance)||0),0);
+  const masLoan=mas.reduce((s,r)=>s+(Number(r.loan)||0),0);
+  $('#sumCards').innerHTML=[
+    ['חשבונות',accts.length],['תנועות עו״ש',txCount],
+    ['יתרות עו״ש',money(balSum)],
+    ['הלוואות',`${loans.length} · ${money(loans.reduce((s,l)=>s+(Number(l.balance)||0),0))}`],
+    ['צילומי שיקים',(data.cheques||[]).length],
+    ['חודשי כרטיסים',(data.cardMonths||[]).length],
+    ['מסלקה ברוטו',mas.length?money(masGross):'—'],
+    ['מסלקה נטו',mas.length?money(masGross-masLoan):'—'],
+  ].map(([t,v])=>`<div class="card"><span>${t}</span><b>${v}</b></div>`).join('');
+  if(st.sanityAlerts?.alerts?.length)
+    $('#sanity').innerHTML=`<div class="warn">⚠ בזמן הגיבוי היו התרעות שפיות: ${st.sanityAlerts.alerts.map(esc).join(' · ')}</div>`;
+
+  // רשימת החודשים — מאותם מפתחות בדיוק כמו הניתוח החודשי.
+  const accMonths=[...new Set(accts.flatMap(a=>(a.transactions||[]).map(txMonth).filter(Boolean)))]
+    .sort((x,y)=>{const[a1,a2]=x.split('.'),[b1,b2]=y.split('.');return (Number(b2)*12+Number(b1))-(Number(a2)*12+Number(a1))});
+  const ap=$('#accMonthPick');
+  ap.innerHTML='<option value="">כל החודשים</option>'+accMonths.map(k=>`<option value="${k}">${k}</option>`).join('');
+  ap.onchange=e=>{ACC_PICK=e.target.value;renderAccounts(accts,LASTQ)};
+  renderAccounts(accts,'');
+  $('#search').oninput=e=>{LASTQ=e.target.value.trim();renderAccounts(accts,LASTQ)};
+  // מיון בלחיצה על כותרת - האזנה אחת לכל הטבלאות.
+  $('#accts').addEventListener('click',e=>{const th=e.target.closest('th[data-k]');if(!th)return;
+    const k=th.dataset.k;
+    if(SORT.key===k)SORT=SORT.dir===1?{key:k,dir:-1}:{key:null,dir:1};
+    else SORT={key:k,dir:1};
+    renderAccounts(accts,LASTQ)});
+  renderLoans(loans);
+  renderCards(st,data.cardMonths||[]);
+  renderMonthly(st,data.cardMonths||[]);
+  $('#monthPick').onchange=e=>renderMonthly(M_ST,M_CM,e.target.value);
+  renderMaslaka(st);
+  renderOther(st);
+  show('sum');
+}
+
+// ── ניתוח חודשי ───────────────────────────────────────────────────────
+// ⚠ 28.08.2026 - טל: "לשונית לניתוח מבנה הכנסות והוצאות חודשיות, שורה
+// לכל חודש עם כמה שיותר פירוט."
+// ⚠⚠ עיקרון כפול-ספירה: הסכומים החודשיים נספרים **מצד הבנק בלבד** -
+// חיוב כרטיס האשראי כבר יורד מהעו"ש כתנועת בנק אחת. עסקאות הכרטיס
+// מוצגות כ"פירוט האשראי" (לאן הכסף הלך), לא מתווספות לסכום - אחרת כל
+// שקל בכרטיס היה נספר פעמיים.
+let M_ST=null,M_CM=null;
+function renderMonthly(st,cardMonths,pick=''){
+  // ⚠ 28.08.2026 - טל: שורת סינון "לפי חודשים או הכל". הנתונים נשמרים
+  // כדי שבחירה בבורר תרנדר מחדש בלי לטעון את הגיבוי שוב.
+  M_ST=st;M_CM=cardMonths;
+  const box=$('#monthly');if(!box)return;
+  const buckets=new Map();
+  const bucket=k=>{if(!buckets.has(k))buckets.set(k,{inSum:0,outSum:0,n:0,byAcc:new Map(),byAction:new Map()});return buckets.get(k)};
+  for(const a of st.accounts||[]){
+    const accName=`${a.sourceLabel||a.source||''} ${a.branch||''}-${a.accountNumber||''}`.trim();
+    for(const t of a.transactions||[]){
+      const ms=txMs(t.date);if(ms==null)continue;
+      const amt=signedAmt(t);if(!amt)continue;
+      const b=bucket(mKeyMs(ms));b.n++;
+      if(amt>0)b.inSum+=amt;else b.outSum+=-amt;
+      const acc=b.byAcc.get(accName)||{inSum:0,outSum:0};
+      if(amt>0)acc.inSum+=amt;else acc.outSum+=-amt;b.byAcc.set(accName,acc);
+      // מבנה לפי סוג פעולה - שם הפעולה כפי שהבנק מסר, קבוצה לכל כיוון.
+      const label=`${amt>0?'+':'-'}|${String(t.action||t.merchant||'ללא שם').replace(/\s+/g,' ').trim().slice(0,40)||'ללא שם'}`;
+      // ⚠ 28.08.2026 - טל: "כל שורה מורכבת ממספר תנועות - תאפשר לחיצה
+      // שתראה את התנועות." הקבוצה שומרת גם את התנועות, לא רק סכום.
+      const g=b.byAction.get(label)||{sum:0,n:0,txs:[]};g.sum+=Math.abs(amt);g.n++;
+      // ⚠ טל: "איפה שיש חיוב בכרטיס אשראי - לחיצה על התנועה תיתן את פירוט
+      // התנועות בגינו." תנועת בנק שהיא חיוב כרטיס מקבלת דגל, ובפירוט
+      // הקבוצה נפתח תחתיה פירוט העסקאות מהחודש המתאים.
+      const isCard=amt<0&&/ישראכרט|כאל|מקס|max|לאומי קארד|ויזה|כרטיסי אשראי|אשראי/i.test(String(t.action||''));
+      g.txs.push({date:t.date,amt,details:String(t.details||'').slice(0,60),ref:t.reference||'',acc:accName,isCard});
+      b.byAction.set(label,g);
+    }}
+  // פירוט אשראי לפי חודש (month='MM.YYYY') - תצוגה בלבד, לא נספר בסכומים.
+  const cardsBy=new Map();
+  for(const r of cardMonths||[]){const k=normMonth(r.month);if(!k)continue;
+    if(!cardsBy.has(k))cardsBy.set(k,[]);cardsBy.get(k).push(r)}
+  // ⚠ טל: "היה חיוב ב-10/8 - תציג את התנועות בגינם." חודש בניתוח מציג
+  // את פירוט הכרטיסים **שחויבו בו** - כלומר חודש-העסקאות שקדם לו. לכן
+  // כרטיס-חודש 07.2026 מבטיח שורת חודש 08.2026 (בו ירד החיוב), לא 07.
+  const nextK=k=>{const[m1,y1]=k.split('.').map(Number);
+    return m1===12?`01.${y1+1}`:`${String(m1+1).padStart(2,'0')}.${y1}`};
+  for(const k of cardsBy.keys())bucket(nextK(k));
+  const keys=[...buckets.keys()].sort((a,b)=>{const[a1,a2]=a.split('.'),[b1,b2]=b.split('.');
+    return (Number(b2)*12+Number(b1))-(Number(a2)*12+Number(a1))});
+  if(!keys.length){box.className='muted';box.textContent='אין תנועות מתוארכות בגיבוי.';return}
+  const pickEl=$('#monthPick');
+  if(pickEl&&pickEl.options.length<=1)
+    pickEl.innerHTML='<option value="">כל החודשים</option>'+keys.map(k=>`<option value="${k}">${k}</option>`).join('');
+  if(pickEl)pickEl.value=pick;
+  const shown=pick?keys.filter(k=>k===pick):keys;
+  const pct=(x,t)=>t?` (${(x/t*100).toFixed(0)}%)`:'';
+  box.innerHTML=shown.map(k=>{
+    const b=buckets.get(k),net=b.inSum-b.outSum;
+    const prevK=(()=>{const[m1,y1]=k.split('.').map(Number);
+      return m1===1?`12.${y1-1}`:`${String(m1-1).padStart(2,'0')}.${y1}`})();
+    // cmCharged - הכרטיסים שחיובם ירד בחודש הזה (עסקאות החודש הקודם);
+    // cmSame - נפילה לאחור בלבד, למקרה של כרטיס שמחויב באותו חודש.
+    const cmCharged=cardsBy.get(prevK)||[],cmSame=cardsBy.get(k)||[];
+    const cardSum=cmCharged.reduce((s,r)=>s+(Number(r.amount)||0),0);
+    // ⚠ 28.08.2026 - טל: "אתה לא מנתח את כל התנועות. תבדוק." צדק:
+    // slice(0,8) הציג רק את שמונה הקבוצות הגדולות, והשאר נעלמו בשקט -
+    // הסכום בכותרת לא התאים למה שמוצג. עכשיו כל הקבוצות מוצגות.
+    const actions=dir=>[...b.byAction.entries()].filter(([l])=>l.startsWith(dir))
+      .sort((x,y)=>y[1].sum-x[1].sum);
+    const merch=new Map();
+    for(const r of cmCharged)for(const t of r.transactions||[]){
+      const m2=String(t.merchant||'ללא שם').slice(0,40);const g=merch.get(m2)||{sum:0,n:0,txs:[]};
+      const am=Math.abs(Number(t.amount)||0);g.sum+=am;g.n++;
+      g.txs.push({date:t.date||'',amt:-am,details:t.payments?`תשלומים ${t.payments}`:'',ref:'',acc:`כרטיס ${r.suffix||''}`});
+      merch.set(m2,g)}
+    const topMerch=[...merch.entries()].sort((x,y)=>y[1].sum-x[1].sum);
+    // ⚠⚠ 28.08.2026 - טל: "כרטיסי האשראי לא נפתחים". הסיבה: חיוב הכרטיס
+    // יורד מהבנק **בחודש שאחרי** חודש העסקאות (חיוב 10.9 על כרטיס 08.2026),
+    // וההתאמה חיפשה רק בכרטיסי אותו חודש - לא מצאה, והפירוט לא הוצג כלל.
+    // עכשיו: התאמת סכום (±1 ש"ח) קודם מול החודש הקודם - המקרה הרגיל -
+    // ואז מול אותו חודש; בלי התאמת סכום נופלים לחודש הקודם ואז לנוכחי.
+    const chargeCards=amt=>{
+      const near=list=>list.filter(r=>Math.abs((Number(r.amount)||0)-Math.abs(amt))<=1);
+      const hp=near(cmCharged);if(hp.length)return{rows:hp,exact:true,note:''};
+      const hc=near(cmSame);if(hc.length)return{rows:hc,exact:true,note:''};
+      // ⚠ נמדד על הגיבוי האמיתי: "עמלת הקצאת אשראי 12.00" נתפסת ברגקס של
+      // 'אשראי'. נפילת "כל כרטיסי החודש" על עמלה זעירה הייתה פירוט מטעה -
+      // לכן הנפילה-לאחור רק לחיובים של ממש (מעל 200 ש"ח); התאמה מדויקת
+      // בסכום עובדת תמיד, בכל גובה.
+      if(Math.abs(amt)<200)return{rows:[],exact:false,note:''};
+      if(cmCharged.length)return{rows:cmCharged,exact:false,note:'התאמה לפי חודש החיוב'};
+      return{rows:cmSame,exact:false,note:'התאמה לפי חודש'}};
+    const cardDrill=t=>{if(!t.isCard)return '';
+      // ⚠ היעדר נתונים נאמר במקום להיעלם - "לא נפתח" בלי הסבר עלה לנו יום.
+      if(!cmCharged.length&&!cmSame.length)
+        return `<tr class="m-cardwrap"><td colspan="3"><span class="muted">אין פירוט אשראי בגיבוי לחודש ${esc(prevK)}</span></td></tr>`;
+      // עמלה קטנה שלא תאמה בסכום - אין מה להציג, וזה מכוון.
+      const {rows,exact,note}=chargeCards(t.amt);
+      const txn=rows.flatMap(r=>(r.transactions||[]).map(x=>({...x,suffix:r.suffix})));
+      if(!txn.length)return '';
+      return `<tr class="m-cardwrap"><td colspan="3"><details class="m-cardsub">
+        <summary>▸ פירוט החיוב · ${txn.length} עסקאות · כרטיס${rows.length>1?'ים':''} ${rows.map(r=>esc(r.suffix||'')).join(', ')} <span class="muted">(חודש עסקאות ${esc(normMonth(rows[0]?.month)||rows[0]?.month||'')})</span>${exact?'':` <span class="muted">(${note})</span>`}</summary>
+        <table class="m-sub"><tbody>${txn.sort((a2,b2)=>Math.abs(Number(b2.amount)||0)-Math.abs(Number(a2.amount)||0)).map(x=>
+         `<tr><td class="num">${esc(x.date||'')}</td><td>${esc(x.merchant||'')} <span class="muted">${x.payments?`תשלומים ${esc(x.payments)} · `:''}כרטיס ${esc(x.suffix||'')}</span></td>
+          <td class="num neg">${money(Math.abs(Number(x.amount)||0))}-</td></tr>`).join('')}</tbody></table></details></td></tr>`};
+    const groupTx=g=>`<table class="m-sub"><tbody>${(g.txs||[]).map(t=>
+      `<tr><td class="num">${esc(t.date)}</td><td>${esc(t.details||'')} <span class="muted">${esc(t.acc)}${t.ref?` · ${esc(t.ref)}`:''}</span></td>
+       <td class="num ${t.amt<0?'neg':'pos'}">${money(Math.abs(t.amt))}${t.amt<0?'-':''}</td></tr>${cardDrill(t)}`).join('')}</tbody></table>`;
+    const list=(title,rows,total)=>rows.length?`<div class="m-col"><h4>${title}</h4>
+      ${rows.map(([l,g])=>`<details class="m-row"><summary><span>▸ ${esc(l.slice(2))} <span class="muted">×${g.n}</span></span>
+        <span class="num">${money(g.sum)}${pct(g.sum,total)}</span></summary>${groupTx(g)}</details>`).join('')}</div>`:'';
+    return `<details class="panel" ${pick?'open':''}><summary class="acct-head">
+      <span><b>${esc(k)}</b> <span class="muted">· ${b.n} תנועות${cmCharged.length?` · חיובי אשראי ${money(cardSum)}`:''}</span></span>
+      <span class="num"><span class="pos">+${money(b.inSum)}</span> · <span class="neg">-${money(b.outSum)}</span>
+       · נטו <b class="${net<0?'neg':'pos'}">${money(net)}</b></span></summary>
+      <div class="m-grid">
+       ${list('הכנסות לפי סוג',actions('+'),b.inSum)}
+       ${list('הוצאות לפי סוג',actions('-'),b.outSum)}
+       ${topMerch.length?`<div class="m-col"><h4>אשראי לפי בית עסק <span class="muted">(חיובי החודש · עסקאות ${esc(prevK)} · כלול בהוצאות)</span></h4>
+        ${topMerch.map(([m2,g])=>`<details class="m-row"><summary><span>▸ ${esc(m2)} <span class="muted">×${g.n}</span></span>
+         <span class="num">${money(g.sum)}${pct(g.sum,cardSum)}</span></summary>${groupTx(g)}</details>`).join('')}</div>`:''}
+       <div class="m-col"><h4>לפי חשבון</h4><table><tbody>
+        ${[...b.byAcc.entries()].sort((x,y)=>(y[1].inSum+y[1].outSum)-(x[1].inSum+x[1].outSum)).map(([n2,v2])=>
+         `<tr><td>${esc(n2)}</td><td class="num"><span class="pos">+${money(v2.inSum)}</span> / <span class="neg">-${money(v2.outSum)}</span></td></tr>`).join('')}</tbody></table></div>
+      </div></details>`}).join('');
+}
+function collectLoans(st){const out=[];
+ for(const a of st.accounts||[])for(const l of a.loans||[])
+   out.push({...l,owner:`${a.sourceLabel||a.source||''} · ${a.branch||''}-${a.accountNumber||''}`});
+ return out;}
+
+function txRow(t,selectionKey){const amt=t.debit!=null&&t.debit!==''?-Math.abs(Number(t.debit)||0):(Number(t.credit)||Number(t.amount)||0);
+ // ⚠ לחיץ רק כשהצילום באמת בגיבוי - שיק בלי צילום לא מבטיח כלום בלחיצה.
+ const chqId=t.cheque&&t.reference?`${selectionKey}|${t.reference}`:'';
+ const has=chqId&&CHQ.has(chqId);
+ return `<tr ${has?`class="has-chq" data-chq="${esc(chqId)}" title="לחיצה פותחת את צילום השיק"`:''}>
+ <td class="num">${esc(t.date||'')}</td><td>${has?'📷 ':''}${esc(t.action||t.merchant||'')} ${esc(t.details||'')}</td>
+ <td class="num">${esc(t.reference||'')}</td>
+ <td class="num ${amt<0?'neg':'pos'}">${money(Math.abs(amt))}${amt<0?'-':''}</td>
+ <td class="num">${t.balance==null?'':money(t.balance)}</td></tr>`}
+
+function renderAccounts(accts,q){
+  // ⚠ 28.08.2026 - טל: "בלחיצה על החץ הדף נסגר." המיון מרנדר את הטבלאות
+  // מחדש, וה-<details> החדשים נולדו סגורים - הפאנל הפתוח "נסגר" בכל מיון.
+  // לפני הרינדור נקרא מה פתוח עכשיו, ומה שהיה פתוח נשאר פתוח. סגירה
+  // נעשית רק היכן שטל מצפה לה - לחיצה על שורת הכותרת עצמה.
+  const openSet=new Set([...document.querySelectorAll('#accts details[open]')].map(d=>d.dataset.acc));
+  const ql=q.toLocaleLowerCase('he');
+  $('#accts').innerHTML=accts.map((a,i)=>{
+    // ⚠ סינון החודש קודם לחיפוש, והסיכום מחושב **ממנו** (לא מתוצאת
+    // החיפוש) — כדי שהמספרים יהיו זהים אחד-לאחד ל"לפי חשבון" בניתוח
+    // החודשי: אותו txMs, אותו signedAmt, אותו דילוג על אפס ועל חסרי תאריך.
+    let tx=(a.transactions||[]);
+    if(ACC_PICK)tx=tx.filter(t=>txMonth(t)===ACC_PICK);
+    let inSum=0,outSum=0;
+    for(const t of tx){if(txMonth(t)==null)continue;const amt=signedAmt(t);
+      if(!amt)continue;if(amt>0)inSum+=amt;else outSum+=-amt}
+    if(q)tx=tx.filter(t=>`${t.date||''} ${t.action||''} ${t.details||''} ${t.merchant||''} ${t.reference||''} ${t.debit||''} ${t.credit||''} ${t.amount||''}`.toLocaleLowerCase('he').includes(ql));
+    if(q&&!tx.length)return '';
+    tx=sortTx(tx);
+    const accId=String(a.selectionKey||i);
+    const open=(q||ACC_PICK||openSet.has(accId))?'open':'';
+    const net=inSum-outSum;
+    return `<details class="panel" data-acc="${esc(accId)}" ${open}><summary class="acct-sum"><div class="acct-head">
+      <span><b>${esc(a.sourceLabel||a.source||'בנק')}</b> · ${esc(a.branch||'')}-${esc(a.accountNumber||'')} ${esc(a.nickname||'')}
+        <span class="muted">· ${esc(String(a.lastSync||'').slice(0,10))} · ${esc(a.status||'')}</span></span>
+      <span class="num"><b>${money(a.balance)}</b> <span class="muted">${tx.length} תנועות</span></span></div>
+      <div class="acct-tot">${ACC_PICK?`<span class="muted">${esc(ACC_PICK)}:</span>`:''}
+        <span>זכות <b class="pos">${money(inSum)}</b></span>
+        <span>חובה <b class="neg">${money(outSum)}</b></span>
+        <span>נטו <b class="${net<0?'neg':'pos'}">${money(net)}</b></span></div></summary>
+      ${(a.cards||[]).length?`<p class="muted">כרטיסים: ${(a.cards||[]).map(c=>`${esc(c.issuer||'')} ${esc(c.suffix||'')} (${money(c.amount)})`).join(' · ')}</p>`:''}
+      <div class="wrap"><table><thead><tr>${[['date','תאריך'],['action','פעולה'],['reference','אסמכתא'],['amount','סכום']].map(([k,t])=>`<th data-k="${k}" class="sortable">${t}${SORT.key===k?(SORT.dir===1?' ▲':' ▼'):''}</th>`).join('')}<th>יתרה</th></tr></thead>
+      <tbody>${tx.length?tx.map(t=>txRow(t,a.selectionKey||'')).join(''):`<tr><td colspan="5" class="muted">אין תנועות בחודש זה</td></tr>`}</tbody></table></div></details>`;
+  }).join('')||'<p class="muted">לא נמצאו תנועות מתאימות.</p>';
+}
+
+function renderLoans(loans){
+  $('#loans').innerHTML=`<table><thead><tr><th>מקור</th><th>סוג</th><th>יתרה</th><th>ריבית</th>
+    <th>תשלום קרוב</th><th>תאריך</th><th>סיום</th></tr></thead><tbody>
+    ${loans.map(l=>`<tr><td>${esc(l.owner)}</td><td>${esc(l.type||'')}</td>
+     <td class="num">${money(l.balance)}</td><td class="num">${esc(l.interest||'')}</td>
+     <td class="num">${money(l.nextPayment)}</td><td class="num">${esc(l.nextPaymentDate||'')}</td>
+     <td class="num">${esc(l.endDate||'')}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="2"><b>סה״כ</b></td><td class="num"><b>${money(loans.reduce((s,l)=>s+(Number(l.balance)||0),0))}</b></td>
+    <td></td><td class="num"><b>${money(loans.reduce((s,l)=>s+(Number(l.nextPayment)||0),0))}</b></td><td></td><td></td></tr></tfoot></table>`;
+}
+
+function renderCards(st,months){
+  const byMonth=new Map();
+  for(const r of months){const k=normMonth(r.month)||String(r.month||'');
+    if(!byMonth.has(k))byMonth.set(k,[]);byMonth.get(k).push(r)}
+  const keys=[...byMonth.keys()].sort((a,b)=>{
+    const p2=v=>{const m2=v.split('.');return m2.length===2?Number(m2[1])*12+Number(m2[0]):0};
+    return p2(b)-p2(a)});
+  $('#cardsBox').innerHTML=keys.length?keys.map(k=>{
+    const rows=byMonth.get(k);
+    return `<details class="panel"><summary class="acct-head"><span><b>${esc(k)}</b>
+      <span class="muted">· ${rows.length} כרטיסים · ${rows.reduce((s,r)=>s+((r.transactions||[]).length),0)} עסקאות</span></span>
+      <span class="num"><b>${money(rows.reduce((s,r)=>s+(Number(r.amount)||0),0))}</b></span></summary>
+      ${rows.map(r=>`<p><b>${esc(r.issuer||'כרטיס')} ${esc(r.suffix||'')}</b> · חיוב ${money(r.amount)}</p>
+      <div class="wrap"><table><thead><tr><th>תאריך</th><th>בית עסק</th><th>סכום</th><th>תשלומים</th></tr></thead><tbody>
+      ${(r.transactions||[]).map(t=>`<tr><td class="num">${esc(t.date||'')}</td><td>${esc(t.merchant||'')}</td>
+        <td class="num">${money(t.amount)}</td><td>${esc(t.payments||'')}</td></tr>`).join('')}</tbody></table></div>`).join('')}
+    </details>`}).join(''):'<p class="muted">אין היסטוריית כרטיסים בגיבוי הזה.</p>';
+}
+
+// הצילום נפתח מהתנועה עצמה. התמונה נכנסת ל-DOM רק ברגע הפתיחה.
+function openCheque(id){
+  const c=CHQ.get(id);if(!c)return;
+  let info={};
+  for(const a of DATA.storage?.accounts||[])for(const t of a.transactions||[])
+    if(t.cheque&&`${a.selectionKey}|${t.reference}`===id){info={date:t.date,amount:t.credit||t.amount};break}
+  $('#chqModalCap').textContent=`אסמכתא ${c.reference||''}${info.date?` · ${info.date}`:''}${info.amount?` · ${money(info.amount)}`:''}`;
+  $('#chqModalImgs').innerHTML=`<img src="${esc(c.front)}" alt="צילום השיק מלפנים">
+    ${c.back?`<img src="${esc(c.back)}" alt="גב השיק">`:''}`;
+  $('#chqModal').style.display='flex';
+}
+$('#chqModal')?.addEventListener('click',e=>{if(!e.target.closest('.chq-box')||e.target.id==='chqClose'){
+  $('#chqModal').style.display='none';$('#chqModalImgs').innerHTML=''}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#chqModal').style.display==='flex'){
+  $('#chqModal').style.display='none';$('#chqModalImgs').innerHTML=''}});
+document.addEventListener('click',e=>{const r=e.target.closest('tr.has-chq');if(r)openCheque(r.dataset.chq)});
+
+function renderMaslaka(st){
+  const rows=(st.maslaka?.rows||[]);
+  if(!rows.length){$('#masCards').innerHTML='';$('#masTable').innerHTML='<p class="muted">אין נתוני מסלקה בגיבוי.</p>';return}
+  const live=rows.filter(r=>!r.closed);
+  const g=live.reduce((s,r)=>s+(Number(r.balance)||0),0),l=live.reduce((s,r)=>s+(Number(r.loan)||0),0);
+  $('#masCards').innerHTML=[['צבירה ברוטו',money(g)],['הלוואות כנגד',money(l)],['נטו',money(g-l)],
+   ['נכון ל',esc(String(st.maslaka.asOf||''))]].map(([t,v])=>`<div class="card"><span>${t}</span><b>${v}</b></div>`).join('');
+  $('#masTable').innerHTML=`<table><thead><tr><th>אדם</th><th>מוסד</th><th>תוכנית</th><th>סוג</th><th>יתרה</th><th>הלוואה</th><th>נטו</th></tr></thead>
+   <tbody>${live.sort((a,b)=>(b.balance||0)-(a.balance||0)).map(r=>`<tr><td>${esc(r.person)}</td><td>${esc(r.inst)}</td>
+   <td>${esc(r.plan)}</td><td>${esc(r.type)}</td><td class="num">${money(r.balance)}</td>
+   <td class="num">${r.loan?money(r.loan):'—'}</td><td class="num"><b>${money((r.balance||0)-(r.loan||0))}</b></td></tr>`).join('')}</tbody></table>`;
+}
+
+function renderOther(st){
+  const re=st.realEstate||[],ba=st.balanceAssets||[],bl=st.balanceLiabs||[];
+  $('#otherBox').innerHTML=
+   `<div class="panel"><h3>נדל״ן</h3>${re.length?`<table><thead><tr><th>כתובת</th><th>עיר</th><th>שווי</th></tr></thead><tbody>
+     ${re.map(r=>`<tr><td>${esc(r.address)}</td><td>${esc(r.city)}</td><td class="num">${money(r.value)}</td></tr>`).join('')}
+     </tbody><tfoot><tr><td colspan="2"><b>סה״כ</b></td><td class="num"><b>${money(re.reduce((s,r)=>s+(Number(r.value)||0),0))}</b></td></tr></tfoot></table>`:'<p class="muted">אין נכסים.</p>'}</div>
+   <div class="panel"><h3>שורות ידניות במאזן</h3>${(ba.length||bl.length)?`
+     ${ba.map(r=>`<p>נכס · ${esc(r.group)} · ${esc(r.name)} · <b class="num">${money(r.value)}</b></p>`).join('')}
+     ${bl.map(r=>`<p>התחייבות · ${esc(r.group)} · ${esc(r.name)} · <b class="num neg">${money(r.value)}</b></p>`).join('')}`:'<p class="muted">אין.</p>'}</div>`;
+}
+
+// ── טעינה: בחירה, גרירה, וכניסה תכנותית (לבדיקות) ──
+const readFile=f=>{const r=new FileReader();
+  r.onload=()=>{try{load(JSON.parse(r.result))}catch(e){alert('הקובץ אינו JSON תקין: '+e.message)}};
+  r.readAsText(f)};
+$('#drop').onclick=()=>$('#file').click();
+$('#file').onchange=e=>{if(e.target.files[0])readFile(e.target.files[0])};
+for(const ev of ['dragover','dragleave','drop']){
+  $('#drop').addEventListener(ev,e=>{e.preventDefault();
+    $('#drop').classList.toggle('hover',ev==='dragover');
+    if(ev==='drop'&&e.dataTransfer.files[0])readFile(e.dataTransfer.files[0])});}
+window.loadBackupObject=load; // לבדיקות אוטומטיות
+</script></body></html>
