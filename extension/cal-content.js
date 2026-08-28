@@ -37,7 +37,27 @@ function activeCards(){return[...document.querySelectorAll('[role="checkbox"].ca
 function transactions(){const rows=[];for(const b of document.querySelectorAll('main .search-results > li[role="button"], main li.field-container[role="button"]')){const lines=String(b.innerText||'').split('\n').map(clean).filter(Boolean),date=lines.find(x=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(x));if(!date)continue;const amountLine=[...lines].reverse().find(x=>/₪\s*-?[\d,]+(?:\.\d{1,2})?/.test(x));if(!amountLine)continue;const merchant=lines.find(x=>x!==date&&!/₪/.test(x)&&!/שנצברו/.test(x))||'';let amount=money(amountLine);if(/זיכוי|החזר/.test(lines.join(' '))&&amount>0)amount=-amount;rows.push({date,merchant,amount,payments:lines.find(x=>/תשלום|מתוך/.test(x))||''})}return rows}
 async function selectAndRead(suffix){const range=[...document.querySelectorAll('[role="radio"],input[type="radio"]')].find(x=>clean(x.innerText||x.closest('label')?.innerText||x.parentElement?.innerText)==='18 חודשים');if(range&&range.getAttribute('aria-checked')!=='true'&&!range.checked){range.click();await wait(350)}const buttons=[...document.querySelectorAll('[role="checkbox"].card-btn')],target=buttons.find(b=>clean(b.innerText).endsWith(String(suffix)));if(!target)throw Error(`כרטיס ${suffix} לא נמצא בבורר`);for(const b of buttons)if(b!==target&&b.getAttribute('aria-checked')==='true')b.click();if(target.getAttribute('aria-checked')!=='true')target.click();await wait(300);const views=[...document.querySelectorAll('button')].filter(b=>clean(b.innerText)==='לצפייה בעסקאות'),view=views.at(-1);if(view&&!view.disabled)view.click();await wait(2400);return{suffix,transactions:transactions()}}
 function clickText(text){const target=[...document.querySelectorAll('a,button')].find(x=>clean(x.innerText)===text);if(!target)return false;target.click();return true}
-async function openMonthly(){const menu=[...document.querySelectorAll('button')].find(x=>clean(x.innerText)==='עסקאות וחיובים');if(menu)menu.click();await wait(450);const link=[...document.querySelectorAll('a,button')].find(x=>clean(x.innerText)==='עסקאות בכרטיס לפי מועד חיוב');if(!link)return false;link.click();return true}
+// ⚠ 28.08.2026 - "לא נמצא המסלול עסקאות בכרטיס לפי מועד חיוב": הטקסטים
+// המדויקים לא נמצאו בממשק. התאמה מכילה במקום שוויון, ואם גם היא מחמיצה -
+// הגשש רושם את כל תפריטי הדף ל-storage (טקסטים בלבד, ספרות מוסרות) והרקע
+// נופל לניווט ישיר. התיקון הסופי ייכתב מן המדידה, לא מניחוש.
+function calUiProbe(){
+  try{
+    const texts=[...new Set([...document.querySelectorAll('a,button,[role="menuitem"],[role="tab"]')]
+      .map(x=>clean(x.innerText).replace(/\d/g,'#'))
+      .filter(s=>s&&s.length<=40))].slice(0,70);
+    chrome.storage.local.set({calUiProbe:{at:new Date().toISOString(),path:location.pathname.slice(0,50),texts}});
+  }catch(e){}
+}
+async function openMonthly(){
+  const find=re=>[...document.querySelectorAll('a,button,[role="menuitem"]')].find(x=>re.test(clean(x.innerText)));
+  const menu=find(/^עסקאות וחיובים$/)||find(/עסקאות וחיובים/);
+  if(menu)menu.click();
+  await wait(450);
+  const link=find(/^עסקאות בכרטיס לפי מועד חיוב$/)||find(/לפי מועד חיוב/)||find(/עסקאות בכרטיס/);
+  if(!link){calUiProbe();return false}
+  link.click();return true
+}
 function monthlyRead(){const main=document.querySelector('main'),text=clean(main?.innerText),heading=(text.match(/עסקאות לחיוב ב-\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)||[]),suffix=(text.match(/(?:^|\s)(\d{4})(?:\s|$)/)||[])[1]||'',rows=[];for(const b of main?.querySelectorAll('button.tran-row-button')||[]){const lines=String(b.innerText||'').split('\n').map(clean).filter(Boolean),date=lines.find(x=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(x));if(!date)continue;const amountLine=[...lines].reverse().find(x=>/₪\s*-?[\d,]+(?:\.\d{1,2})?/.test(x));if(!amountLine)continue;const merchant=lines.find(x=>x!==date&&!/₪/.test(x)&&!/שנצברו/.test(x))||'';let amount=money(amountLine);if(/זיכוי|החזר/.test(lines.join(' '))&&amount>0)amount=-amount;rows.push({date,merchant,amount,payments:lines.find(x=>/תשלום|מתוך/.test(x))||''})}let y=Number(heading[3]||0);if(y&&y<100)y+=2000;const month=heading[2]&&y?`${String(Number(heading[2])).padStart(2,'0')}${y}`:'',total=money((text.match(/עסקאות לחיוב ב-[^₪]{0,40}₪\s*([\d,.-]+)/)||[])[1]);return{ok:Boolean(month),month,chargeDate:heading[1]?`${String(heading[1]).padStart(2,'0')}/${String(heading[2]).padStart(2,'0')}/${String(y).slice(-2)}`:'',suffix,total,transactions:rows,fingerprint:`${month}|${rows.map(x=>`${x.date}|${x.merchant}|${x.amount}`).join(';')}`,canPrev:document.querySelector('button.prev.pickerBtn')?.getAttribute('aria-disabled')!=='true'}}
 function monthlyPrev(){const b=document.querySelector('button.prev.pickerBtn');if(!b||b.getAttribute('aria-disabled')==='true')return false;b.click();return true}
 chrome.runtime.onMessage.addListener((m,_s,reply)=>{if(m?.type==='CAL_PING'){reply({ok:true});return}if(m?.type==='CAL_GO_HOME'){reply({ok:clickText('דף הבית')});return}if(m?.type==='CAL_OPEN_TRANSACTIONS'){reply({ok:clickText('לצפייה בכל העסקאות')});return}if(m?.type==='CAL_OPEN_MONTHLY'){openMonthly().then(ok=>reply({ok}));return true}if(m?.type==='CAL_MONTHLY_READ'){reply(monthlyRead());return}if(m?.type==='CAL_MONTHLY_PREV'){reply({ok:monthlyPrev()});return}if(m?.type==='CAL_HOME'){reply({ok:true,data:home()});return}if(m?.type==='CAL_CARDS'){reply({ok:true,cards:activeCards()});return}if(m?.type==='CAL_SELECT_READ'){selectAndRead(m.suffix).then(data=>reply({ok:true,data})).catch(e=>reply({ok:false,error:e.message}));return true}});
