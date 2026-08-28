@@ -886,15 +886,20 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   // ⚠ ברירת המחדל נשארה רענון מלא, מהסיבה המתועדת למעלה. „השלם חסרים בלבד" הוא
   // בחירה מפורשת של המשתמש בדשבורד, ונוסף 18.08.2026 כי גם כרטיס בודד לוקח דקה
   // ארוכה כשאין מה לקרוא מחדש. הדילוג נשען על cardHistStats, שמחזיק months לכל סיומת.
+  // ⚠ 28.08.2026 - טל: "שיזהה מראש איזה חודשים כבר סונכרנו ושאפילו לא ינסה
+  // לסנכרן שוב - חוץ מהקרוב והקודם תמיד." שני החודשים החדשים ביותר נקראים
+  // תמיד טרי, גם במצב "חסרים בלבד" - הם היחידים שעוד משתנים (עסקאות
+  // מצטברות ותיקוני חיוב). קודם המצב הזה דילג גם עליהם - פער רעננות אמיתי.
+  const alwaysFresh=new Set(wanted.slice(0,2));
   let todo=wanted;
   let histStats=null; // AUDIT (קטנות): cardHistStats סורק את כל המסד — נקרא פעם אחת וישרת גם את haveMonths למטה.
   if(onlyMissing){
     histStats=await cardHistStats().catch(()=>({}));
     const stats=histStats;
-    todo=wanted.filter(month=>!active.every(c=>(stats[String(c.suffix)]?.months||[]).includes(month)));
+    todo=wanted.filter(month=>alwaysFresh.has(month)||!active.every(c=>(stats[String(c.suffix)]?.months||[]).includes(month)));
     if(!todo.length){await endProgress();await chrome.storage.local.set({syncStatus:`ישראכרט: כל ${wanted.length} החודשים כבר שמורים ל${active.length>1?`-${active.length} הכרטיסים`:`כרטיס ${active[0].suffix}`} — אין מה להשלים`});
       return{ok:true,loaded:0,failed:[],skipped:wanted.length}}
-    await chrome.storage.local.set({syncStatus:`ישראכרט: ${wanted.length-todo.length} חודשים כבר שמורים — קורא ${todo.length} חסרים בלבד`});
+    await chrome.storage.local.set({syncStatus:`ישראכרט: ${wanted.length-todo.length} חודשים כבר שמורים — קורא ${todo.length} (הקרוב והקודם תמיד, והחסרים)`});
   }
   await chrome.storage.local.set({syncStatus:`ישראכרט: כרטיס ${active.map(c=>c.suffix).join(', ')} זוהה — מכין 12 חודשים`});
   // ⚠ 18.08.2026 — כאן עמדה מחיקה גורפת של 12 החודשים **לפני** הקריאה, ולכן ריצה
@@ -938,7 +943,7 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
       //   todo=wanted.filter(month=>!active.every(c=>…includes(month)))
       // כלומר חודש שחסר **לכרטיס אחד** נקרא מחדש **לכל שמונת הכרטיסים**.
       // מכאן „סורק הכול" למרות שכמעט הכול שמור. **הדילוג עובר לרמת כרטיס.**
-      if(onlyMissing&&(haveMonths[String(card.suffix)]||new Set()).has(month)){cardSkipped++;continue}
+      if(onlyMissing&&!alwaysFresh.has(month)&&(haveMonths[String(card.suffix)]||new Set()).has(month)){cardSkipped++;continue}
       const pageStarted=Date.now();let pageOk=false;
       await syncStep(`היסטוריה ${month} · כרטיס ${i+1}/${active.length} (${card.suffix}) · חודש ${done+1}/${todo.length}`,`כרטיס ${card.suffix} · ${String(month).slice(0,2)}/${String(month).slice(2)}`);
       try{

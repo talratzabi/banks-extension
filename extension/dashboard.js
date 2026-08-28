@@ -281,7 +281,7 @@ async function renderCardMonthPicker(){
       +`<option value="">כל הכרטיסים — ארוך, והסשן עלול להיסגר</option>`
       +yearCards.map(c=>`<option value="${esc(c.suffix)}">כרטיס ${esc(c.suffix)}${c.name?` — ${esc(c.name)}`:''}</option>`).join('')
       +`</select></label>`
-    +`<label class="auto-sync"><input type="checkbox" id="cardYearOnlyMissing" checked> <span>השלם חסרים בלבד<small>מדלג על חודשים ששמורים כבר. הסר סימון לרענון מלא של 12 החודשים</small></span></label>`
+    +`<label class="auto-sync"><input type="checkbox" id="cardYearOnlyMissing" checked> <span>השלם חסרים בלבד<small>מדלג על חודשים ששמורים כבר; חודש החיוב הקרוב והקודם נקראים תמיד מחדש. הסר סימון לרענון מלא של 12 החודשים</small></span></label>`
     +`<button type="button" class="button secondary" id="loadCardYear">טען שנה אחורה — ישראכרט</button>`
     +`<small class="sync-detail">${saved.length?`שמורים ${saved.length} חודשים`:'טרם נשמרה היסטוריה'}${cardMonth?` · מוצג ${monthLabel(cardMonth)}`:''}</small>`;
 }

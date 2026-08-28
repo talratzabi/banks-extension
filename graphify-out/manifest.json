@@ -1,8 +1,8 @@
 {
   "extension/background.js": {
-    "mtime": 1787909895.006626,
-    "seen": 1787910008.4732642,
-    "ast_hash": "efa5fbfc28b4f76c28bfaa8989208fa8",
+    "mtime": 1787910505.851573,
+    "seen": 1787910650.0289822,
+    "ast_hash": "a4b183b0df08522b01905470db241d9e",
     "semantic_hash": ""
   },
   "extension/btb-content.js": {
@@ -30,9 +30,9 @@
     "semantic_hash": ""
   },
   "extension/dashboard.js": {
-    "mtime": 1787906550.4197915,
-    "seen": 1787906638.4192085,
-    "ast_hash": "aa4a6e9f9c65df6f964bf6f7d97ab78e",
+    "mtime": 1787910522.050947,
+    "seen": 1787910650.0289822,
+    "ast_hash": "3a4398cdb5ba327a19887bc6d48f17d8",
     "semantic_hash": ""
   },
   "extension/discount-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1787909900.266101,
-    "seen": 1787910008.4732642,
-    "ast_hash": "4c12c68b7a1b8b66657733784e782312",
+    "mtime": 1787910527.5418105,
+    "seen": 1787910650.0289822,
+    "ast_hash": "8c51a1836ad73376ed97e746719a9e34",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1787909988.0030632,
-    "seen": 1787910008.4732642,
-    "ast_hash": "83fe43cbb074f1c7c4e752d0647bba1f",
+    "mtime": 1787910620.5295417,
+    "seen": 1787910650.0289822,
+    "ast_hash": "f15bb977dfd37600011125a20a6da310",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
@@ -267,6 +267,12 @@
     "mtime": 1786787284.1043706,
     "seen": 1787902538.2787333,
     "ast_hash": "97b01b2099a6ef8599781992234dea4c",
+    "semantic_hash": ""
+  },
+  "DELTA-AUDIT.md": {
+    "mtime": 1787910598.8019824,
+    "seen": 1787910650.0289822,
+    "ast_hash": "37ab2c9ef4360737c2f08569b1280bcb",
     "semantic_hash": ""
   }
 }
