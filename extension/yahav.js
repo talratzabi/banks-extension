@@ -139,7 +139,16 @@ let creditLimit=creditFrom(home.text),balance=home.transactions[0].balance;
     let creditKept=false;
     if(creditLimit==null&&prevYahav&&prevYahav.creditLimit!=null){creditLimit=prevYahav.creditLimit;creditKept=true}
     const now=new Date().toISOString(),selectionKey=`yahav|${account.branch}-${account.accountNumber}`,availableCredit=creditLimit==null?null:balance+creditLimit;
-    const row={...account,nickname:home.owner||'טל',owner:home.owner||'טל',balance,creditLimit,availableCredit,transactions:home.transactions,loans,source:'yahav',sourceLabel:'יהב',selectionKey,id:`yahav-${account.branch}-${account.accountNumber}`,lastSync:now,status:'מסונכרן'};
+    /* ⚠ 28.08.2026 - DELTA-AUDIT פער 6 (נכונות): הדף מציג רק את החלון האחרון
+       (~10 תנועות), וההחלפה המלאה מחקה כל תנועה שיצאה ממנו. מיזוג: הטריות
+       קודם (סדר הבנק, החדשה ראשונה), ותנועות שמורות שאינן בחלון מצורפות
+       אחריהן. אותו כלל של "ערך ידוע אינו נמחק בגלל קריאה חסרה" - על התנועות. */
+    const yKey=t=>`${t.date}|${t.reference||''}|${t.debit??''}|${t.credit??''}|${t.balance??''}|${t.action||t.details||''}`;
+    const freshSet=new Set(home.transactions.map(yKey));
+    const prevKeys=new Set(((prevYahav&&prevYahav.transactions)||[]).map(yKey));
+    const mergedTx=[...home.transactions,...(((prevYahav&&prevYahav.transactions)||[]).filter(t=>!freshSet.has(yKey(t))))];
+    const yahavNew=home.transactions.filter(t=>!prevKeys.has(yKey(t))).length;
+    const row={...account,nickname:home.owner||'טל',owner:home.owner||'טל',balance,creditLimit,availableCredit,transactions:mergedTx,loans,source:'yahav',sourceLabel:'יהב',selectionKey,id:`yahav-${account.branch}-${account.accountNumber}`,lastSync:now,status:'מסונכרן'};
     const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],accountKinds:{}}),accounts=[...state.accounts.filter(a=>a.source!=='yahav'),row],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('yahav|')),selectionKey])],accountKinds={...state.accountKinds,[selectionKey]:'private'};
     await chrome.storage.local.set({accounts,selectedAccountKeys,accountKinds,accountFilter:'both',pendingYahav:false,
   /* ⚠ פרוב שאומר **באיזה מסך היינו**, לא רק מה לא נמצא. */
@@ -150,7 +159,7 @@ let creditLimit=creditFrom(home.text),balance=home.transactions[0].balance;
 
   // ⚠ גם בסיום — מוחקים רק את יהב, לא את הבורר של בנקים אחרים.
   discoveredAccounts:(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts.filter(a=>a&&a.source!=='yahav'),
-  syncStatus:`יהב: הסנכרון הסתיים — ${home.transactions.length} תנועות ו־${loans.length} הלוואות`,lastAutoSync:now});
+  syncStatus:`יהב: סונכרן בהצלחה — ${yahavNew?`${yahavNew} תנועות חדשות`:'אין נתונים חדשים'} · ${mergedTx.length} תנועות שמורות · ${loans.length} הלוואות`,lastAutoSync:now});
     if(!autoBusy)await chrome.runtime.openOptionsPage();
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה ביהב: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{yahavBusy=false;await restoreSyncTabs()}
 }

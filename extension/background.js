@@ -1954,7 +1954,22 @@ const stashLeumi=async list=>{try{await accountsMutex(async()=>{
  await stashLeumi(partial);leumiStashed=partial.length;
  const txSoFar=partial.reduce((sum,a)=>sum+(a.transactions?.length||0),0);
  await chrome.storage.local.set({syncStatus:`לאומי: ${partial.length} חשבונות ו-${txSoFar} תנועות נשמרו — ממשיך להלוואות`});}
-const tLoans=Date.now();let lr;lastError='';lastDebug=null;const loanAttempts=[];for(let attempt=1;attempt<=3;attempt++){const loanStart=Date.now();await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא הלוואות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,loanUrl);lr=await withHeartbeat(chrome.tabs.sendMessage(tabId,{type:'LEUMI_LOANS_SELECTED',keys}),leumiLoanBudget(keys.length),'קריאת הלוואות בלאומי',45000);if(lr?.ok&&lr.accounts?.length===keys.length&&lr.accounts.every(a=>Array.isArray(a.loans)))break;lastError=lr?.error||'לא התקבל פירוט הלוואות מלא';lastDebug=lr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}
+const tLoans=Date.now();let lr=null;lastError='';lastDebug=null;const loanAttempts=[];
+// ⚠ 28.08.2026 - DELTA-AUDIT פער 5: כל היתרות זהות לשמורות => ההלוואות
+// (החלק הכבד - עד 3×120 שניות) נלקחות מהמסד. תשלום הלוואה משנה את יתרת
+// העו"ש, ולכן יתרות-זהות בכל החשבונות מכסות גם אותן. די בחשבון אחד שהשתנה
+// או שחסר לו רישום שמור - וקוראים מהאתר כרגיל. התנועות כבר נקראו מלאות.
+{const stL=await chrome.storage.local.get({accounts:[]});
+ const savedBy=new Map(stL.accounts.filter(a=>a.source==='leumi').map(a=>[a.id,a]));
+ const allSame=r.accounts.length>0&&r.accounts.every(a=>{const s=savedBy.get(`leumi-${a.key}`);
+   return s&&s.balance!=null&&a.balance!=null&&Math.abs(Number(a.balance)-Number(s.balance))<0.005&&Array.isArray(s.loans)});
+ if(allSame){
+   lr={ok:true,accounts:r.accounts.map(a=>{const s=savedBy.get(`leumi-${a.key}`);
+     return{key:a.key,loans:(s.loans||[]).map(l=>({...l})),
+       ...(s.loansTotal!=null?{loansTotal:s.loansTotal}:{}),...(s.loanCount!=null?{loanCount:s.loanCount}:{})}})};
+   await chrome.storage.local.set({syncStatus:'לאומי: היתרות לא השתנו — ההלוואות נלקחו מהמסד'});
+ }}
+if(!lr)for(let attempt=1;attempt<=3;attempt++){const loanStart=Date.now();await chrome.storage.local.set({syncStatus:`לאומי: סנכרון בתהליך — קורא הלוואות, ניסיון ${attempt} מתוך 3`});try{await prepareLeumiRoute(tabId,loanUrl);lr=await withHeartbeat(chrome.tabs.sendMessage(tabId,{type:'LEUMI_LOANS_SELECTED',keys}),leumiLoanBudget(keys.length),'קריאת הלוואות בלאומי',45000);if(lr?.ok&&lr.accounts?.length===keys.length&&lr.accounts.every(a=>Array.isArray(a.loans)))break;lastError=lr?.error||'לא התקבל פירוט הלוואות מלא';lastDebug=lr?.debug||await leumiSnapshot(tabId)}catch(e){lastError=e.message;lastDebug=await leumiSnapshot(tabId)}
 // ⚠ נמדד: שלושת הניסיונות נפלו על אותה שגיאה, 120/120/121 שניות.
 // חזרה שלישית על תנאים זהים אינה ניסיון - היא רק עוד שתי דקות.
 if(BFCACHE.test(String(lastError||'')))leumiForceInject=true;
@@ -2349,7 +2364,13 @@ await accountsMutex(async()=>{
 const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});const accounts=[...state.accounts.filter(a=>a.source!=='mizrahi'),...result],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('mizrahi|')),result[0].selectionKey])];await chrome.storage.local.set({accounts,
   // ⚠ מוחק רק את מזרחי. הוחל לפי דפוס; לא נמדדה תקלה כאן.
   discoveredAccounts:(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts.filter(a=>a&&a.source!=='mizrahi'),
-  selectedAccountKeys,pendingMizrahi:false,syncStatus:`מזרחי־טפחות: הסנכרון הסתיים — ${result[0].transactions.length} תנועות ו־${result[0].loans.length} הלוואות`});});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{mizrahiBusy=false;await restoreSyncTabs()}}
+  selectedAccountKeys,pendingMizrahi:false,syncStatus:(()=>{
+    // "אין נתונים חדשים" גם במסלול הישיר - השוואת מפתחות מול השמור (DELTA-AUDIT פער 7).
+    const prevMiz=state.accounts.find(a=>a.source==='mizrahi'&&a.id===result[0].id);
+    const k=t=>`${t.date}|${t.reference||''}|${t.debit??''}|${t.credit??''}|${t.action||t.details||''}`;
+    const prevSet=new Set(((prevMiz&&prevMiz.transactions)||[]).map(k));
+    const mizNew=(result[0].transactions||[]).filter(t=>!prevSet.has(k(t))).length;
+    return`מזרחי־טפחות: סונכרן בהצלחה — ${mizNew?`${mizNew} תנועות חדשות`:'אין נתונים חדשים'} · ${result[0].transactions.length} תנועות · ${result[0].loans.length} הלוואות`})()});});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{mizrahiBusy=false;await restoreSyncTabs()}}
 async function syncMizrahiSelected(keys,knownTabId=null){const tab=knownTabId?await chrome.tabs.get(knownTabId):await mizrahiTab();if(!tab)throw Error('החיבור למזרחי־טפחות אינו פעיל');if(keys.length!==1)throw Error('בחיבור מזרחי הנוכחי ניתן לסנכרן חשבון פעיל אחד בכל פעם');await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: קובע את טווח התאריכים'});if(!tab.url?.includes('root-main-osh-p428New')){await chrome.tabs.update(tab.id,{url:MIZRAHI_TX});await waitTab(tab.id,'root-main-osh-p428New')}await prepareMizrahi(tab.id);await delay(1200);await setMizrahiRange(tab.id);await delay(4200);const account=await readMizrahiSummary(tab.id),transactions=await readMizrahiTransactions(tab.id);if(!account)throw Error('פרטי החשבון הפעיל לא זוהו בעמוד מזרחי');if(`${account.branch}-${account.accountNumber}`!==keys[0])throw Error(`החשבון הפעיל הוא ${account.branch}-${account.accountNumber}, ולא החשבון שנבחר`);if(!transactions.length)throw Error('לא נקראו תנועות ישירות מטבלת שלושת החודשים — הסנכרון נעצר ולא נשמרו נתונים חלקיים');let loans=[];await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: נקראו ${transactions.length} תנועות; קורא הלוואות`});try{await chrome.tabs.update(tab.id,{url:MIZRAHI_LOANS});await waitTab(tab.id,'legacy-Loan-P060');await prepareMizrahi(tab.id);await delay(2200);const lr=await chrome.tabs.sendMessage(tab.id,{type:'MIZRAHI_LOANS'});if(lr?.ok)loans=lr.loans||[]}catch{}const now=new Date().toISOString(),availableCredit=account.balance==null||account.creditLimit==null?null:account.balance+account.creditLimit;return[{...account,availableCredit,transactions,loans,source:'mizrahi',sourceLabel:'מזרחי־טפחות',selectionKey:`mizrahi|${account.branch}-${account.accountNumber}`,id:`mizrahi-${account.branch}-${account.accountNumber}`,lastSync:now,status:loans.length?'מסונכרן':'מסונכרן ללא פירוט הלוואות'}]}
 
 const ISRACARD_HOME='https://web.isracard.co.il/StatusPage';
