@@ -2406,25 +2406,29 @@ try{for(const r of await cardHistGetMonth(chargeMonthRaw))beforeCurrent.set(Stri
 let prevSkipped=0;const freshPrev=[];
 await beginProgress(active.length);
 for(let i=0;i<active.length;i++){const card=active[i];await syncStep(`ישראכרט: קורא כרטיס ${i+1} מתוך ${active.length} · ${card.suffix}`,`כרטיס ${card.suffix} · ${chargeMonthLabel}`);await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?cardSuffix=${encodeURIComponent(card.suffix)}`});await waitIsracardReady(tabId,card.suffix);let read={ok:true,transactions:[]};try{read=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_TRANSACTIONS_V3'})}catch{}
-// ⚠⚠ 28.08.2026 - שני תיקונים (DELTA-AUDIT פער 1):
-// א. "החודש הקודם" חושב מאז ומעולם כחודש **הנוכחי** (new Date(y,m,1) בלי
-//    מינוס) - previousCharge היה סך החודש השוטף החלקי, שחיובו טרם ירד לבנק,
-//    ולכן מסלול 4 לא שייך כרטיס ישראכרט מעולם. עכשיו נקרא חודש-העסקאות
-//    הקודם, שחיובו כבר נחת בבנק (בחודש שאחריו - הלקח המדוד מ-1.57.1).
-// ב. דלתא: חודש קודם סגור אינו משתנה - אם הוא כבר שמור בהיסטוריה עם סכום,
-//    הדף לא נפתח כלל והסכום נלקח מהמסד. הדף הנוכחי נקרא תמיד.
-const prevDate=new Date();prevDate.setDate(1);prevDate.setMonth(prevDate.getMonth()-1);
-const prevKey=`${String(prevDate.getMonth()+1).padStart(2,'0')}.${prevDate.getFullYear()}`;
+// ⚠⚠ 28.08.2026 - **נמדד חי ע"י טל, שתי איטרציות**: monthAndYear של ישראכרט
+// הוא **חודש החיוב** - דף 07 הראה את חיוב 10/7, לא את 10/8. לכן דף החיוב
+// הקודם האמיתי (10/8) הוא monthAndYear=החודש הנוכחי. ניסיון קודם לקרוא את
+// "חודש העסקאות הקודם" (07) החזיר חיוב ישן מדי - תוקן כאן לפי המדידה.
+// ⚠ המסד לעומת זאת שומר לפי **חודש העסקאות** (נמדד 1.57.1: שורות 08 עם
+// chargeDate 10.9) - לכן דף חיוב 08 (עסקאות יולי) נשמר תחת 07, ובדילוג
+// מחפשים את 07 במסד. שני לוחות שנה שונים - אסור לערבב את המפתחות.
+// דלתא: חיוב קודם שכבר נחת אינו משתנה - אם עסקאות החודש הקודם שמורות עם
+// סכום, הדף לא נפתח והסכום נלקח מהמסד. הדף הנוכחי (חיוב קרוב) נקרא תמיד.
+const chargePageDate=new Date();chargePageDate.setDate(1);
+const chargePageKey=`${String(chargePageDate.getMonth()+1).padStart(2,'0')}.${chargePageDate.getFullYear()}`;
+const prevTxDate=new Date();prevTxDate.setDate(1);prevTxDate.setMonth(prevTxDate.getMonth()-1);
+const prevTxKey=`${String(prevTxDate.getMonth()+1).padStart(2,'0')}.${prevTxDate.getFullYear()}`;
 const storedPrev=prevStoredRows.get(String(card.suffix));
 let previousCharge=0;
 if(storedPrev){previousCharge=Number(storedPrev.amount)||0;prevSkipped++}
 else{
-  await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?monthAndYear=${prevKey}&cardSuffix=${encodeURIComponent(card.suffix)}`});await delay(1400);await prepareIsracard(tabId);await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SELECT_MONTH_V3',month:prevKey});await waitIsracardReady(tabId,card.suffix,prevKey);
+  await chrome.tabs.update(tabId,{url:`https://web.isracard.co.il/transactions?monthAndYear=${chargePageKey}&cardSuffix=${encodeURIComponent(card.suffix)}`});await delay(1400);await prepareIsracard(tabId);await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SELECT_MONTH_V3',month:chargePageKey});await waitIsracardReady(tabId,card.suffix,chargePageKey);
   let previousRead={total:0};try{previousRead=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_TRANSACTIONS_V3'})}catch{}
   previousCharge=Number(previousRead?.total)||0;
-  if(previousCharge>0)freshPrev.push({...card,amount:previousCharge,transactions:previousRead?.transactions||[],month:prevKey});
+  if(previousCharge>0)freshPrev.push({...card,amount:previousCharge,transactions:previousRead?.transactions||[],month:prevTxKey});
 }
-details.push({...card,transactions:read?.transactions||[],previousCharge,previousChargeMonth:prevKey})}
+details.push({...card,transactions:read?.transactions||[],previousCharge,previousChargeMonth:chargePageKey})}
 await endProgress();
 // חודשים קודמים שנקראו טרי נשמרים להיסטוריה - הם שיזינו את הדילוג בפעם הבאה.
 if(freshPrev.length)try{await storeCardMonth(freshPrev[0].month,freshPrev)}catch(e){}

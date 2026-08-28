@@ -1,8 +1,8 @@
 {
   "extension/background.js": {
-    "mtime": 1787910505.851573,
-    "seen": 1787910650.0289822,
-    "ast_hash": "a4b183b0df08522b01905470db241d9e",
+    "mtime": 1787911076.530592,
+    "seen": 1787911161.1110663,
+    "ast_hash": "bc40ba0d304a3608d9a1e526c3e1b7d9",
     "semantic_hash": ""
   },
   "extension/btb-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1787910527.5418105,
-    "seen": 1787910650.0289822,
-    "ast_hash": "8c51a1836ad73376ed97e746719a9e34",
+    "mtime": 1787911087.1640422,
+    "seen": 1787911161.1110663,
+    "ast_hash": "ae188b32c3ffc3270b8be0fe393b0363",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1787910620.5295417,
-    "seen": 1787910650.0289822,
-    "ast_hash": "f15bb977dfd37600011125a20a6da310",
+    "mtime": 1787911141.3355107,
+    "seen": 1787911161.1110663,
+    "ast_hash": "755a512037b652f11401e7dbb1ac6a65",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
