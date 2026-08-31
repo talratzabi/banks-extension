@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s);
-let accounts=[],discovered=[],selectedKeys=[],syncScope='business',accountFilter='both',accountKinds={},privateOwnerName='',hideMortgages=false,isracardUnassigned=[],calUnassigned=[],maxUnassigned=[],isracardLastCards=[],calLastCards=[],maxLastCards=[],cardHistoryStats={},cardNewMarks={},chequeInfo={},chequePayers={},chequePayerDoubt={},chequePayerMeta={},chequePayerGuess={},chequePayerBank={},chequeHashes={},chequeAccounts={},chequeLedger=[],chequePayerSource={},activeView='accounts',loadEpoch=0,loadTimer=null,monthlyCardMonths=null,monthlyPick='';
+let accounts=[],discovered=[],selectedKeys=[],syncScope='business',accountFilter='both',accountKinds={},privateOwnerName='',hideMortgages=false,isracardUnassigned=[],calUnassigned=[],maxUnassigned=[],isracardLastCards=[],calLastCards=[],maxLastCards=[],cardHistoryStats={},cardNewMarks={},chequeInfo={},chequePayers={},chequePayerDoubt={},chequePayerMeta={},chequePayerGuess={},chequePayerBank={},chequeHashes={},chequeAccounts={},chequeLedger=[],chequePayerSource={},chooserFocus=null,activeView='accounts',loadEpoch=0,loadTimer=null,monthlyCardMonths=null,monthlyPick='';
 let movementSearchTimer=null,movementSearchEpoch=0;
 // ⚠ סט ריק פירושו **כל המקורות**, ולא "אף מקור". כך פתיחה ראשונה של הלשונית
 // מציגה הכול בלי לדרוש סימון, וגם מקור חדש שנוסף אחרי סנכרון נכנס מעצמו.
@@ -49,7 +49,7 @@ async function load(){
   const epoch=++loadEpoch;
   monthlyCardMonths=null; // טעינה מחדש = ייתכנו חודשי כרטיסים חדשים; הלשונית תקרא שוב.
   document.querySelector('.sources')?.classList.add('hidden');
-  const data=await chrome.storage.local.get({viewSince:'',viewSinceInit:false,collectSince:'',accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],cardNewMarks:{},chequeInfo:{},chequePayers:{},chequePayerDoubt:{},chequePayerMeta:{},chequePayerGuess:{},chequePayerBank:{},chequeHashes:{},chequeAccounts:{},chequeLedger:[],chequePayerSource:{},fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{},hiddenCards:[],maslaka:null,realEstate:[],balanceAssets:[],balanceLiabs:[],loanKinds:{}});
+  const data=await chrome.storage.local.get({viewSince:'',viewSinceInit:false,collectSince:'',accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],cardNewMarks:{},chequeInfo:{},chequePayers:{},chequePayerDoubt:{},chequePayerMeta:{},chequePayerGuess:{},chequePayerBank:{},chequeHashes:{},chequeAccounts:{},chequeLedger:[],chequePayerSource:{},chooserFocus:null,fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{},hiddenCards:[],maslaka:null,realEstate:[],balanceAssets:[],balanceLiabs:[],loanKinds:{}});
   maslaka=data.maslaka||null;loanKinds=data.loanKinds||{};realEstate=Array.isArray(data.realEstate)?data.realEstate:[];balanceAssets=Array.isArray(data.balanceAssets)?data.balanceAssets:[];balanceLiabs=Array.isArray(data.balanceLiabs)?data.balanceLiabs:[];
   hiddenCards=(data.hiddenCards||[]).map(x=>String(x).replace(/\D/g,'')).filter(Boolean);
   // כרטיס שהוסתר אינו חוזר דרך סנכרון: הסינון כאן, לפני כל רינדור.
@@ -64,7 +64,7 @@ async function load(){
   // לכן חלון התצוגה מאותחל פעם אחת לערך הגבול הישן — המסך נראה בדיוק
   // כמו קודם — ומכאן השניים עצמאיים לגמרי.
   if(!data.viewSinceInit){viewSince=String(data.collectSince||'');chrome.storage.local.set({viewSince,viewSinceInit:true})}
-  accounts=data.accounts;discovered=data.discoveredAccounts;syncScope=data.syncScope;accountFilter=data.accountFilter;accountKinds=data.accountKinds;privateOwnerName=data.privateOwnerName;hideMortgages=Boolean(data.hideMortgages);isracardUnassigned=data.isracardUnassigned||[];calUnassigned=data.calUnassigned||[];maxUnassigned=data.maxUnassigned||[];isracardLastCards=data.isracardLastCards||[];calLastCards=data.calLastCards||[];maxLastCards=data.maxLastCards||[];cardNewMarks=data.cardNewMarks||{};chequeInfo=data.chequeInfo||{};chequePayers=data.chequePayers||{};chequePayerDoubt=data.chequePayerDoubt||{};chequePayerMeta=data.chequePayerMeta||{};chequePayerGuess=data.chequePayerGuess||{};chequePayerBank=data.chequePayerBank||{};chequeHashes=data.chequeHashes||{};chequeAccounts=data.chequeAccounts||{};chequeLedger=data.chequeLedger||[];chequePayerSource=data.chequePayerSource||{};setTimeout(()=>{try{refreshPayerButton()}catch(e){}},0);
+  accounts=data.accounts;discovered=data.discoveredAccounts;syncScope=data.syncScope;accountFilter=data.accountFilter;accountKinds=data.accountKinds;privateOwnerName=data.privateOwnerName;hideMortgages=Boolean(data.hideMortgages);isracardUnassigned=data.isracardUnassigned||[];calUnassigned=data.calUnassigned||[];maxUnassigned=data.maxUnassigned||[];isracardLastCards=data.isracardLastCards||[];calLastCards=data.calLastCards||[];maxLastCards=data.maxLastCards||[];cardNewMarks=data.cardNewMarks||{};chequeInfo=data.chequeInfo||{};chequePayers=data.chequePayers||{};chequePayerDoubt=data.chequePayerDoubt||{};chequePayerMeta=data.chequePayerMeta||{};chequePayerGuess=data.chequePayerGuess||{};chequePayerBank=data.chequePayerBank||{};chequeHashes=data.chequeHashes||{};chequeAccounts=data.chequeAccounts||{};chequeLedger=data.chequeLedger||[];chequePayerSource=data.chequePayerSource||{};chooserFocus=data.chooserFocus||null;setTimeout(()=>{try{refreshPayerButton()}catch(e){}},0);
   // ⚠⚠⚠ **כאן ישבה הגירה שהורידה שמות ל"הצעה", והיא הוסרה - זה היה באג.**
   // היא סימנה את עצמה כבוצעה **רק כשהיה מה להעביר**. אצל טל לא היה,
   // ולכן היא נשארה דרוכה - ואחרי שהייבוא מהנהלת החשבונות מילא שמות
@@ -608,7 +608,16 @@ function splitDiscovered(){
  return{current,older:list.filter(a=>a.source!==src),label:(current[0]||{}).sourceLabel||''};
 }
 function renderSelection(){const box=$('#discoveredAccounts'),tab=$('#selectionTab');
- const split=splitDiscovered(),discovered=split.current;
+ // ⚠⚠ 31.08.2026 - **טל נחסם שלוש פעמים ב"אין בורר", והשורש היה
+ // `chooserFocus` שנעשה בו שימוש בלי שהוצהר** (סקריפט עריכה שנכשל
+ // באמצע). השגיאה זרקה את renderSelection כולה, והמסך נשאר ריק בלי
+ // שום רמז - בזמן שהסטטוס אמר "נמצא 3 חשבון".
+ // **חישוב שנכשל לא יבלע את הבורר.** נפילה לאחור למה שזוהה, עם
+ // הודעה שמסגירה את התקלה במקום מסך ריק.
+ let split;
+ try{split=splitDiscovered()}
+ catch(err){split={current:discovered.slice(),older:[],label:'',error:String(err&&err.message||err)}}
+ const discovered=split.current;
 // ⚠ הפאנל כבר לא מסתתר מעצמו — הלשונית שולטת בהצגה. קודם הוא נעלם כשלא היו חשבונות
 // שזוהו, ולכן לא היה שום מקום קבוע לחפש בו את הבחירה.
 // המונה סופר את הבנק המוצג בלבד — אחרת הוא מבטיח שורות שאינן על המסך.
@@ -642,7 +651,7 @@ const b=e.target.closest('[data-pick]');if(!b)return;const all=b.dataset.pick===
 // ⚠ בניית השורה הוצאה לפונקציה כדי שהסעיף המקופל יציג בדיוק את אותה
 // שורה - כולל תיבת סימון פעילה. "ישן" אינו "לקריאה בלבד".
 const choiceRow=a=>{const kind=accountKinds[a.key]||(a.source==='private'||a.source==='discount-private'?'private':'business'),ready=!!(a.branch&&a.accountNumber);return`<label class="choice ${ready?'':'identifying'}"><input type="checkbox" value="${esc(a.key)}" ${ready&&selectedKeys.includes(a.key)?'checked':''} ${ready?'':'disabled'}><span><b>${esc(a.nickname||a.owner||`חשבון ${a.accountNumber||''}`)} <span class="source-badge">${esc(a.sourceLabel||'פועלים עסקי')}</span></b><small class="choice-id">${ready?esc(a.branch)+"-"+esc(fullAccount(a)):'מזהה מספר חשבון…'}</small><small>${ready?'היתרה תיקרא רק לאחר אישור הסנכרון':'ממתין לזיהוי בלבד — עדיין לא מוריד נתונים'}</small><select class="discovered-kind" data-key="${esc(a.key)}" ${ready?'':'disabled'}><option value="business" ${kind==='business'?'selected':''}>עסקי</option><option value="private" ${kind==='private'?'selected':''}>פרטי</option></select></span></label>`};
-box.innerHTML=(split.fallback?`<div class="chooser-note">הבנק האחרון שהתחברת אליו לא החזיר חשבונות לבחירה, ולכן מוצג כל מה שממתין.</div>`:'')
+box.innerHTML=(split.error?`<div class="chooser-note">תקלה בסינון הבורר (${esc(split.error)}) — מוצג כל מה שזוהה.</div>`:split.fallback?`<div class="chooser-note">הבנק האחרון שהתחברת אליו לא החזיר חשבונות לבחירה, ולכן מוצג כל מה שממתין.</div>`:'')
  +discovered.map(choiceRow).join('');box.onchange=async e=>{const c=e.target.closest('input[type=checkbox]');if(c){selectedKeys=c.checked?[...new Set([...selectedKeys,c.value])]:selectedKeys.filter(k=>k!==c.value);await chrome.storage.local.set({selectedAccountKeys:selectedKeys})}updateSelectionCount()};updateSelectionCount()}
 function updateSelectionCount(){const box=document.querySelector('#discoveredAccounts'),el=document.querySelector('#selectionCount');if(!box||!el)return;const n=box.querySelectorAll('input[type=checkbox]:checked').length,total=box.querySelectorAll('input[type=checkbox]').length;el.textContent=`${n} מתוך ${total} מסומנים`;const btn=document.querySelector('#confirmSelection');if(btn)btn.textContent=n?`אישור וסנכרון ${n} חשבונות`:'סמן לפחות חשבון אחד';}
 

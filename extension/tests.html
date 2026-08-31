@@ -1204,6 +1204,42 @@ t('בחירה: יש אבחון שמעתיק את מצב הבורר',()=>{
   if(!/pendingDiscovered\(\)/.test(fn)||!/split\.current/.test(fn))return 'האבחון אינו משווה אחסון מול תצוגה';
   return /#chooserAudit/.test(dash)||'אין כפתור'});
 
+// -- 1.98.0: "אין בורר" — משתנה בשימוש בלי הצהרה --
+t('בחירה: כל משתנה שנטען מהאחסון גם מוצהר',()=>{
+  // ⚠⚠ השורש של שלושה סבבי "אין בורר": `chooserFocus` נכתב לתוך
+  // pendingDiscovered ו-splitDiscovered, **אבל ההצהרה שלו אבדה** בסקריפט
+  // עריכה שנכשל באמצע. renderSelection זרקה ReferenceError, והמסך נשאר
+  // ריק בלי שום רמז — בזמן שהסטטוס אמר "נמצא 3 חשבון".
+  // ⚠ סורק את **כל** שורות ההצהרה ברמה העליונה, לא רק את הראשונה:
+  // loanKinds מוצהר ב-var בשורה אחרת, ובדיקה צרה מדי מאשימה לשווא.
+  const declared=new Set();
+  // אין בקסלאשים כאן בכוונה: כל ניסיון קודם לכתוב מחלקת תווים עם תו
+  // שורה נשבר בכתיבה לקובץ.
+  // הדגל m מספיק, כי הנקודה ממילא אינה חוצה שורות.
+  for(const m of dash.matchAll(/^(?:let|var|const) (.*?);$/gm))
+    for(const part of m[1].split(',')){
+      const id=part.split('=')[0];
+      declared.add((id.includes('*/')?id.split('*/').pop():id).trim());
+    }
+  if(declared.size<10)return 'לא נמצאו הצהרות ברמה העליונה';
+  // כל `foo=data.foo` ב-load() מחייב הצהרה מקבילה
+  const missing=[];
+  for(const m of dash.matchAll(/(\w+)=data\.\1\s*\|\|/g))
+    if(!declared.has(m[1]))missing.push(m[1]);
+  if(missing.length)return 'נטענים מהאחסון בלי הצהרה: '+[...new Set(missing)].join(', ');
+  // ובפרט המשתנה שהפיל את הבורר
+  for(const v of ['chooserFocus','chequePayerSource','chequeLedger','chequeAccounts'])
+    if(!declared.has(v))return 'חסרה הצהרה: '+v;
+  return true});
+
+t('בחירה: חישוב שנכשל אינו בולע את הבורר',()=>{
+  // ⚠ מסך ריק בלי רמז הוא הכשל הגרוע ביותר כאן — הוא חוסם ואינו מסגיר.
+  const sel=dash.slice(dash.indexOf('function renderSelection'),dash.indexOf('function updateSelectionCount'));
+  if(!/try\{split=splitDiscovered\(\)\}/.test(sel))return 'splitDiscovered אינו מוגן';
+  if(!/catch\(err\)\{split=\{current:discovered\.slice\(\)/.test(sel))return 'אין נפילה לאחור למה שזוהה';
+  if(!/split\.error/.test(sel))return 'התקלה אינה מוצגת למשתמש';
+  return true});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
