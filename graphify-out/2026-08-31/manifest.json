@@ -1,8 +1,8 @@
 {
   "extension/background.js": {
-    "mtime": 1788153588.2841053,
-    "seen": 1788153732.4922388,
-    "ast_hash": "9965ac7176faebd8cb2aa5329b263b56",
+    "mtime": 1788155345.8606448,
+    "seen": 1788155569.6294947,
+    "ast_hash": "b6c4fb3adbebf99585be22c549e3172b",
     "semantic_hash": ""
   },
   "extension/btb-content.js": {
@@ -30,9 +30,9 @@
     "semantic_hash": ""
   },
   "extension/dashboard.js": {
-    "mtime": 1788154938.2133403,
-    "seen": 1788155109.2583928,
-    "ast_hash": "8f50234204fc68057da1ba5979f5e327",
+    "mtime": 1788155381.5693536,
+    "seen": 1788155569.6294947,
+    "ast_hash": "ce771efad74b9eeaa017c1a7280d2b06",
     "semantic_hash": ""
   },
   "extension/discount-content.js": {
@@ -54,15 +54,15 @@
     "semantic_hash": ""
   },
   "extension/leumi-content.js": {
-    "mtime": 1787913352.762691,
-    "seen": 1787913434.0694711,
-    "ast_hash": "37579db5a9148aa7b024e6b04a843212",
+    "mtime": 1788155325.8623142,
+    "seen": 1788155569.6294947,
+    "ast_hash": "9ab1ee9a5dd0e84ec49c155fcc4a610d",
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1788154977.157374,
-    "seen": 1788155109.2583928,
-    "ast_hash": "306e023079db3f5f10e72e7fcb510489",
+    "mtime": 1788155411.2549405,
+    "seen": 1788155569.6294947,
+    "ast_hash": "ad7c4dc952c6c757d56da69b56e9962c",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1788155104.8711598,
-    "seen": 1788155109.2583928,
-    "ast_hash": "b8669892ed40eb34ba24d581fda950dc",
+    "mtime": 1788155566.1961842,
+    "seen": 1788155569.6294947,
+    "ast_hash": "de4d956c0e59bf8a397119236333aa66",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
@@ -198,9 +198,9 @@
     "semantic_hash": ""
   },
   "extension/tests.html": {
-    "mtime": 1788154977.157374,
-    "seen": 1788155109.2583928,
-    "ast_hash": "34a7241c412ee9ef8eea4664bbccf97d",
+    "mtime": 1788155433.6282077,
+    "seen": 1788155569.6294947,
+    "ast_hash": "fcd0c774663c642d1f887d90261aa59a",
     "semantic_hash": ""
   },
   "extension/viewer.html": {
