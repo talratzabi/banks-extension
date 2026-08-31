@@ -236,9 +236,9 @@ t('חיפוש: פילוח לפי חודש, לפי מקור, ושילוב — ע�
   try{
     const $$=sel=>document.querySelector(sel);
     const esc2=v=>{const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;')};
-    const mk=(mode,rows)=>new Function('$','esc','money','movementBreakdown','movementLastMatched',
+    const mk=(mode,rows,terms=[])=>new Function('$','esc','money','movementBreakdown','movementLastMatched','movementLastTerms',
       cut(dash,'movementMonthTitle')+';'+cut(dash,'movementMonthKey')+';'+cut(dash,'movementMonthDesc')+';'+cut(dash,'movementGroups')+';'+cut(dash,'paintMovementBreakdown')+
-      ';return{paintMovementBreakdown,movementGroups}')($$,esc2,new Function(cut(dash,'money')+';return money')(),mode,rows);
+      ';return{paintMovementBreakdown,movementGroups}')($$,esc2,new Function(cut(dash,'money')+';return money')(),mode,rows,terms);
     const dateKey=new Function(cut(dash,'dateKey')+';return dateKey')();
     const D=(d,src,flow,amt)=>({when:dateKey(d),date:d,source:src,flow,amount:amt});
     const rows=[D('05.08.2026','לאומי · 800-1','debit',100),D('20.08.2026','לאומי · 800-1','credit',40),
@@ -480,6 +480,46 @@ t('שיקים: החילוץ לא מתחיל מעצמו ולא שולח כלום 
   if(/fetch\('https?:/.test(ocr)||/XMLHttpRequest/.test(ocr))return 'הקובץ פונה לרשת';
   return /LanguageModel\.create/.test(ocr)&&/session\.clone\(\)/.test(ocr)
     ||'הסשן אינו משוכפל לכל שיק — ההקשר ייערם'});
+
+// -- 1.76.0: פילוח לפי מונח חיפוש, כשיש יותר ממונח אחד --
+t('חיפוש: פילוח לפי מונח — סדר הקלדה, חפיפה נספרת, ומוצע רק מעל מונח אחד',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    if(txt.slice(i-6,i)==='async ')i-=6;
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+    throw new Error('לא נסגרה '+name)};
+  const host=document.createElement('div');host.style.display='none';
+  host.innerHTML='<div id="movementBreakdownBox"></div>';document.body.appendChild(host);
+  try{
+    const $$=sel=>document.querySelector(sel);
+    const esc2=v=>{const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;')};
+    const mk=(mode,rows,terms=[])=>new Function('$','esc','money','movementBreakdown','movementLastMatched','movementLastTerms',
+      cut(dash,'movementMonthTitle')+';'+cut(dash,'movementMonthKey')+';'+cut(dash,'movementMonthDesc')+';'+cut(dash,'movementGroups')+';'+cut(dash,'paintMovementBreakdown')+
+      ';return{paintMovementBreakdown,movementGroups}')($$,esc2,new Function(cut(dash,'money')+';return money')(),mode,rows,terms);
+    const R=(hay,src,flow,amt)=>({hay,when:0,source:src,flow,amount:amt});
+    // "ארנונה מים" מתאים לשני המונחים - וזו בדיוק החפיפה שצריך לספור פעמיים
+    // כל שורה כאן התאימה לפחות למונח אחד - כך נראה matched אמיתי.
+    const rows=[R('ארנונה גדרה','לאומי · 1','debit',100),R('תאגיד מים','לאומי · 1','debit',60),
+                R('ארנונה מים משולב','ישראכרט · 2','debit',40)];
+    const terms=['ארנונה','מים'];
+    const g=mk('term',rows,terms).movementGroups(rows,'term',terms);
+    if(g.length!==2)return 'קבוצות: '+g.length;
+    if(g[0].key!=='ארנונה'||g[1].key!=='מים')return 'לא בסדר ההקלדה: '+g.map(x=>x.key).join(',');
+    if(g[0].n!==2||g[0].debit!==140)return 'ארנונה: '+JSON.stringify(g[0]);
+    if(g[1].n!==2||g[1].debit!==100)return 'מים: '+JSON.stringify(g[1]);
+
+    mk('term',rows,terms).paintMovementBreakdown();
+    if(!$$('#movementBreakdownBox button[data-bd="term"].on'))return 'הכפתור "לפי מונח" לא סומן פעיל';
+    const head=[...document.querySelectorAll('#movementBreakdownBox thead th')].map(x=>x.textContent);
+    if(head[0]!=='מונח חיפוש')return 'כותרת העמודה: '+head[0];
+    // ⚠ 4 שורות מותאמות מול 3 שורות שנמצאו - ההערה חייבת להופיע
+    const note=$$('#movementBreakdownBox .movement-search-note');
+    if(!note||!note.textContent.includes('נספרת בכל אחד מהם'))return 'הערת החפיפה חסרה';
+
+    // מונח יחיד — הכפתור לא מוצע כלל, והמצב חוזר ל"ללא"
+    mk('term',rows,['ארנונה']).paintMovementBreakdown();
+    if(document.querySelector('#movementBreakdownBox button[data-bd="term"]'))return '"לפי מונח" הוצע על מונח יחיד';
+    return document.querySelectorAll('#movementBreakdownBox tbody tr').length===0||'פילוח צויר למרות מונח יחיד';
+  }finally{host.remove()}});
 
 // ── סיכום ──
 const ul=document.getElementById('out');

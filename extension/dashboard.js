@@ -3,7 +3,7 @@ let accounts=[],discovered=[],selectedKeys=[],syncScope='business',accountFilter
 let movementSearchTimer=null,movementSearchEpoch=0;
 // ⚠ סט ריק פירושו **כל המקורות**, ולא "אף מקור". כך פתיחה ראשונה של הלשונית
 // מציגה הכול בלי לדרוש סימון, וגם מקור חדש שנוסף אחרי סנכרון נכנס מעצמו.
-const movementSourcePick=new Set();let movementSourceSig='',movementBreakdown='none',movementLastMatched=[];
+const movementSourcePick=new Set();let movementSourceSig='',movementBreakdown='none',movementLastMatched=[],movementLastTerms=[];
 const BANK_BUTTONS=[
   {id:'business',name:'פועלים עסקי',logo:'icons/poalim-business.png',ready:true},
   {id:'private',name:'פועלים פרטי',logo:'https://www.bankhapoalim.co.il/favicon.ico',ready:true},
@@ -410,7 +410,14 @@ function movementMonthKey(r){if(!r.when)return 'ללא תאריך';const d=new D
 // ⚠ מיון החודשים: 'ללא תאריך' עוקף כל YYYY-MM במיון היורד (אותיות אחרי
 // ספרות) והתיישב בראש הטבלה. הדלי חסר-התאריך נדחף לסוף במפורש.
 function movementMonthDesc(a,b){return a==='ללא תאריך'?1:b==='ללא תאריך'?-1:String(b).localeCompare(String(a))}
-function movementGroups(matched,by){
+function movementGroups(matched,by,terms){
+ if(by==='term'){
+  // סדר ההקלדה, לא סדר הגודל: "מונח 1, מונח 2" הוא איך שטל חושב עליהם.
+  return (terms||[]).map(term=>{
+   const cur={key:term,month:'',source:term,n:0,debit:0,credit:0};
+   for(const r of matched)if(r.hay.includes(term)){cur.n++;if(r.flow==='credit')cur.credit+=r.amount;else cur.debit+=r.amount}
+   return cur});
+ }
  const g=new Map();
  for(const r of matched){
   const month=by==='source'?'':movementMonthKey(r),source=by==='month'?'':r.source,
@@ -432,11 +439,13 @@ function paintMovementBreakdown(){
  // ⚠ "לפי מקור" ו"חודש ומקור" חסרי משמעות על מקור יחיד, ולכן אינם מוצעים -
  // ואם המשתמש כבר עמד עליהם והתוצאה הצטמצמה למקור אחד, המצב חוזר ל"ללא"
  // במקום להשאיר כפתור פעיל שאין לו כפתור בסרגל.
+ const manyTerms=movementLastTerms.length>1;
  if((movementBreakdown==='source'||movementBreakdown==='both')&&!manySources)movementBreakdown='none';
+ if(movementBreakdown==='term'&&!manyTerms)movementBreakdown='none';
  const btn=(id,label)=>`<button type="button" data-bd="${id}" class="${movementBreakdown===id?'on':''}">${label}</button>`;
- const bar=`<div class="movement-breakdown-bar"><span>פילוח הסיכום:</span>${btn('none','ללא')}${btn('month','לפי חודש')}${manySources?btn('source','לפי מקור')+btn('both','חודש ומקור'):''}</div>`;
+ const bar=`<div class="movement-breakdown-bar"><span>פילוח הסיכום:</span>${btn('none','ללא')}${btn('month','לפי חודש')}${manySources?btn('source','לפי מקור')+btn('both','חודש ומקור'):''}${manyTerms?btn('term','לפי מונח חיפוש'):''}</div>`;
  if(movementBreakdown==='none'){box.innerHTML=bar;return}
- const by=movementBreakdown,rows=movementGroups(matched,by),
+ const by=movementBreakdown,rows=movementGroups(matched,by,movementLastTerms),
   tn=rows.reduce((x,r)=>x+r.n,0),td=rows.reduce((x,r)=>x+r.debit,0),tc=rows.reduce((x,r)=>x+r.credit,0),
   nums=r=>`<td>${r.n}</td><td class="bd-debit">${money(r.debit)}</td><td class="bd-credit">${money(r.credit)}</td><td>${money(r.debit-r.credit)}</td>`;
  let head,body,totalLabel;
@@ -450,12 +459,12 @@ function paintMovementBreakdown(){
    return list.map((r,i)=>`<tr>${i?'':`<th class="bd-month" rowspan="${list.length}">${esc(movementMonthTitle(m))}</th>`}<td>${esc(r.source)}</td>${nums(r)}</tr>`).join('')}).join('');
   totalLabel=`<th colspan="2">סה״כ ${order.length} חודשים · ${new Set(rows.map(r=>r.source)).size} מקורות</th>`;
  }else{
-  head=`<th>${by==='month'?'חודש':'מקור'}</th><th>תנועות</th><th>חובה</th><th>זכות</th><th>נטו</th>`;
+  head=`<th>${by==='month'?'חודש':by==='term'?'מונח חיפוש':'מקור'}</th><th>תנועות</th><th>חובה</th><th>זכות</th><th>נטו</th>`;
   body=rows.map(r=>`<tr><td>${esc(by==='month'?movementMonthTitle(r.key):r.key)}</td>${nums(r)}</tr>`).join('');
-  totalLabel=`<th>סה״כ ${rows.length} ${by==='month'?'חודשים':'מקורות'}</th>`;
+  totalLabel=`<th>סה״כ ${rows.length} ${by==='month'?'חודשים':by==='term'?'מונחים':'מקורות'}</th>`;
  }
  box.innerHTML=bar+`<div class="movement-breakdown-table"><table><thead><tr>${head}</tr></thead><tbody>${body}`
-  +`<tr class="bd-total">${totalLabel}<th>${tn}</th><th>${money(td)}</th><th>${money(tc)}</th><th>${money(td-tc)}</th></tr></tbody></table></div>`;
+  +`<tr class="bd-total">${totalLabel}<th>${tn}</th><th>${money(td)}</th><th>${money(tc)}</th><th>${money(td-tc)}</th></tr></tbody></table></div>`  +(by==='term'&&tn!==matched.length?`<div class="movement-search-note">הסכום כאן (${tn}) גדול מ-${matched.length} התנועות שנמצאו: תנועה שמתאימה ליותר ממונח אחד נספרת בכל אחד מהם.</div>`:'');
 }
 function scheduleMovementSearch(){clearTimeout(movementSearchTimer);movementSearchTimer=setTimeout(renderMovementSearch,220)}
 async function renderMovementSearch(){
@@ -475,7 +484,7 @@ async function renderMovementSearch(){
  const debitRows=matched.filter(r=>r.flow==='debit'),creditRows=matched.filter(r=>r.flow==='credit'),debitSum=debitRows.reduce((s,r)=>s+r.amount,0),creditSum=creditRows.reduce((s,r)=>s+r.amount,0),sum=debitSum+creditSum;
  if(!matched.length){box.className='empty';box.textContent='לא נמצאו תנועות שמתאימות לחיפוש.';return}const capped=matched.length>filtered.length;box.className='movement-search-table';const perTerm=terms.length>1?terms.map(term=>({term,n:matched.filter(r=>r.hay.includes(term)).length})):[];
  box.innerHTML=`<div class="movement-search-summary"><span>נמצאו ${matched.length} תנועות</span><span>סכום מצטבר ${money(sum)}</span></div>${perTerm.length?`<div class="movement-search-terms">${perTerm.length} מונחי חיפוש · ${perTerm.map(x=>`<span class="mterm">${esc(x.term)} <b>${x.n}</b></span>`).join('')}</div>`:''}<table><thead><tr><th>תאריך</th><th>ספק / לקוח / פעולה</th><th>מקור</th><th>סוג</th><th>סכום</th></tr></thead><tbody>${filtered.map(r=>`<tr><td>${esc(r.date||'')}</td><td><b>${esc(r.name||'ללא פירוט')}</b>${r.payer?` <span class="payer-tag">מוסר: ${esc(r.payer)}</span>`:''}${r.fresh?' <span class="new-tag">חדש</span>':''}${r.cheque?` <button type="button" class="cheque-view" data-cheque="${esc(r.cheque)}" data-date="${esc(r.date||'')}" title="צילום השיק שמור מקומית — נפתח גם בלי חיבור לבנק">צילום שיק</button>${chequeNoteHtml(r.cheque)}`:''}</td><td>${esc(r.source)}</td><td>${esc(r.kind)}</td><td>${money(r.amount)}</td></tr>`).join('')}</tbody><tfoot><tr><th colspan="4">סה״כ ${matched.length} תנועות</th><th>${money(sum)}</th></tr></tfoot></table><div class="movement-search-total"><span class="mst-debit">חובה · ${debitRows.length} תנועות · ${money(debitSum)}</span><span class="mst-credit">זכות · ${creditRows.length} תנועות · ${money(creditSum)}</span><span>נטו (חובה פחות זכות) · ${money(debitSum-creditSum)}</span></div><div id="movementBreakdownBox"></div>${capped?`<div class="movement-search-note">מוצגות ${filtered.length} התנועות האחרונות מתוך ${matched.length}; הסיכום כולל את כולן.</div>`:''}`;
- movementLastMatched=matched;paintMovementBreakdown();
+ movementLastMatched=matched;movementLastTerms=terms;paintMovementBreakdown();
 }
 function renderSelection(){const box=$('#discoveredAccounts'),tab=$('#selectionTab');
 // ⚠ הפאנל כבר לא מסתתר מעצמו — הלשונית שולטת בהצגה. קודם הוא נעלם כשלא היו חשבונות
