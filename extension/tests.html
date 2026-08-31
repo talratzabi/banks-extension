@@ -671,7 +671,7 @@ t('שיקים: סוג המוסר נשמר ומוצג',()=>{
   return /CHQ_STAMP_ASK/.test(ocr)&&/אין חותמת/.test(ocr)
     &&/meta\[id\]=\{kind:r\.kind\|\|'',stamp:r\.stamp\|\|''\}/.test(ocr)
     &&/chequePayerMeta/.test(dash)&&/אושר מול החותמת/.test(dash)
-    &&/בלי חותמת — שיק פרטי/.test(dash)
+    &&/לא נמצאה חותמת — שיק פרטי/.test(dash)
     ||'סוג המוסר אינו נשמר או אינו מוצג'});
 
 // -- 1.81.0: פלט המודל ירד מדרגה מ"עובדה" ל"הצעה" --
@@ -689,7 +689,7 @@ t('שיקים: המודל אינו כותב שמות לחיפוש, רק הצעו
   if(!/class="payer-guess"/.test(dash))return 'הצעה אינה מסומנת כהצעה';
   // ⚠ הגירה: מה שנשמר בגרסאות הקודמות יורד לדרגת הצעה, בלי למחוק דבר
   if(!/chequePayerReviewed/.test(dash))return 'אין הגירה לשמות שכבר נשמרו';
-  return /payerQueue\.splice\(payerAt,1\)/.test(dash)||'אישור אינו מסיר מהתור'});
+  return /payerQueue=payerQueue\.filter\(/.test(dash)||'אישור אינו מסיר מהתור'});
 
 t('שיקים: תור האישור מתנהג נכון',()=>{
   const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
@@ -698,6 +698,51 @@ t('שיקים: תור האישור מתנהג נכון',()=>{
     ({'a|1':{name:'x'},'a|2':{name:'y'},'a|3':{name:''}},{'a|2':'אושר'})();
   // מה שטל כבר אישר יוצא מהתור; הצעה ריקה נשארת — היא עדיין דורשת הכרעה
   return pending.join(',')==='a|1,a|3'||'תור שגוי: '+pending.join(',')});
+
+// -- 1.83.0: הקיבוץ האוטומטי נמדד ונפסל; נשאר דירוג + הכרעה של טל --
+{
+ const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+   if(txt.slice(i-6,i)==='async ')i-=6;
+   let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+   throw new Error('לא נסגרה '+name)};
+ let bad=[];
+ try{
+  const M=new Function('chrome','chequeKeys','chequeGet',ocr+
+    ';return{chequeBlockHash,chequeHashDistance,chequeSimilarRanked}')({storage:{local:{get:async d=>d,set:async()=>{}}}},null,null);
+  const draw=(lines,bright,shift)=>{const c=document.createElement('canvas');c.width=700;c.height=300;const g=c.getContext('2d');
+   g.fillStyle='#fff';g.fillRect(0,0,700,300);g.fillStyle=`rgba(0,0,0,${0.85*bright})`;g.font='bold 20px sans-serif';g.textAlign='right';
+   lines.split('|').forEach((l,i)=>g.fillText(l,690-shift,34+i*26));return c.toDataURL('image/png')};
+  const A='ועד מקומי מושב יד-נתן|יד נתן 237|טל 08-6848678';
+  const B='פרידמן מאיר, פרידמן שושנה|כפר אחים 49|טל 0526361601';
+  const a1=await M.chequeBlockHash(draw(A,1,0)),a2=await M.chequeBlockHash(draw(A,0.7,2)),b1=await M.chequeBlockHash(draw(B,1,0));
+  if(a1.length!==64)bad.push('הטביעה אינה 256 סיביות: '+a1.length*4);
+  if(M.chequeHashDistance(a1,'')!==256)bad.push('טביעה חסרה אינה מרחק מרבי');
+  // ⚠ הדירוג חייב להעדיף את אותו מוסר, גם כשאין סף שמפריד מוחלטית
+  const ranked=M.chequeSimilarRanked({x:a1,same:a2,other:b1},'x',8);
+  if(ranked[0]?.id!=='same')bad.push('הדירוג לא העדיף את אותו מוסר: '+JSON.stringify(ranked));
+  if(ranked.length!==2)bad.push('דירוג החזיר '+ranked.length+' במקום 2');
+  // ⚠⚠ אסור שיישאר סף אוטומטי כלשהו
+  if(/CHQ_SAME_ACCOUNT/.test(ocr))bad.push('סף הקיבוץ האוטומטי עדיין בקובץ');
+  if(/chequeSameAccount/.test(ocr)||/chequeSameAccount/.test(dash))bad.push('פונקציית הקיבוץ האוטומטי עדיין קיימת');
+  if(/applyKnownPayers/.test(dash))bad.push('ההחלה האוטומטית על שיקים חדשים עדיין קיימת');
+ }catch(e){bad.push('חריגה: '+e.message)}
+ t('שיקים: דמיון מדרג מועמדים, ואינו מקבץ לבד',()=>!bad.length||bad.join(' · '));
+}
+
+t('שיקים: ההחלה על קבוצה דורשת סימון, והבנק נלווה לשם',()=>{
+  const save=dash.slice(dash.indexOf('save.onclick=async()=>{'),dash.indexOf('skip.onclick'));
+  // ⚠ מוחל רק על מה שסומן בעין, ורק כשיש שם
+  if(!/const picked=\[\.\.\.grid\.querySelectorAll\('input:checked'\)\]/.test(save))return 'ההחלה אינה נגזרת מסימון';
+  if(!/if\(name\)for\(const other of picked\)/.test(save))return 'שם ריק מוחל על הקבוצה';
+  if(!/chequePayerBank\[other\]=bk/.test(save))return 'הבנק אינו מוחל עם השם';
+  if(!/הוחל גם על \$\{spread\}/.test(save))return 'ההחלה שקטה — אין דיווח';
+  const paint=dash.slice(dash.indexOf('async function paintPayerReview'),dash.indexOf('function closePayerReview'));
+  if(!/pr-grid/.test(paint))return 'המועמדים אינם מוצגים כתמונות';
+  if(!/PAYER_BANKS/.test(paint))return 'אין בורר בנק';
+  if(/cb\.checked=true/.test(paint))return 'מועמד מסומן מראש — הסימון חייב להיות הכרעה';
+  // צבע: אדום = לא אושר, ירוק = אושר (בקשת טל)
+  if(!/\.payer-guess\{[^}]*#fdecec/.test(dash))return 'תגית לא-מאושרת אינה אדומה';
+  return /\$\{payerBank\}/.test(dash)||'בנק המוסר אינו נכנס לחיפוש'});
 
 // ── סיכום ──
 const ul=document.getElementById('out');

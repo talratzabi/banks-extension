@@ -183,3 +183,84 @@ async function chequeOcrRunAll({onProgress,onDownload,limit=0,retryDoubt=false}=
   }finally{try{session.destroy()}catch(e){}}
   return{total:ids.length,done,found,unsure,already:Object.keys(payers).length,pending:Object.keys(guess).length};
 }
+
+// ── קיבוץ שיקים לפי החשבון, בלי OCR ────────────────────────────────────
+// ⚠⚠ תובנה של טל (31.08.2026): "רוב השיקים חוזרים על עצמם. אם אישרתי אחד
+// ובחשבון הבנק זהה - זה צריך אוטומטית להחיל על כל השיקים מאותו חשבון."
+//
+// **המפתח: הבלוק המודפס בפינה הימנית-העליונה הוא אותה הדפסה פיזית בכל
+// שיק של אותו חשבון.** לכן אפשר לקבץ לפי **התמונה עצמה** ולא לפי טקסט -
+// וזה עוקף לגמרי את החולשה שהתגלתה: המודל ממציא שמות, אבל טביעת אצבע
+// חזותית היא חישוב דטרמיניסטי שאפשר לבדוק.
+//
+// dHash: הקטנה ל-17x16 אפור, והשוואת כל פיקסל לשכנו מימין -> 256 סיביות.
+// ⚠⚠ **נמדד ונדחה: 8x8 (64 סיביות) לא הפריד בין מוסרים.** בבדיקה חיה שני
+// בלוקים של מוסרים **שונים** קיבלו מרחק 4, בעוד שני צילומים של **אותו**
+// בלוק קיבלו 5 - כלומר הסף היה מקבץ את הזרים ודוחה את הזהים. ברזולוציה
+// כזאת כל בלוק עברי נראה "טקסט כהה על לבן באותן שורות".
+// עמיד לשינויי בהירות וניגודיות (הוא משווה שכנים, לא ערכים מוחלטים),
+// ולכן צילום בתאורה אחרת מייצר טביעה כמעט זהה.
+// ⚠ **אינו עמיד לסיבוב.** צילום נטוי מאוד ייתן טביעה רחוקה, והשיק פשוט
+// לא יקובץ - כלומר יידרש אישור ידני. זו נפילה בטוחה, לא שיוך שגוי.
+async function chequeBlockHash(front,box=CHQ_CROP){
+  const blob=await chequeCropTopRight(front,box);
+  const bmp=await createImageBitmap(blob);
+  const W=17,H=16;
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const g=c.getContext('2d',{willReadFrequently:true});
+  g.drawImage(bmp,0,0,W,H);
+  const px=g.getImageData(0,0,W,H).data;
+  const grey=[];
+  for(let i=0;i<px.length;i+=4)grey.push(0.299*px[i]+0.587*px[i+1]+0.114*px[i+2]);
+  let bits='';
+  for(let y=0;y<H;y++)for(let x=0;x<W-1;x++)bits+=grey[y*W+x]>grey[y*W+x+1]?'1':'0';
+  // הקסה, כדי שהמפתח יהיה קצר באחסון
+  let hex='';
+  for(let i=0;i<bits.length;i+=4)hex+=parseInt(bits.slice(i,i+4),2).toString(16);
+  return hex;
+}
+const CHQ_HASH_HEX=64;// 256 סיביות
+function chequeHashDistance(a,b){
+  const x=String(a||''),y=String(b||'');
+  // ⚠ טביעה חסרה או באורך אחר (כולל טביעות 64-סיביות מגרסה 1.82.0)
+  // מוחזרת כמרחק מרבי - כלומר "לא מקובץ", ולא כהתאמה מקרית.
+  if(x.length!==CHQ_HASH_HEX||y.length!==CHQ_HASH_HEX)return 256;
+  let d=0;
+  for(let i=0;i<CHQ_HASH_HEX;i++){
+    let v=parseInt(x[i],16)^parseInt(y[i],16);
+    while(v){d+=v&1;v>>=1}
+  }
+  return d;
+}
+// ⚠⚠⚠ **הקיבוץ האוטומטי נמדד ונפסל.** 31.08.2026, שישה בלוקים מודפסים:
+//   אותו מוסר (תאורה/היסט שונים): מרחקים 17, 28, 28
+//   מוסרים שונים:                  מרחקים 22, 34, 28
+// **הטווחים חופפים.** אין שום סף שמקבץ את הזהים בלי לקבץ גם זרים, ולכן
+// כל "החלה אוטומטית" כאן הייתה מורחת שם של מוסר אחד על שיקים של אחר -
+// בשקט, בלי שאיש רואה. הגדלת הטביעה מ-64 ל-256 סיביות שיפרה, ולא פתרה.
+//
+// **מה שנשאר בתוקף:** הדמיון עדיין מדרג מועמדים היטב, והוא משמש **לסידור
+// בלבד**. ההכרעה מי מהם באמת אותו חשבון היא של טל, מול התמונות עצמן -
+// לחיצה אחת מכסה עשרה שיקים, בלי אף שיוך שאיש לא ראה.
+function chequeSimilarRanked(hashes,id,limit=8){
+  const h=hashes[id];if(!h)return [];
+  return Object.keys(hashes).filter(k=>k!==id&&hashes[k])
+    .map(k=>({id:k,d:chequeHashDistance(h,hashes[k])}))
+    .sort((a,b)=>a.d-b.d).slice(0,limit);
+}
+
+// טביעה לכל צילום שאין לו עדיין. חישוב מקומי בלבד - בלי מודל, בלי רשת.
+async function chequeHashAll({onProgress}={}){
+  const st=await chrome.storage.local.get({chequeHashes:{}}),hashes=st.chequeHashes||{};
+  const ids=[...await chequeKeys()].filter(id=>!hashes[id]);
+  let done=0;
+  for(const id of ids){
+    const rec=await chequeGet(id).catch(()=>null);
+    done++;
+    if(rec?.front){try{hashes[id]=await chequeBlockHash(rec.front)}catch(e){}}
+    if(done%10===0)await chrome.storage.local.set({chequeHashes:hashes});
+    onProgress?.({done,total:ids.length});
+  }
+  await chrome.storage.local.set({chequeHashes:hashes});
+  return{computed:ids.length,total:Object.keys(hashes).length};
+}
