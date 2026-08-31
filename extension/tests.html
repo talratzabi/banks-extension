@@ -943,37 +943,55 @@ t('שיקים: אין הגירה שמורידה שמות, וכל מקור מסו
   const saves=(dash.match(/chequePayerSource\}\)/g)||[]).length+(dash.match(/chequePayerSource,/g)||[]).length;
   return saves>=5||`המקור נשמר רק ב-${saves} מקומות`});
 
-// -- 1.92.0: "אני מסנכרן בינלאומי ורואה חשבונות של לאומי?" --
-t('בחירה: הבנק שזוהה אחרון למעלה, השאר מקופל',()=>{
+// -- 1.93.0: רק הבנק שמתחברים אליו מופיע בבורר --
+t('בחירה: הבנק הנוכחי נקבע במפורש, וזיהוי טרי גובר על "כבר שמור"',()=>{
   const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
     let p=txt.indexOf('(',txt.indexOf(name,i)),d=0,j=p;
     for(;j<txt.length;j++){if(txt[j]==='(')d++;else if(txt[j]===')'&&!--d)break}
     let b=txt.indexOf('{',j),k=b,e=0;
     for(;k<txt.length;k++){if(txt[k]==='{')e++;else if(txt[k]==='}'&&!--e)return txt.slice(i,k+1)}};
-  const mk=disc=>new Function('accounts','discovered',
-    cut(dash,'savedAccountKeys')+';'+cut(dash,'pendingDiscovered')+';'+cut(dash,'splitDiscovered')+';return splitDiscovered')([],disc)();
-  // בינלאומי זוהה עכשיו; לאומי יושב מלפני יומיים
+  const mk=(accts,disc,focus)=>new Function('accounts','discovered','chooserFocus',
+    cut(dash,'savedAccountKeys')+';'+cut(dash,'pendingDiscovered')+';'+cut(dash,'splitDiscovered')+';return splitDiscovered')(accts,disc,focus)();
   const disc=[
-   {key:'leumi|921-684000',source:'leumi',sourceLabel:'לאומי',branch:'921',accountNumber:'684000',at:1000},
-   {key:'leumi|928-24630',source:'leumi',sourceLabel:'לאומי',branch:'928',accountNumber:'24630',at:1000},
-   {key:'fibi|62-206601',source:'fibi',sourceLabel:'הבינלאומי',branch:'62',accountNumber:'206601',at:9000}];
-  let r=mk(disc);
-  if(r.current.map(a=>a.source).join()!=='fibi')return 'הבנק הנוכחי אינו הבינלאומי: '+JSON.stringify(r.current.map(a=>a.key));
-  if(r.older.length!==2)return 'לאומי לא ירד לסעיף המקופל: '+r.older.length;
-  if(r.label!=='הבינלאומי')return 'תווית שגויה: '+r.label;
-  // ⚠ שני חשבונות של אותו בנק נשארים יחד — זיהוי אחד מייצר אותם ברגע אחד
-  r=mk([{key:'leumi|1',source:'leumi',at:5000},{key:'leumi|2',source:'leumi',at:5000}]);
-  if(r.current.length!==2||r.older.length)return 'חשבונות של אותו בנק פוצלו';
-  // ⚠ רשומות ישנות בלי חותם (מלפני הגרסה) — לא נעלמות, כולן מוצגות
-  r=mk([{key:'leumi|1',source:'leumi'},{key:'mizrahi|1',source:'mizrahi'}]);
-  if(r.current.length!==2)return 'רשומות בלי חותם נעלמו: '+JSON.stringify(r);
-  if(mk([]).current.length)return 'רשימה ריקה החזירה משהו';
-  // ⚠ הסעיף המקופל חייב להציג את **אותה** שורה, עם תיבת סימון פעילה
-  if(!/const choiceRow=/.test(dash))return 'שורת הבחירה לא הוצאה לפונקציה משותפת';
-  if(!/split\.older\.map\(choiceRow\)/.test(dash))return 'הסעיף המקופל אינו משתמש באותה שורה';
-  // הלשונית סופרת את הכול, כדי ששום דבר לא ייעלם מהעין
-  return /totalPending=discovered\.length\+split\.older\.length/.test(dash)
-    ||'מונה הלשונית אינו כולל את המקופלים'});
+   {key:'leumi|921-684000',source:'leumi',sourceLabel:'לאומי',branch:'921',accountNumber:'684000',at:9000},
+   {key:'discount-private|015-0497352',source:'discount-private',sourceLabel:'דיסקונט פרטי',branch:'015',accountNumber:'0497352',at:1000},
+   {key:'discount-private|016-3327612',source:'discount-private',sourceLabel:'דיסקונט פרטי',branch:'016',accountNumber:'3327612',at:1000}];
+  // ⚠⚠ המקרה של טל: לאומי נושא את החותם הגדול, אבל הוא התחבר לדיסקונט.
+  // הפרוקסי (חותם זמן) הצביע על הבנק הלא נכון — הכוונה המפורשת מנצחת.
+  let r=mk([],disc,{source:'discount-private',at:1});
+  if(r.current.length!==2||r.current[0].source!=='discount-private')
+    return 'הכוונה המפורשת לא ניצחה את חותם הזמן: '+JSON.stringify(r.current.map(a=>a.key));
+  // ⚠⚠ והמקרה השני: חשבון דיסקונט **שכבר סונכרן** חייב להופיע כשמתחברים
+  // שוב לאותו בנק. הסינון מ-1.91.0 בלע אותו והמסך נראה ריק.
+  const saved=[{source:'discount-private',selectionKey:'discount-private|015-0497352',branch:'015',accountNumber:'0497352'}];
+  r=mk(saved,disc,{source:'discount-private',at:1});
+  if(r.current.length!==2)return 'חשבון שכבר סונכרן לא הופיע בזיהוי טרי: '+r.current.length;
+  // אבל בלי מיקוד על אותו בנק — הוא עדיין יורד מהבורר (ההתנהגות מ-1.91.0)
+  r=mk(saved,disc,{source:'leumi',at:1});
+  if(r.current.map(a=>a.key).join()!=='leumi|921-684000')return 'המיקוד על לאומי לא בודד אותו: '+JSON.stringify(r.current.map(a=>a.key));
+  if(!r.older.some(a=>a.key==='discount-private|016-3327612'))return 'השאר לא סווג כישן';
+  if(r.older.some(a=>a.key==='discount-private|015-0497352'))return 'חשבון שמור לא-במיקוד לא סונן';
+  // בלי מיקוד כלל — נפילה לאחור לחותם הזמן
+  r=mk([],disc,null);
+  if(r.current[0]?.source!=='leumi')return 'נפילה לאחור לחותם נכשלה';
+  // ⚠⚠ מיקוד על בנק **בלי ממתינים** אינו נופל אחורה לבנק אחר — זו בדיוק
+  // התלונה של טל. התשובה חייבת להיות "אין", ולא חשבונות של לאומי.
+  r=mk([],disc,{source:'yahav',at:1});
+  if(r.current.length)return 'בנק בלי ממתינים הציג חשבונות של בנק אחר: '+JSON.stringify(r.current.map(a=>a.key));
+  if(r.older.length!==disc.length)return 'השאר לא סווג כישן';
+  return true});
+
+t('בחירה: הבורר מציג את הבנק הנוכחי בלבד',()=>{
+  // ⚠ טל, מפורשות: "כל בנק שאני מסנכרן, רק החשבונות שלו בחיבור צריכים
+  // להופיע, לא חשבונות של בנקים אחרים." הסעיף המקופל מ-1.92.0 נדחה.
+  const sel=dash.slice(dash.indexOf('function renderSelection'),dash.indexOf('function updateSelectionCount'));
+  if(/older-choices/.test(sel))return 'הסעיף המקופל עדיין מרונדר';
+  if(/split\.older\.map\(choiceRow\)/.test(sel))return 'חשבונות מבנקים אחרים עדיין מוצגים';
+  if(!/box\.innerHTML=discovered\.map\(choiceRow\)\.join\(''\);/.test(sel))return 'הרינדור אינו של הבנק הנוכחי בלבד';
+  // המונה סופר את המוצג בלבד
+  if(/totalPending/.test(sel))return 'המונה עדיין כולל בנקים שאינם על המסך';
+  // ⚠ אבל המידע לא נמחק — במסך הריק נאמר כמה ממתינים בבנקים אחרים
+  return /חשבונות מבנקים אחרים ממתינים/.test(sel)||'לא נאמר למשתמש שקיימים ממתינים בבנקים אחרים'});
 
 // -- 1.91.0: הבורר מתרוקן בסיום הסנכרון, בלי להחזיר שתי תקלות עבר --
 t('בחירה: חשבון שכבר נשמר יורד מהבורר',()=>{
@@ -982,8 +1000,8 @@ t('בחירה: חשבון שכבר נשמר יורד מהבורר',()=>{
     for(;j<txt.length;j++){if(txt[j]==='(')d++;else if(txt[j]===')'&&!--d)break}
     let b=txt.indexOf('{',j),k=b,e=0;
     for(;k<txt.length;k++){if(txt[k]==='{')e++;else if(txt[k]==='}'&&!--e)return txt.slice(i,k+1)}};
-  const mk=(accts,disc)=>new Function('accounts','discovered',
-    cut(dash,'savedAccountKeys')+';'+cut(dash,'pendingDiscovered')+';return pendingDiscovered')(accts,disc)();
+  const mk=(accts,disc)=>new Function('accounts','discovered','chooserFocus',
+    cut(dash,'savedAccountKeys')+';'+cut(dash,'pendingDiscovered')+';return pendingDiscovered')(accts,disc,null)();
   const leumiSaved={source:'leumi',selectionKey:'leumi|921-348300',branch:'921',accountNumber:'348300'};
   const disc=[
     {key:'leumi|921-348300',source:'leumi',branch:'921',accountNumber:'348300'},

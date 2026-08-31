@@ -601,7 +601,7 @@ async function discover(tabId,source){
     await prepareRoute(tabId,route(source,'current-account/transactions'),'/current-account/transactions');await chrome.storage.local.set({syncStatus:`מזהה חשבונות ב${SOURCES[source].label}`});
     const r=await chrome.tabs.sendMessage(tabId,{type:'DISCOVER_ACCOUNTS'});if(!r?.ok)throw Error(r?.error||'גילוי החשבונות נכשל');
     const latest=await chrome.storage.local.get({discoveredAccounts:[],pendingSources:[]});const others=latest.discoveredAccounts.filter(a=>a.source!==source);const found=r.accounts.map(a=>({...a,source,sourceLabel:SOURCES[source].label,key:`${source}|${a.key}`,at:Date.now()}));const pending=latest.pendingSources.filter(x=>x!==source);
-    const combined=[...others,...found];await chrome.storage.local.set({discoveredAccounts:combined,pendingSources:pending,syncStatus:pending.length?`התחבר גם אל ${SOURCES[pending[0]].label}`:'בודק אם נדרשת בחירת חשבונות'});
+    const combined=[...others,...found];await chrome.storage.local.set({discoveredAccounts:combined,chooserFocus:{source,at:Date.now()},pendingSources:pending,syncStatus:pending.length?`התחבר גם אל ${SOURCES[pending[0]].label}`:'בודק אם נדרשת בחירת חשבונות'});
     // אין סנכרון אוטומטי, גם לא כשנמצא חשבון יחיד. הבחירה היא של המשתמש, תמיד.
 if(!pending.length){await chrome.storage.local.set({syncStatus:`נמצאו ${combined.length} חשבונות — בחר אילו לסנכרן ואשר`});await chrome.runtime.openOptionsPage()}
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה ב${SOURCES[source].label}: ${e.message}`});await chrome.runtime.openOptionsPage()}
@@ -1389,7 +1389,7 @@ if(!r)throw Error(`אין חיבור לעמוד לאומי אחרי 5 ניסיו
 if(!r?.ok){try{await chrome.storage.local.set({leumiDebug:{stage:'discover',error:r?.error||'',text:dbgText('',r?.debug),...(r?.debug||{})}})}catch{}
 throw Error(r?.error||'זיהוי חשבונות לאומי נכשל')}const others=state.discoveredAccounts.filter(a=>a.source!=='leumi'),found=r.accounts.map(a=>({...a,source:'leumi',sourceLabel:'לאומי',key:`leumi|${a.key}`,at:Date.now()}));// כשהזיהוי מחזיר חשבון בודד, שומרים את צילום הרשימה הנפתחת — שם התשובה למה השאר חסרים.
 if(found.length<2&&r.optionProbe)await chrome.storage.local.set({leumiOptionProbe:r.optionProbe});
-await chrome.storage.local.set({pendingLeumi:false,leumiAttempts:0,discoveredAccounts:[...others,...found],syncStatus:`נמצאו ${found.length} חשבונות בלאומי${r.strategy?` (${r.strategy})`:''} — בחר אילו לסנכרן ואשר`});await chrome.runtime.openOptionsPage()}
+await chrome.storage.local.set({pendingLeumi:false,leumiAttempts:0,discoveredAccounts:[...others,...found],chooserFocus:{source:'leumi',at:Date.now()},syncStatus:`נמצאו ${found.length} חשבונות בלאומי${r.strategy?` (${r.strategy})`:''} — בחר אילו לסנכרן ואשר`});await chrome.runtime.openOptionsPage()}
 const LEUMI_TX_URL='https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/nis-accounts/nis-transactions/',LEUMI_LOAN_URL='https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/credits/loans/';
 // ⚠ LEUMI_PING עונה מכל דף ב-hb2, כולל gate-keeper. בלי בדיקת הנתיב הקוד המשיך לדף השגוי
 // ודיווח "לא נמצאה רשימת החשבונות" במקום פשוט לנווט שוב.
@@ -2321,7 +2321,7 @@ return{ok:true,status:'waiting_login'}}
 async function handleDiscountAuthenticated(tabId){const state=await chrome.storage.local.get({pendingDiscountBusiness:false,pendingDiscountPrivate:false});
 if(state.pendingDiscountPrivate){await discoverDiscountPrivate(tabId);return}
 if(state.pendingDiscountBusiness){await chrome.storage.local.set({syncStatus:'דיסקונט עסקי: מזהה ישויות וחשבונות'});await discoverDiscountBusiness(tabId)}}
-async function discoverDiscountPrivate(tabId){try{await chrome.storage.local.set({syncStatus:'דיסקונט פרטי: מזהה את החשבון הפעיל'});await prepareDiscountContent(tabId);const r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_PRIVATE_DISCOVER'}),30000,'זיהוי חשבון פרטי');if(!r?.ok)throw Error(r?.error||'החשבון הפרטי לא זוהה');const state=await chrome.storage.local.get({discoveredAccounts:[]});const others=state.discoveredAccounts.filter(a=>a.source!=='discount-private');const found=(r.accounts||[]).map(a=>({...a,source:'discount-private',sourceLabel:'דיסקונט פרטי',key:`discount-private|${a.key}`,balance:null,at:Date.now()}));if(!found.length)throw Error('לא נמצא מספר חשבון בדף');await chrome.storage.local.set({pendingDiscountPrivate:false,discountPrivateTabId:tabId,discoveredAccounts:[...others,...found],syncStatus:`דיסקונט פרטי: נמצא ${found.length} חשבון — בחר ואשר סנכרון`});await chrome.runtime.openOptionsPage()}catch(e){await chrome.storage.local.set({pendingDiscountPrivate:false,syncStatus:`שגיאה בדיסקונט פרטי: ${e.message}`});await chrome.runtime.openOptionsPage()}}
+async function discoverDiscountPrivate(tabId){try{await chrome.storage.local.set({syncStatus:'דיסקונט פרטי: מזהה את החשבון הפעיל'});await prepareDiscountContent(tabId);const r=await withTimeout(chrome.tabs.sendMessage(tabId,{type:'DISCOUNT_PRIVATE_DISCOVER'}),30000,'זיהוי חשבון פרטי');if(!r?.ok)throw Error(r?.error||'החשבון הפרטי לא זוהה');const state=await chrome.storage.local.get({discoveredAccounts:[]});const others=state.discoveredAccounts.filter(a=>a.source!=='discount-private');const found=(r.accounts||[]).map(a=>({...a,source:'discount-private',sourceLabel:'דיסקונט פרטי',key:`discount-private|${a.key}`,balance:null,at:Date.now()}));if(!found.length)throw Error('לא נמצא מספר חשבון בדף');await chrome.storage.local.set({pendingDiscountPrivate:false,discountPrivateTabId:tabId,discoveredAccounts:[...others,...found],chooserFocus:{source:'discount-private',at:Date.now()},syncStatus:`דיסקונט פרטי: נמצא ${found.length} חשבון — בחר ואשר סנכרון`});await chrome.runtime.openOptionsPage()}catch(e){await chrome.storage.local.set({pendingDiscountPrivate:false,syncStatus:`שגיאה בדיסקונט פרטי: ${e.message}`});await chrome.runtime.openOptionsPage()}}
 async function syncDiscountPrivate(keys){
 const state=await chrome.storage.local.get({discountPrivateTabId:null});let tab=null;if(state.discountPrivateTabId)try{tab=await chrome.tabs.get(state.discountPrivateTabId)}catch{}if(!tab){const tabs=await chrome.tabs.query({url:['https://start.telebank.co.il/apollo/retail3/*']});tab=tabs.find(t=>t.active)||tabs[0]}if(!tab)throw Error('החיבור לדיסקונט פרטי אינו פעיל');
 const saved=await chrome.storage.local.get({discoveredAccounts:[],accounts:[]}),names=new Map(saved.discoveredAccounts.filter(a=>a.source==='discount-private').map(a=>[String(a.key).replace(/^discount-private\|/,''),a.owner||a.nickname]));const out=[],now=new Date().toISOString();
@@ -2819,7 +2819,7 @@ for(const a of raw){
 // הישויות, ובהמשך מספרי החשבון מתמלאים שורה-שורה.
 const otherBanks=state.discoveredAccounts.filter(a=>a.source!=='discount-business');
 const asChoice=a=>({...a,balance:null,source:'discount-business',sourceLabel:'דיסקונט עסקי',key:`discount-business|${a.key}`,identifying:!(a.branch&&a.accountNumber),at:Date.now()});
-await chrome.storage.local.set({discoveredAccounts:[...otherBanks,...raw.map(asChoice)],syncStatus:`דיסקונט עסקי: נמצאו ${raw.length} ישויות — מזהה מספרי חשבון בלבד`});
+await chrome.storage.local.set({discoveredAccounts:[...otherBanks,...raw.map(asChoice)],chooserFocus:{source:'discount-business',at:Date.now()},syncStatus:`דיסקונט עסקי: נמצאו ${raw.length} ישויות — מזהה מספרי חשבון בלבד`});
 await chrome.runtime.openOptionsPage();
 const entityReport=[];
 for(let i=0;i<raw.length;i++){const a=raw[i],want=a.entityId||a.key;
@@ -2848,7 +2848,7 @@ const missing=raw.filter(a=>!a.branch||!a.accountNumber),resolved=raw.length-mis
 // הבאה לדיסקונט הפעילה זיהוי מחדש — כך „הסנכרון לא נגמר" הפך למצב קבוע.
 // עכשיו: מה שזוהה מוצג ונשמר, הדגל נסגר, והחסר נאמר במפורש. רק אפס זיהויים הוא כישלון.
 if(!resolved)throw Error(`אף ישות לא נטענה מתוך ${raw.length} — הרשימה החלקית לא הוצגה`);
-const found=raw.map(asChoice);await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0,discoveredAccounts:[...otherBanks,...found],syncStatus:missing.length
+const found=raw.map(asChoice);await chrome.storage.local.set({pendingDiscountBusiness:false,discountAttempts:0,discoveredAccounts:[...otherBanks,...found],chooserFocus:{source:'discount-business',at:Date.now()},syncStatus:missing.length
   ?`דיסקונט עסקי: ${resolved} מתוך ${raw.length} חשבונות זוהו — ${missing.map(a=>a.owner||a.entityId).join(', ')} טרם נטענו. בחר מה שיש, או לחץ שוב להשלמה`
   :`דיסקונט עסקי: נמצאו ואומתו ${found.length} חשבונות${seededCount?` (${seededCount} ממספרי חשבון שנשמרו בסנכרון קודם)`:''} — בחר לפי מספר חשבון`})}
 const DISCOUNT_TX_URL='https://start.telebank.co.il/apollo/business2/#/OSH_LENTRIES_ALTAMIRA';
