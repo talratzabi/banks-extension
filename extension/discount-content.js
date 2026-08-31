@@ -210,10 +210,23 @@ const PRIVATE_TRIGGER='button.commonDropdown__button,.dropdown-toggle.commonDrop
 // כך שתי רמות של אותו פריט לעולם אינן מעורבבות.
 const PRIVATE_ITEM_SETS=['li.commonDropdown__menuItem','button.commonDropdown__menuItemBtn','[role="menu"] [role="radio"]'];
 async function privateAccountOptions(deadline=0){
-  const found=()=>{for(const sel of PRIVATE_ITEM_SETS){
-    const hit=[...document.querySelectorAll(sel)];
-    if(hit.length)return hit}
-    return[]};
+  // ⚠⚠ 31.08.2026 - טל: "בדיסקונט פרטי הוא לא מזהה את כל החשבונות."
+  // **כאן ישבה יציאה מוקדמת אחרי הסלקטור הראשון שמצא משהו,**
+  // וכל מה שהסלקטורים האחרים היו מוצאים נזרק. אם רשימת הבנק מרנדרת חלק
+  // מהחשבונות ב-li וחלק אחרת, החלק השני אבד **בשקט** - בלי שגיאה, כי
+  // "נמצאו חשבונות" נראה כמו הצלחה.
+  // **התיקון: איחוד כל הסלקטורים.** זה אינו ניחוש על ה-DOM של דיסקונט:
+  // שורה שאינה חשבון מוחזרת כ-null מ-privateAccountFromRow ונזרקת ממילא,
+  // וכפילות מנוכה לפי מפתח החשבון. כלומר האיחוד יכול רק **להוסיף**
+  // חשבונות אמיתיים, לעולם לא להמציא.
+  const perSel={};
+  const found=()=>{const out=[],seen=new Set();
+    for(const sel of PRIVATE_ITEM_SETS){
+      const hit=[...document.querySelectorAll(sel)];
+      perSel[sel]=hit.length;
+      for(const el of hit){if(seen.has(el))continue;seen.add(el);out.push(el)}
+    }
+    return out};
   let rows=found();
   if(!rows.length){
     const trigger=document.querySelector(PRIVATE_TRIGGER);
@@ -227,14 +240,22 @@ async function privateAccountOptions(deadline=0){
       if(rows.length)break;
     }
   }
-  try{await chrome.storage.local.set({discountPrivateOptions:{n:rows.length,at:new Date().toISOString(),
+  // ⚠ הגשש רושם עכשיו **כמה כל סלקטור מצא בנפרד**, וכמה מהשורות נותחו
+  // בהצלחה לחשבון. בלי זה "נמצאו 2" ו"נמצאו 2 מתוך 6" נראים זהה.
+  try{await chrome.storage.local.set({discountPrivateOptions:{n:rows.length,perSel,
+    parsed:rows.map(r=>privateAccountFromRow(r)).filter(Boolean).length,at:new Date().toISOString(),
     sample:rows.slice(0,4).map(r=>String(r.textContent||'').replace(/\s+/g,' ').trim().slice(0,44))}})}catch(e){}
   return rows;
 }
 const // ⚠ הפרסור הסתמך על <p> בתוך השורה. בדף שנמדד הטקסט **מחובר**
 // („113392534רצבי טל") ואין <p>, ולכן נוספה נפילה-לאחור:
 // המספר נלקח מכל הטקסט, והבעלים הוא מה שנשאר אחרי הסרתו.
-privateAccountFromRow=row=>{const parts=[...row.querySelectorAll("p")].map(text).filter(Boolean),whole=text(row),raw=(parts[0]?.match(/\b\d{9,10}\b/)||whole.match(/\b\d{9,10}\b/)||[])[0]||"",full=raw.padStart(10,"0"),owner=parts[1]||whole.replace(raw,"").replace(/^[\s,:-]+/,"").trim()||"דיסקונט פרטי";return full?{key:`${full.slice(0,3)}-${full.slice(3)}`,nickname:owner,owner,branch:full.slice(0,3),accountNumber:full.slice(3),balance:null}:null};
+// ⚠⚠ 31.08.2026 - התנאי היה `full?`, ו-`full` הוא `raw.padStart(10,"0")`.
+// שורה **בלי ספרות כלל** נתנה raw="" ולכן full="0000000000" - ערך אמיתי
+// לכל דבר - והוחזר **חשבון מזויף 000-0000000**. זה נחשף רק כשאיחוד
+// הסלקטורים הביא שורות שאינן חשבון ("בחר חשבון", כותרת וכד'). התנאי
+// נבדק עכשיו על `raw`, שהוא ההתאמה עצמה.
+privateAccountFromRow=row=>{const parts=[...row.querySelectorAll("p")].map(text).filter(Boolean),whole=text(row),raw=(parts[0]?.match(/\b\d{9,10}\b/)||whole.match(/\b\d{9,10}\b/)||[])[0]||"",full=raw.padStart(10,"0"),owner=parts[1]||whole.replace(raw,"").replace(/^[\s,:-]+/,"").trim()||"דיסקונט פרטי";return raw?{key:`${full.slice(0,3)}-${full.slice(3)}`,nickname:owner,owner,branch:full.slice(0,3),accountNumber:full.slice(3),balance:null}:null};
 // ⚠⚠ 25.08.2026 — טל: „הסנכרון נכשל." נמדד פעמיים:
 // „שגיאה בדיסקונט פרטי: זיהוי חשבון פרטי לא השיב תוך 30 שניות".
 // **השורש — אותו באג בדיוק שעלה שבעה סבבים היום (1.10.5):**

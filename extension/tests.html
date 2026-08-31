@@ -1050,6 +1050,68 @@ t('בחירה: חשבון שזוהה אינו מסומן מאליו',()=>{
   return /selectedKeys=c\.checked\?\[\.\.\.new Set\(\[\.\.\.selectedKeys,c\.value\]\)\]/.test(dash)
     ||'סימון ידני אינו נשמר'});
 
+// -- 1.94.0: דיסקונט פרטי לא זיהה את כל החשבונות --
+{
+ const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+   if(txt.slice(i-6,i)==='async ')i-=6;
+   let p=txt.indexOf('(',txt.indexOf(name,i)),d=0,j=p;
+   for(;j<txt.length;j++){if(txt[j]==='(')d++;else if(txt[j]===')'&&!--d)break}
+   let b=txt.indexOf('{',j),k=b,e=0;
+   for(;k<txt.length;k++){if(txt[k]==='{')e++;else if(txt[k]==='}'&&!--e)return txt.slice(i,k+1)}
+   throw new Error('לא נסגרה '+name)};
+ let bad=[];
+ try{
+  const dc=await get('discount-content.js');
+  // ⚠⚠ הבאג: `if(hit.length)return hit` — הסלקטור הראשון שמצא משהו ניצח,
+  // והשאר נזרק בשקט. "נמצאו 2" נראה כמו הצלחה גם כשיש 6.
+  if(/if\(hit\.length\)return hit/.test(dc))bad.push('הסלקטור הראשון עדיין מנצח');
+  if(!/const perSel=\{\}/.test(dc))bad.push('אין ספירה לכל סלקטור בנפרד');
+  if(!/parsed:rows\.map\(r=>privateAccountFromRow\(r\)\)\.filter\(Boolean\)\.length/.test(dc))
+    bad.push('הגשש אינו מדווח כמה שורות נותחו לחשבון');
+
+  // ה-DOM האמיתי מהתקלה: חלק מהחשבונות ב-li, חלק ב-role=radio בלבד
+  const host=document.createElement('div');host.style.display='none';
+  host.innerHTML='<ul>'
+   +'<li class="commonDropdown__menuItem"><p>0150497352</p><p>רצבי טל,קידר אושר</p></li>'
+   +'<li class="commonDropdown__menuItem"><p>0163327612</p><p>רצבי טל,רצבי סופי</p></li>'
+   +'</ul><div role="menu">'
+   +'<div role="radio"><p>0151234567</p><p>חשבון שלישי</p></div>'
+   +'<div role="radio"><p>0169876543</p><p>חשבון רביעי</p></div>'
+   +'<div role="radio">לא חשבון בכלל</div>'
+   +'</div>';
+  document.body.appendChild(host);
+  try{
+   // ⚠⚠ הסלקטורים מכילים גם מרכאות כפולות וגם סוגריים מרובעים
+   // ([role="menu"] [role="radio"]), ולכן גם JSON.parse וגם [^\]]* נשברים -
+   // האחרון חתך את הסלקטור השלישי ל-'[role="menu"' והבדיקה האשימה את הקוד.
+   // העוגן הוא ה-`];` שסוגר את ההצהרה.
+   const SETS=((dc.match(/const PRIVATE_ITEM_SETS=\[(.*?)\];/)||[])[1]||'')
+     .split(/'\s*,\s*'/).map(x=>x.replace(/^'|'$/g,'')).filter(Boolean);
+   if(SETS.length!==3)bad.push('חילוץ הסלקטורים נכשל: '+JSON.stringify(SETS));
+   // האיחוד עצמו, כפי שהוא בקובץ
+   const body=cut(dc,'privateAccountOptions');
+   const foundSrc=body.slice(body.indexOf('const perSel={}'),body.indexOf('let rows=found()'));
+   const found=new Function('PRIVATE_ITEM_SETS',foundSrc+';return found')(SETS);
+   const rows=found();
+   const parse=new Function('text',(dc.match(/privateAccountFromRow=row=>\{[\s\S]*?\};/)||[''])[0].replace(/^privateAccountFromRow=/,'const privateAccountFromRow=')+'return privateAccountFromRow')
+     (el=>String(el.textContent||'').replace(/\s+/g,' ').trim());
+   const seen=new Set(),accounts=[];
+   for(const r of rows){const a=parse(r);if(!a||!a.key||seen.has(a.key))continue;seen.add(a.key);accounts.push(a)}
+   // ⚠ ארבעה חשבונות משני סוגי סלקטורים; השורה שאינה חשבון נזרקת מאליה
+   if(accounts.length!==4)bad.push('אוחדו '+accounts.length+' חשבונות במקום 4: '+JSON.stringify(accounts.map(a=>a.key)));
+   if(!accounts.some(a=>a.key==='015-0497352')||!accounts.some(a=>a.key==='016-9876543'))
+     bad.push('חסר חשבון מאחד הסלקטורים: '+JSON.stringify(accounts.map(a=>a.key)));
+   // ⚠⚠ באג אמיתי שהבדיקה הזאת חשפה: שורה בלי ספרות ייצרה חשבון מזויף
+   // 000-0000000, כי "".padStart(10,"0") הוא ערך אמיתי לכל דבר.
+   if(accounts.some(a=>/^0+$/.test(a.branch+a.accountNumber)))
+     bad.push('שורה שאינה חשבון ייצרה חשבון מזויף: '+JSON.stringify(accounts.map(a=>a.key)));
+   // ⚠ ניכוי כפילויות: אותו אלמנט שנתפס בשני סלקטורים נספר פעם אחת
+   if(new Set(rows).size!==rows.length)bad.push('אלמנט נספר פעמיים באיחוד');
+  }finally{host.remove()}
+ }catch(e){bad.push('חריגה: '+e.message)}
+ t('דיסקונט פרטי: כל הסלקטורים מאוחדים, ולא הראשון שמצא משהו',()=>!bad.length||bad.join(' · '));
+}
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
