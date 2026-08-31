@@ -1,8 +1,8 @@
 {
   "extension/background.js": {
-    "mtime": 1788187341.365847,
-    "seen": 1788187564.4615982,
-    "ast_hash": "47b2311af5c556883b6ee4711bf74412",
+    "mtime": 1788187706.9288566,
+    "seen": 1788188468.5640752,
+    "ast_hash": "e20943cb47df3fb294d6219fd442dc6e",
     "semantic_hash": ""
   },
   "extension/btb-content.js": {
@@ -30,15 +30,15 @@
     "semantic_hash": ""
   },
   "extension/dashboard.js": {
-    "mtime": 1788187447.8800595,
-    "seen": 1788187564.4615982,
-    "ast_hash": "e85792403672f80dca4acd49155f2fc8",
+    "mtime": 1788187974.678585,
+    "seen": 1788188468.5640752,
+    "ast_hash": "ed4c165d26fd69c76126c3f9668fcca5",
     "semantic_hash": ""
   },
   "extension/discount-content.js": {
-    "mtime": 1787890856.64882,
-    "seen": 1787902538.2787333,
-    "ast_hash": "3203d956e4d560cf30c941eac3b5ea98",
+    "mtime": 1788188370.6841855,
+    "seen": 1788188468.5640752,
+    "ast_hash": "4abbf99631f64172fc0c5c37f61aec56",
     "semantic_hash": ""
   },
   "extension/fibi-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1788187448.0286746,
-    "seen": 1788187564.4615982,
-    "ast_hash": "7a24b80aa7ea067847f6bbb47bb9c76a",
+    "mtime": 1788188202.093544,
+    "seen": 1788188468.5640752,
+    "ast_hash": "460e0ad28a59c332533e18c51ddf4777",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1788187557.23729,
-    "seen": 1788187564.4615982,
-    "ast_hash": "b7940dc62e561d25573bd68a3f943db0",
+    "mtime": 1788188463.7323015,
+    "seen": 1788188468.5640752,
+    "ast_hash": "41217b6a7d47dc855d9a9ddde5118b4c",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
@@ -198,9 +198,9 @@
     "semantic_hash": ""
   },
   "extension/tests.html": {
-    "mtime": 1788187448.0286746,
-    "seen": 1788187564.4615982,
-    "ast_hash": "b02c73ee64300b926d7a627334ae03bb",
+    "mtime": 1788188383.3465428,
+    "seen": 1788188468.5640752,
+    "ast_hash": "50d12b02e941e9d6af33ffdf5b09367d",
     "semantic_hash": ""
   },
   "extension/viewer.html": {
