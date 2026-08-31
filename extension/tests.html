@@ -392,6 +392,32 @@ t('שיקים: התצוגה מסומנת כטקסט מהאתר ולא כשדה �
     &&!/מוסר השיק:/.test(dash)
     ||'התצוגה חסרה באחד המקומות, או מבטיחה שדה שלא נמדד'});
 
+// -- 1.74.0: פסיק במילת החיפוש = חיפוש נוסף --
+t('חיפוש: פסיק מפצל למונחים, והתוצאות מאוחדות',()=>{
+  const split=(dash.match(/terms=q\.split\(','\)[^;]*;/)||[])[0];
+  if(!split)return 'פיצול המונחים לא נמצא ב-dashboard.js';
+  const cond=(dash.match(/\(!terms\.length\|\|terms\.some\(term=>r\.name\.toLocaleLowerCase\('he'\)\.includes\(term\)\)\)/)||[])[0];
+  if(!cond)return 'תנאי ההתאמה אינו מאחד מונחים';
+  const mk=new Function('q','return '+split.replace(/^terms=/,'').replace(/;$/,''));
+  const match=new Function('terms','r','return '+cond+';');
+  const rows=[{name:'ארנונה עיריית גדרה'},{name:'תאגיד מים'},{name:'חשמל'},{name:'ביטוח לאומי'}];
+  const hits=q=>rows.filter(r=>match(mk(q.trim().toLocaleLowerCase('he')),r)).map(r=>r.name);
+  const cases=[
+    ['מונח יחיד','ארנונה',['ארנונה עיריית גדרה']],
+    ['שני מונחים','ארנונה, מים',['ארנונה עיריית גדרה','תאגיד מים']],
+    ['שלושה מונחים','ארנונה, מים, חשמל',['ארנונה עיריית גדרה','תאגיד מים','חשמל']],
+    ['רווחים סביב הפסיק','  ארנונה  ,   חשמל  ',['ארנונה עיריית גדרה','חשמל']],
+    ['פסיק תלוי בסוף','ארנונה,',['ארנונה עיריית גדרה']],
+    ['פסיקים ריקים','ארנונה,,,מים',['ארנונה עיריית גדרה','תאגיד מים']],
+    ['רק פסיקים = בלי סינון',' , , ',rows.map(r=>r.name)],
+    ['מונח שלא קיים','ארנונה, ירח',['ארנונה עיריית גדרה']]];
+  for(const [name,q,want] of cases){
+    const got=hits(q);
+    if(got.join('|')!==want.join('|'))return name+': '+JSON.stringify(got)+' במקום '+JSON.stringify(want);
+  }
+  return /perTerm=terms\.length>1/.test(dash)&&/movement-search-terms/.test(dash)
+    ||'מונה התוצאות לכל מונח חסר'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
