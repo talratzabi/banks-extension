@@ -1127,12 +1127,26 @@ $('#pruneCheques')?.addEventListener('click',()=>pruneOrphanCheques().catch(e=>t
 // התקדמות ולא נועלת את הדף בשקט.
 // האבחון של קציר הצילומים, מוכן להדבקה. עדיף מלבקש מטל לחפור ב-storage.
 $('#chequeAudit')?.addEventListener('click',async()=>{
- const st=await chrome.storage.local.get({leumiChequeAudit:null,leumiChequeWindows:null,leumiChequeReport:null,leumiChequeMissing:{}});
- if(!st.leumiChequeAudit)return toast('אין עדיין אבחון — הוא נכתב בסנכרון לאומי הבא');
- const text=JSON.stringify({audit:st.leumiChequeAudit,windows:st.leumiChequeWindows,
-   report:st.leumiChequeReport,missing:Object.keys(st.leumiChequeMissing||{}).length},null,1);
- try{await navigator.clipboard.writeText(text);toast(`האבחון הועתק (${st.leumiChequeAudit.rows?.length||0} שיקים)`)}
- catch(e){toast('ההעתקה נכשלה — האבחון נמצא ב-leumiChequeAudit')}
+ const st=await chrome.storage.local.get({leumiChequeAudit:null,leumiChequeWindows:null,
+   leumiChequeReport:null,leumiChequeMissing:{},chequeAuditForce:0});
+ const stored=(await chequeKeys().catch(()=>new Set())).size;
+ // ⚠ **תמיד מעתיקים משהו.** הגרסה הקודמת סירבה כשלא הייתה ביקורת חדשה
+ // והחזירה את טל בידיים ריקות, למרות שגששים ישנים כן היו במכשיר.
+ const text=JSON.stringify({
+   נכתב:new Date().toISOString(),גרסה:chrome.runtime.getManifest().version,
+   צילומים_שמורים:stored,ממתין_לאבחון:st.chequeAuditForce||0,
+   audit:st.leumiChequeAudit||'לא נכתב עדיין — נדרשת קצירה',
+   windows:st.leumiChequeWindows,report:st.leumiChequeReport,
+   missing:Object.keys(st.leumiChequeMissing||{}).length},null,1);
+ try{await navigator.clipboard.writeText(text)}catch(e){}
+ if(st.leumiChequeAudit)return toast(`האבחון הועתק (${st.leumiChequeAudit.rows?.length||0} שיקים)`);
+ // ⚠ בלי המכסה הזאת הקציר מדלג על כל שיק ששמור, ולכן לא ייכתב אבחון לעולם.
+ if(!confirm(['אין עדיין ביקורת, כי הקציר מדלג על שיקים ששמורים — ואצלך כולם שמורים.',
+   `להורות לתוסף לקצור מחדש 5 שיקים בסנכרון לאומי הבא, לצורך אבחון בלבד?`,
+   'הצילומים נשמרים תחת אותם מפתחות — שום נתון לא נמחק.'].join(String.fromCharCode(10))))
+   return toast('מה שכן היה במכשיר הועתק ללוח');
+ await chrome.storage.local.set({chequeAuditForce:5});
+ toast('סומן. הרץ סנכרון לאומי, ואז לחץ שוב על "העתקת אבחון שיקים"');
 });
 // ⚠ מחיקה מלאה, לא ניקוי יתומים: אחרי שהשיוך יתוקן צריך לקצור מחדש.
 // הקציר מוגבל ל-90 שניות לסנכרון, ולכן זה יתפרס על כמה סנכרונים.

@@ -2113,6 +2113,15 @@ const chequeSince=await collectSinceMs();
   // asked 94 - saved 64 - notFound 30, כלומר כשליש מהעבודה חוזרת לריק.
   // עכשיו נזכר מתי ניסינו, ומדלגים ל-30 יום. לא לתמיד: צילום עשוי להתווסף.
   const missingRaw=(await chrome.storage.local.get({leumiChequeMissing:{}})).leumiChequeMissing||{};
+  // ⚠⚠ 31.08.2026 - טל לחץ "העתקת אבחון" וקיבל "אין עדיין אבחון".
+  // **זו הייתה מגבלת תכנון ולא תקלה בכפתור:** הביקורת נכתבת רק בתוך קציר
+  // צילומים, והקציר מדלג על כל שיק ש-`have` כבר מכיל. אצל טל כל הצילומים
+  // שמורים (הם פשוט משויכים לא נכון) - ולכן `wanted` ריק תמיד, הקציר לא
+  // רץ אף פעם, והאבחון לא היה נכתב **לעולם**.
+  // הפתרון: מכסה מפורשת שמכריחה את הקציר לכלול מחדש כמה שיקים שכבר
+  // שמורים, לצורך אבחון בלבד. נצרכת פעם אחת ומתאפסת.
+  let auditForce=Number((await chrome.storage.local.get({chequeAuditForce:0})).chequeAuditForce)||0;
+  const auditForced=auditForce;
   // AUDIT סעיף 4: הרשומות עצמן פגות אחרי 90 יום — לא רק הדילוג. בלעדיה
   // המפה גדלה לנצח, שיק אחד בכל פעם.
   const EXPIRE_MS=90*24*3600*1000;
@@ -2124,7 +2133,8 @@ const chequeSince=await collectSinceMs();
       if(!t.cheque||!t.reference)return false;
       if(!keepSince(t.date,chequeSince))return false;
       const id=chequeId(a.selectionKey,t.reference);
-      if(have.has(id))return false;
+      // הצילום נשמר שוב תחת אותו מפתח, ולכן אין כאן נזק - רק מדידה.
+      if(have.has(id)){if(auditForce<=0)return false;auditForce--;return true}
       // WHY 28.08.2026 - טל: "לא צילם חלק מהשיקים החדשים".
       // ⚠ הזיכרון שהוספתי ב-1.38.0 רשם **כישלון אחד** כ"אין צילום" ודילג
       // ל-30 יום. אבל הריצות האחרונות נפלו על bfcache באמצע הקציר -
@@ -2136,6 +2146,7 @@ const chequeSince=await collectSinceMs();
       return true}).map(t=>({date:t.date,reference:t.reference}));
 // ניווט אחד לכל הקציר; מעבר בין חשבונות נעשה בתוך הדף ולא בטעינה מחדש.
 if(!wanted.length)continue;asked+=wanted.length;chequeCtx.selectionKey=a.selectionKey;
+if(auditForced)try{await chrome.storage.local.set({chequeAuditForce:0})}catch(e){}
 if(!routed){try{await prepareLeumiRoute(tabId,txUrl);routed=true}catch(e){why=`המעבר לדף התנועות נכשל: ${e.message}`;break}}
 // באצוות, כדי שכשל באמצע לא יזרוק את מה שכבר ירד
 for(let i=0;i<wanted.length;i+=6){if(abortFlag){why=why||ABORT_MESSAGE;break}

@@ -559,6 +559,37 @@ t('שיקים: החלון מצהיר לאיזו תנועה הצילום שויך
     &&/leumiChequeMissing:\{\}/.test(dash)
     ||'ההצהרה או כלי התחזוקה חסרים'});
 
+// -- 1.78.0: האבחון לא היה נכתב לעולם על מכשיר שכל צילומיו שמורים --
+t('שיקים: מכסת האבחון מכריחה קצירה חוזרת, ומתאפסת',()=>{
+  // ⚠ נולד מדיווח של טל: "לא עובד העתקת אבחון". הכפתור עבד; הקציר פשוט
+  // לא רץ, כי `have.has(id)` דילג על כל שיק שמור - וכולם שמורים.
+  const line=(bg.match(/if\(have\.has\(id\)\)\{[^}]*\}/)||[])[0];
+  if(!line)return 'תנאי הדילוג לא נמצא ב-background.js';
+  const decide=new Function('have','id','ctx',
+    'let auditForce=ctx.force;const r=(()=>{'+line+'return true})();ctx.force=auditForce;return r;');
+  const have=new Set(['a|1','a|2','a|3']);
+  const ctx={force:2};
+  const kept=['a|1','a|2','a|3','a|4'].filter(id=>decide(have,id,ctx));
+  if(kept.join(',')!=='a|1,a|2,a|4')return 'המכסה לא נצרכה נכון: '+kept.join(',');
+  if(ctx.force!==0)return 'המכסה לא ירדה לאפס: '+ctx.force;
+  // בלי מכסה - התנהגות זהה לקודם בדיוק
+  const ctx2={force:0};
+  const kept2=['a|1','a|4'].filter(id=>decide(have,id,ctx2));
+  if(kept2.join(',')!=='a|4')return 'בלי מכסה ההתנהגות השתנתה: '+kept2.join(',');
+  if(!/chequeAuditForce:0/.test(bg))return 'המכסה אינה מתאפסת אחרי הקציר';
+  return /let auditForce=Number\(\(await chrome\.storage\.local\.get\(\{chequeAuditForce:0\}\)\)/.test(bg)
+    ||'המכסה אינה נקראת מהאחסון'});
+
+t('שיקים: כפתור האבחון תמיד מעתיק משהו',()=>{
+  const h=dash.slice(dash.indexOf("$('#chequeAudit')"),dash.indexOf("$('#clearCheques')"));
+  if(!h)return 'המטפל לא נמצא';
+  // ⚠ סירוב שמחזיר את טל בידיים ריקות הוא באג בפני עצמו.
+  if(/return toast\('אין עדיין אבחון/.test(h))return 'הכפתור עדיין מסרב להעתיק';
+  const before=h.indexOf('clipboard.writeText'),gate=h.indexOf('if(st.leumiChequeAudit)return toast');
+  if(before<0||gate<0||before>gate)return 'ההעתקה אינה קודמת לבדיקת קיום הביקורת';
+  return /chequeAuditForce:5/.test(h)&&/confirm\(/.test(h)&&/צילומים_שמורים/.test(h)
+    ||'חסרה הצעת הקצירה החוזרת או ספירת הצילומים'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
