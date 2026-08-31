@@ -17,6 +17,7 @@ const t=(name,fn)=>{try{const v=fn();results.push({name,ok:v===true,info:v===tru
 const get=async f=>await (await fetch(f+'?v='+Date.now(),{cache:'no-store'})).text();
 (async()=>{
 const bg=await get('background.js'), lc=await get('leumi-content.js'), btb=await get('btb-content.js');
+const dash=await get('dashboard.js'), dashHtml=await get('dashboard.html');
 
 // ── פרסינג: כל הקבצים נטענים ──
 for(const [f,txt] of [['background.js',bg],['leumi-content.js',lc],['btb-content.js',btb],
@@ -90,6 +91,26 @@ t('שער שפיות: שלושת התנאים, בלי התרעות שווא',()=
 t('תשתית: dataVersion, מנעול, שגיאות worker, גיבוי',()=>{
   return /const DATA_VERSION=/.test(bg)&&(bg.match(/accountsMutex\(async\(\)=>\{/g)||[]).length>=10
     &&/unhandledrejection/.test(bg)&&/markSyncInFlight/.test(bg)||'חסר רכיב'});
+
+// -- 1.67.0: סינון חובה/זכות וסיכום בתחתית החיפוש --
+// ⚠ בדיקה מבנית בלבד (כמו "תשתית" למעלה) — הזרימה החיה של הלשונית לא נבדקת כאן.
+t('חיפוש: בורר חובה/זכות קיים ומחובר',()=>{
+  const doc=new DOMParser().parseFromString(dashHtml,'text/html');
+  const opts=[...doc.querySelectorAll('#movementSearchKind option')].map(o=>o.value).join(',');
+  return opts==='both,debit,credit'
+    &&/flowPick=String\(\$\('#movementSearchKind'\)\?\.value\|\|'both'\)/.test(dash)
+    &&/flowPick==='both'\|\|r\.flow===flowPick/.test(dash)
+    &&/kindPick\.value='both'/.test(dash)
+    ||'הבורר או החיווט חסרים — opts='+opts});
+
+// ⚠ נולד מכך שהסיכום חושב אחרי slice(0,500) והציג סכום קטן מהאמת.
+t('חיפוש: הסיכום נמדד על כל ההתאמות ולא על 500 המוצגות',()=>{
+  return /const matched=rows\.filter\(/.test(dash)
+    &&/filtered=matched\.slice\(0,500\)/.test(dash)
+    &&/debitSum=debitRows\.reduce/.test(dash)&&/creditSum=creditRows\.reduce/.test(dash)
+    &&!/\.slice\(0,500\),sum=/.test(dash)
+    &&/movement-search-total/.test(dash)&&/<tfoot>/.test(dash)
+    ||'הסיכום עדיין נגזר מהשורות המוצגות'});
 
 // ── סיכום ──
 const ul=document.getElementById('out');
