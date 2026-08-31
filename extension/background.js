@@ -743,15 +743,44 @@ function keepSince(value,since){if(!since)return true;const ms=txDateMs(value);r
 // נתונים שכבר נשמרו, והוחלפה בסינון תצוגה בדשבורד (viewSince).
 // keepSince ו-txDateMs נשארות — הן משמשות את גבול הורדת השיקים בלאומי.
 const mmYYYY=d=>`${String(d.getMonth()+1).padStart(2,'0')}${d.getFullYear()}`;
+// ── סימון "חדש" לעסקאות כרטיס (ישראכרט · כאל · MAX) ──────────────────
+// storeCardMonth הוא הפתח היחיד שדרכו נשמרות עסקאות של שלוש החברות, ולכן
+// ההשוואה יושבת כאן ולא בשלושה זרימות נפרדות.
+//
+// ⚠ "ריצה" ולא "קריאה": כאל ו-MAX קוראים ל-storeCardMonth פעם לכל חודש,
+// עד 12 פעמים ברצף. אילו כל קריאה הייתה חותם נפרד, רק החודש האחרון היה
+// נחשב "הסנכרון האחרון". לכן החותם נקבע פעם אחת ב-beginCardRun.
+// ⚠ נמדד בבדיקה: שתי ריצות באותה מילישנייה קיבלו חותם זהה, והשנייה ירשה
+// את הסימונים של הראשונה במקום להחליף אותם. לכן מונה ולא זמן בלבד.
+let cardRunStamp='',cardRunKnown=null,cardRunSeq=0;
+function beginCardRun(){cardRunStamp=`${new Date().toISOString()}#${++cardRunSeq}`;cardRunKnown=null;return cardRunStamp}
 async function storeCardMonth(month,cards){
   const rawMonth=String(month||''),normalizedMonth=rawMonth.replace(/\D/g,'');
+  if(!cardRunStamp)beginCardRun();
+  const stamp=cardRunStamp;
+  // הקודם נקרא לפי אינדקס החודש בלבד - לא getAll על כל המסד, שרץ עד 12 פעמים.
+  const prevBySuffix=new Map((await cardHistGetMonth(normalizedMonth)).map(r=>[String(r.suffix),r]));
+  const store=await chrome.storage.local.get({cardNewMarks:{}}),marks=store.cardNewMarks||{};
+  // ⚠ "מוכר" נקבע מהתמונה שלפני הריצה. אילו נבדק מול marks המתעדכן, החודש
+  // הראשון בריצה היה הופך את הכרטיס ל"מוכר" ו-11 החודשים שאחריו היו נצבעים
+  // חדשים במלואם בסנכרון הראשון בחיי הכרטיס.
+  if(!cardRunKnown)cardRunKnown=new Set(Object.keys(marks));
   for(const c of cards||[]){
     if(!c?.suffix)continue;
+    const suffix=String(c.suffix),known=cardRunKnown.has(suffix),remaining=cardTxCounts(prevBySuffix.get(suffix)?.transactions),fresh=[];
+    for(const t of c.transactions||[]){const k=cardTxKey(t),left=remaining.get(k)||0;
+      if(left>0){remaining.set(k,left-1);continue}
+      if(known)fresh.push(k)}
+    // סנכרון ראשון של כרטיס הוא **קו הבסיס** ולא "הכול חדש": הרשומה נוצרת
+    // ריקה, ומהסנכרון הבא ואילך ההפרש אמיתי.
+    const prevMark=marks[suffix],carry=prevMark&&prevMark.at===stamp?prevMark.keys||[]:[];
+    marks[suffix]={at:stamp,keys:[...new Set([...carry,...fresh])].slice(0,800)};
     if(rawMonth!==normalizedMonth)await cardHistDeleteMonths([rawMonth],[c.suffix]);
     await cardHistPut({id:cardHistId(c.suffix,normalizedMonth),suffix:c.suffix,month:normalizedMonth,
       name:c.name||'',issuer:c.issuer||'',amount:c.amount??null,chargeDate:c.chargeDate||'',
       transactions:c.transactions||[],savedAt:new Date().toISOString()});
   }
+  await chrome.storage.local.set({cardNewMarks:marks});
   await cardHistPrune(12);
 }
 let isracardHistoryBusy=false;
@@ -828,7 +857,7 @@ async function loadIsracardMonth(month){
     await chrome.storage.local.set({syncStatus:'ישראכרט: נפתח האתר — התחבר ואז בחר את החודש שוב'});
     return{ok:false,error:'נפתח אתר ישראכרט. התחבר, ואז נסה שוב.'}}
   if(running||autoBusy||isracardHistoryBusy)throw Error('סנכרון אחר כבר רץ — המתן לסיומו ונסה שוב');
-  isracardHistoryBusy=true;
+  isracardHistoryBusy=true;beginCardRun();
   try{
     const summary=await isracardSummaryFromHome(tab.id),active=summary.cards.filter(c=>!c.cancelled),out=[];
     for(let i=0;i<active.length;i++){
@@ -853,7 +882,7 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
     await chrome.storage.local.set({syncStatus:'ישראכרט: נפתח האתר — התחבר ואז לחץ שוב על "טען שנה אחורה"'});
     return{ok:false,error:'נפתח אתר ישראכרט. התחבר, ואז לחץ שוב.'}}
   if(running||autoBusy||isracardHistoryBusy)throw Error('סנכרון אחר כבר רץ — המתן לסיומו ונסה שוב');
-  isracardHistoryBusy=true;
+  isracardHistoryBusy=true;beginCardRun();
   try{
   const requested=new Set(suffixes.map(v=>String(v).replace(/\D/g,'').slice(-4)).filter(Boolean));
   await chrome.storage.local.set({syncStatus:requested.size?`ישראכרט: מאתר את כרטיס ${[...requested].join(', ')}`:'ישראכרט: קורא את רשימת הכרטיסים'});
@@ -2459,7 +2488,7 @@ async function startIsracard(){await chrome.storage.local.set({pendingIsracard:t
     return{ok:true,status:'waiting_login'};
   }
   try{const result=await runIsracard(tab.id);return{ok:true,status:'done',...result}}catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();throw e}}
-async function runIsracard(tabId,attempts=40){await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<attempts;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length){await saveIsracardMiss(tabId);throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');}const active=summary.cards.filter(c=>!c.cancelled),details=[];
+async function runIsracard(tabId,attempts=40){beginCardRun();await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<attempts;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length){await saveIsracardMiss(tabId);throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');}const active=summary.cards.filter(c=>!c.cancelled),details=[];
   // הגלגל מציג את ארבע הספרות של הכרטיס הנקרא כרגע, לבקשת טל.
 const chargeMonthRaw=mmYYYY(new Date()),chargeMonthLabel=`${chargeMonthRaw.slice(0,2)}/${chargeMonthRaw.slice(2)}`;
 // דלתא (28.08.2026): שורות החודש הקודם שכבר במסד - מפתח לדילוג על דף לכרטיס;
@@ -2519,7 +2548,7 @@ const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
 return tabs.find(t=>String(t.url||'').includes('digital-web.cal-online.co.il'))||tabs[0]||null}
 async function prepareCal(tabId){await delay(600);try{const p=await chrome.tabs.sendMessage(tabId,{type:'CAL_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['cal-content.js']});await delay(300)}
 async function startCal(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingCal:true,pendingCalSuffix:suffix,syncStatus:suffix?`כאל: מכין טעינת שנה לכרטיס ${suffix}`:'כאל: בודק את החיבור'});const tab=await calTab();if(!tab||!String(tab.url||'').includes('digital-web.cal-online.co.il')){await chrome.storage.local.set({syncStatus:suffix?`ממתין להתחברות לכאל עבור כרטיס ${suffix}`:'ממתין להתחברות לכאל'});if(tab)await chrome.tabs.update(tab.id,{url:'https://www.cal-online.co.il/',active:true});else await chrome.windows.create({url:CAL_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runCal(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingCal:false,pendingCalSuffix:'',syncStatus:`שגיאה בכאל: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
-async function runCal(tabId,requestedSuffix=''){
+async function runCal(tabId,requestedSuffix=''){beginCardRun();
   if(calBusy)return;calBusy=true;
   try{
     await chrome.storage.local.set({syncStatus:'כאל: קורא חיוב קרוב וחשבון חיוב'});let current=await chrome.tabs.get(tabId);if(!String(current.url||'').includes('digital-web.cal-online.co.il'))throw Error('החיבור לכאל אינו פעיל — יש להתחבר מחדש');await prepareCal(tabId);if(!String(current.url||'').includes('/dashboard')){const go=await chrome.tabs.sendMessage(tabId,{type:'CAL_GO_HOME'});
@@ -2593,7 +2622,7 @@ const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
 return tabs.find(t=>String(t.url||'').includes('/transaction-details/personal'))||tabs[0]||null}
 async function prepareMax(tabId){await delay(500);try{const p=await chrome.tabs.sendMessage(tabId,{type:'MAX_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['max-content.js']});await delay(250)}
 async function startMax(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingMax:true,pendingMaxSuffix:suffix,syncStatus:suffix?`MAX: מכין טעינת שנה לכרטיס ${suffix}`:'MAX: בודק את החיבור'});const tab=await maxTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל‑MAX'});await chrome.windows.create({url:MAX_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMax(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingMax:false,pendingMaxSuffix:'',syncStatus:`שגיאה ב‑MAX: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
-async function runMax(tabId,requestedSuffix=''){
+async function runMax(tabId,requestedSuffix=''){beginCardRun();
  if(maxBusy)return;maxBusy=true;
  try{
   await chrome.storage.local.set({syncStatus:'MAX: פותח פירוט חיובים'});let tab=await chrome.tabs.get(tabId);if(!String(tab.url||'').includes('/transaction-details/personal')){await chrome.tabs.update(tabId,{url:MAX_TX});for(let i=0;i<40;i++){await delay(300);tab=await chrome.tabs.get(tabId);if(String(tab.url||'').includes('/transaction-details/personal'))break}}

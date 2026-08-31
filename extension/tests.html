@@ -17,7 +17,7 @@ const t=(name,fn)=>{try{const v=fn();results.push({name,ok:v===true,info:v===tru
 const get=async f=>await (await fetch(f+'?v='+Date.now(),{cache:'no-store'})).text();
 (async()=>{
 const bg=await get('background.js'), lc=await get('leumi-content.js'), btb=await get('btb-content.js');
-const dash=await get('dashboard.js'), dashHtml=await get('dashboard.html');
+const dash=await get('dashboard.js'), dashHtml=await get('dashboard.html'), ch=await get('card-history.js');
 
 // ── פרסינג: כל הקבצים נטענים ──
 for(const [f,txt] of [['background.js',bg],['leumi-content.js',lc],['btb-content.js',btb],
@@ -154,6 +154,117 @@ t('חיפוש: הבורר מחובר למסנן ולניקוי',()=>{
     &&/renderMovementSources\(rows\)/.test(dash)
     &&/kindPick\.value='both';movementSourcePick\.clear\(\)/.test(dash)
     ||'הבורר לא מחובר לחיפוש או ל"נקה"'});
+
+// -- 1.69.0: סימון "חדש" לעסקאות כרטיס — storeCardMonth האמיתי מ-background.js --
+// ⚠ הגוף נחתך מהקובץ ורץ כפי שהוא, עם cardTxKey/cardTxCounts האמיתיים
+// מ-card-history.js. רק ה-IO מוחלף (IndexedDB ו-chrome.storage).
+{
+ // ⚠ החיתוך חייב לכלול את 'async' שלפני 'function'. בלעדיו הגוף נחתך
+ // כפונקציה רגילה, ה-await שבתוכה נקרא כמזהה, והבדיקה נופלת על תחביר.
+ const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+   if(txt.slice(i-6,i)==='async ')i-=6;
+   let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+   throw new Error('לא נסגרה '+name)};
+ const build=()=>{
+   let db=[],store={cardNewMarks:{}};
+   const chromeStub={storage:{local:{
+     get:async d=>({cardNewMarks:JSON.parse(JSON.stringify(store.cardNewMarks||d.cardNewMarks))}),
+     set:async o=>{store=JSON.parse(JSON.stringify({...store,...o}))}}}};
+   const api=new Function('chrome','cardHistGetMonth','cardHistPut','cardHistDeleteMonths','cardHistPrune','cardHistId','cardTxKey','cardTxCounts',
+     "let cardRunStamp='',cardRunKnown=null,cardRunSeq=0;"+cut(bg,'beginCardRun')+';'+cut(bg,'storeCardMonth')+
+     ';return{beginCardRun,storeCardMonth}')(
+     chromeStub,
+     async m=>db.filter(r=>String(r.month)===String(m)),
+     async r=>{db=db.filter(x=>x.id!==r.id);db.push(JSON.parse(JSON.stringify(r)))},
+     async()=>{},async()=>{},(x,m)=>x+'|'+m,
+     new Function(cut(ch,'cardTxKey')+';return cardTxKey')(),
+     new Function(cut(ch,'cardTxKey')+';'+cut(ch,'cardTxCounts')+';return cardTxCounts')());
+   return {api,keys:x=>store.cardNewMarks[x]?.keys||[],stamp:x=>store.cardNewMarks[x]?.at||''};
+ };
+ const A={date:'01.08.2026',merchant:'רמי לוי',amount:120,payments:''},
+       B={date:'02.08.2026',merchant:'דלק',amount:300,payments:''},
+       C={date:'03.08.2026',merchant:'סופר פארם',amount:55,payments:''},
+       D={date:'04.08.2026',merchant:'קפה',amount:18,payments:''};
+ let bad=[];
+ try{
+  const h=build();
+  h.api.beginCardRun();
+  await h.api.storeCardMonth('082026',[{suffix:'1234',transactions:[A,B]}]);
+  if(h.keys('1234').length)bad.push('סנכרון ראשון סימן '+h.keys('1234').length+' במקום קו בסיס');
+
+  h.api.beginCardRun();
+  await h.api.storeCardMonth('082026',[{suffix:'1234',transactions:[A,B,C]}]);
+  if(!(h.keys('1234').length===1&&h.keys('1234')[0].includes('סופר פארם')))bad.push('עסקה חדשה לא סומנה: '+JSON.stringify(h.keys('1234')));
+
+  h.api.beginCardRun();
+  await h.api.storeCardMonth('082026',[{suffix:'1234',transactions:[A,A,B,C]}]);
+  if(!(h.keys('1234').length===1&&h.keys('1234')[0].includes('רמי לוי')))bad.push('כפילות זהה נבלעה: '+JSON.stringify(h.keys('1234')));
+
+  const before=h.stamp('1234');
+  h.api.beginCardRun();
+  await h.api.storeCardMonth('082026',[{suffix:'1234',transactions:[A,A,B,C]}]);
+  if(h.keys('1234').length||h.stamp('1234')===before)bad.push('הסימון לא התאפס בסנכרון שאין בו חדש');
+
+  const g=build();
+  g.api.beginCardRun();
+  await g.api.storeCardMonth('072026',[{suffix:'9999',transactions:[A,B]}]);
+  await g.api.storeCardMonth('082026',[{suffix:'9999',transactions:[C,D]}]);
+  if(g.keys('9999').length)bad.push('ריצה ראשונה על כמה חודשים צבעה '+g.keys('9999').length);
+
+  g.api.beginCardRun();
+  await g.api.storeCardMonth('072026',[{suffix:'9999',transactions:[A,B,C]}]);
+  await g.api.storeCardMonth('082026',[{suffix:'9999',transactions:[C,D,A]}]);
+  if(g.keys('9999').length!==2)bad.push('שני חודשים באותה ריצה לא נצברו: '+g.keys('9999').length);
+ }catch(e){bad.push('חריגה: '+e.message)}
+ t('כרטיסים: סימון "חדש" — storeCardMonth האמיתי, שישה תרחישים',()=>!bad.length||bad.join(' · '));
+}
+
+t('כרטיסים: המפתח מוגדר פעם אחת, והתג מחובר בשני הצדדים',()=>{
+  return /function cardTxKey\(/.test(ch)&&!/function cardTxKey\(/.test(dash)&&!/function cardTxKey\(/.test(bg)
+    &&/newTag\(k,t\)/.test(dash)&&/class="new-tag"/.test(dash)&&/\.new-tag\{/.test(dash)
+    &&/cardNewMarks/.test(bg)&&/cardNewMarks/.test(dash)&&/beginCardRun\(\)/.test(bg)
+    ||'המפתח שוכפל, או שהתג לא מחובר'});
+
+// -- 1.69.0: פילוח הסיכום לפי חודש/מקור — הפונקציות האמיתיות מ-dashboard.js --
+t('חיפוש: פילוח לפי חודש ולפי מקור, על DOM אמיתי',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    if(txt.slice(i-6,i)==='async ')i-=6;
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+    throw new Error('לא נסגרה '+name)};
+  const host=document.createElement('div');host.style.display='none';
+  host.innerHTML='<div id="movementBreakdownBox"></div>';document.body.appendChild(host);
+  try{
+    const $$=sel=>document.querySelector(sel);
+    const esc2=v=>{const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;')};
+    const mk=(mode,rows)=>new Function('$','esc','money','movementBreakdown','movementLastMatched',
+      cut(dash,'movementMonthTitle')+';'+cut(dash,'movementGroups')+';'+cut(dash,'paintMovementBreakdown')+
+      ';return{paintMovementBreakdown,movementGroups}')($$,esc2,new Function(cut(dash,'money')+';return money')(),mode,rows);
+    const dateKey=new Function(cut(dash,'dateKey')+';return dateKey')();
+    const D=(d,src,flow,amt)=>({when:dateKey(d),date:d,source:src,flow,amount:amt});
+    const rows=[D('05.08.2026','לאומי · 800-1','debit',100),D('20.08.2026','לאומי · 800-1','credit',40),
+                D('03.07.2026','ישראכרט · 1234','debit',60),D('09.07.2026','לאומי · 800-1','debit',25),
+                {when:0,date:'',source:'ישראכרט · 1234',flow:'debit',amount:10}];
+    const byMonth=mk('month',rows).movementGroups(rows,'month');
+    if(byMonth.length!==3)return 'קבוצות חודש: '+byMonth.length;
+    if(byMonth[0].key!=='2026-08')return 'החודש החדש אינו ראשון: '+byMonth[0].key;
+    if(byMonth[byMonth.length-1].key!=='ללא תאריך')return 'שורה בלי תאריך לא קובצה: '+JSON.stringify(byMonth.map(g=>g.key));
+    if(!(byMonth[0].debit===100&&byMonth[0].credit===40&&byMonth[0].n===2))return 'סכומי אוגוסט: '+JSON.stringify(byMonth[0]);
+    const bySrc=mk('source',rows).movementGroups(rows,'source');
+    if(bySrc.length!==2||bySrc[0].key!=='לאומי · 800-1')return 'מיון מקורות לפי גודל נכשל: '+JSON.stringify(bySrc.map(g=>g.key));
+
+    mk('month',rows).paintMovementBreakdown();
+    const bodyRows=[...document.querySelectorAll('#movementBreakdownBox tbody tr')];
+    if(bodyRows.length!==4)return 'שורות טבלה (3 חודשים + סה״כ): '+bodyRows.length;
+    if(!document.querySelector('#movementBreakdownBox button[data-bd="month"].on'))return 'הכפתור הפעיל לא סומן';
+    if(!document.querySelector('#movementBreakdownBox button[data-bd="source"]'))return '"לפי מקור" חסר למרות שני מקורות';
+    if(!bodyRows[0].textContent.includes('אוגוסט'))return 'שם החודש בעברית חסר: '+bodyRows[0].textContent;
+
+    // מקור יחיד — הכפתור "לפי מקור" לא מוצע כלל
+    const one=rows.filter(r=>r.source.startsWith('לאומי'));
+    mk('none',one).paintMovementBreakdown();
+    if(document.querySelector('#movementBreakdownBox button[data-bd="source"]'))return '"לפי מקור" הוצע על מקור יחיד';
+    return document.querySelectorAll('#movementBreakdownBox tbody tr').length===0||'פילוח צויר במצב "ללא"';
+  }finally{host.remove()}});
 
 // ── סיכום ──
 const ul=document.getElementById('out');

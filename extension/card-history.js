@@ -27,6 +27,13 @@ function cardHistWrap(request){ return new Promise((res,rej)=>{ request.onsucces
 // המפתח הוא כרטיס+חודש. monthAndYear בפורמט של ישראכרט: MMYYYY.
 function cardHistId(suffix, month){ return `${suffix}|${month}` }
 
+// מפתח תנועת כרטיס. מוגדר **כאן** ולא בשני הקבצים, כי הרקע (שמסמן "חדש")
+// והדשבורד (שמצייר את התג) חייבים לגזור בדיוק את אותו מפתח - שתי הגדרות
+// שנפרדות אפילו ברווח אחד פירושן תג שלא מופיע לעולם, בלי שום שגיאה.
+function cardTxKey(t){return [String(t?.date||'').trim(),String(t?.merchant||'').replace(/\s+/g,' ').trim(),String(t?.amount??'').trim(),String(t?.payments||'').trim()].join('|')}
+// ריבוי מופעים זהים באותו יום נספר ולא מתאחד: אם אתמול הייתה קנייה אחת
+// בבית עסק והיום יש שתיים - השנייה חדשה. Set פשוט היה בולע אותה.
+function cardTxCounts(list){const m=new Map();for(const t of list||[]){const k=cardTxKey(t);m.set(k,(m.get(k)||0)+1)}return m}
 async function cardHistPut(record){ return cardHistWrap((await cardHistStore('readwrite')).put(record)) }
 async function cardHistGetMonth(month){
   const st = await cardHistStore('readonly');
