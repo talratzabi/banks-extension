@@ -688,7 +688,8 @@ t('שיקים: המודל אינו כותב שמות לחיפוש, רק הצעו
   if(!/chequeCropTopRight\(rec\.front\)/.test(dash))return 'מסך האישור אינו מציג את החיתוך';
   if(!/class="payer-guess"/.test(dash))return 'הצעה אינה מסומנת כהצעה';
   // ⚠ הגירה: מה שנשמר בגרסאות הקודמות יורד לדרגת הצעה, בלי למחוק דבר
-  if(!/chequePayerReviewed/.test(dash))return 'אין הגירה לשמות שכבר נשמרו';
+  // ⚠ ההגירה הוסרה ב-1.90.0 אחרי שהתגלתה כמוקש דרוך; הבדיקה שלה הפוכה עכשיו.
+
   return /payerQueue=payerQueue\.filter\(/.test(dash)||'אישור אינו מסיר מהתור'});
 
 t('שיקים: תור האישור מתנהג נכון',()=>{
@@ -925,6 +926,22 @@ t('שיקים: התוצאה מוצגת במסך ולא ב-toast חולף',()=>{
   if(!/נקרא בטעות/.test(rep)||!/האמת מהייצוא/.test(rep))return 'הטבלה אינה מציגה לפני ואחרי';
   if(!/was-wrong/.test(dash))return 'הקריאה השגויה אינה מסומנת חזותית';
   return /אף תנועה לא הותאמה/.test(rep)||'אין הסבר כשלא הותאם כלום'});
+
+// -- 1.90.0: הגירה דרוכה הורידה שמות אמיתיים לדרגת "הצעה" --
+t('שיקים: אין הגירה שמורידה שמות, וכל מקור מסומן',()=>{
+  // ⚠⚠ הבאג: ההגירה מ-1.81.0 סימנה את עצמה כבוצעה **רק כשהיה מה להעביר**.
+  // אצל טל לא היה — ולכן היא נשארה דרוכה, ואחרי הייבוא מהנהלת החשבונות
+  // היא הורידה גם את השמות האמיתיים ל-guess. בצילום: "יפרח מזל ?" באדום.
+  if(/chequePayerReviewed/.test(dash))return 'ההגירה הדרוכה עדיין בקוד';
+  if(/chequePayerGuess=moved/.test(dash))return 'עדיין קיים מסלול שמוריד שמות ל-guess';
+  // מקור השם נשמר — ייצוא מול הקלדה מול ניחוש הם שלושה דברים שונים
+  if(!/chequePayerSource\[id\]='ledger'/.test(dash))return 'שם מהייצוא אינו מסומן';
+  const manual=(dash.match(/chequePayerSource\[id\]='manual'/g)||[]).length;
+  if(manual<4)return `רק ${manual} מסלולים ידניים מסמנים מקור — צריך את כולם`;
+  if(!/מהנהלת החשבונות — נתון ודאי/.test(dash))return 'ה-tooltip אינו מבחין בין ייצוא לניחוש';
+  // ⚠ המקור חייב להישמר יחד עם השם, אחרת הוא יאבד ברענון
+  const saves=(dash.match(/chequePayerSource\}\)/g)||[]).length+(dash.match(/chequePayerSource,/g)||[]).length;
+  return saves>=5||`המקור נשמר רק ב-${saves} מקומות`});
 
 // ── סיכום ──
 const ul=document.getElementById('out');

@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s);
-let accounts=[],discovered=[],selectedKeys=[],syncScope='business',accountFilter='both',accountKinds={},privateOwnerName='',hideMortgages=false,isracardUnassigned=[],calUnassigned=[],maxUnassigned=[],isracardLastCards=[],calLastCards=[],maxLastCards=[],cardHistoryStats={},cardNewMarks={},chequeInfo={},chequePayers={},chequePayerDoubt={},chequePayerMeta={},chequePayerGuess={},chequePayerBank={},chequeHashes={},chequeAccounts={},chequeLedger=[],activeView='accounts',loadEpoch=0,loadTimer=null,monthlyCardMonths=null,monthlyPick='';
+let accounts=[],discovered=[],selectedKeys=[],syncScope='business',accountFilter='both',accountKinds={},privateOwnerName='',hideMortgages=false,isracardUnassigned=[],calUnassigned=[],maxUnassigned=[],isracardLastCards=[],calLastCards=[],maxLastCards=[],cardHistoryStats={},cardNewMarks={},chequeInfo={},chequePayers={},chequePayerDoubt={},chequePayerMeta={},chequePayerGuess={},chequePayerBank={},chequeHashes={},chequeAccounts={},chequeLedger=[],chequePayerSource={},activeView='accounts',loadEpoch=0,loadTimer=null,monthlyCardMonths=null,monthlyPick='';
 let movementSearchTimer=null,movementSearchEpoch=0;
 // ⚠ סט ריק פירושו **כל המקורות**, ולא "אף מקור". כך פתיחה ראשונה של הלשונית
 // מציגה הכול בלי לדרוש סימון, וגם מקור חדש שנוסף אחרי סנכרון נכנס מעצמו.
@@ -49,7 +49,7 @@ async function load(){
   const epoch=++loadEpoch;
   monthlyCardMonths=null; // טעינה מחדש = ייתכנו חודשי כרטיסים חדשים; הלשונית תקרא שוב.
   document.querySelector('.sources')?.classList.add('hidden');
-  const data=await chrome.storage.local.get({viewSince:'',viewSinceInit:false,collectSince:'',accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],cardNewMarks:{},chequeInfo:{},chequePayers:{},chequePayerDoubt:{},chequePayerMeta:{},chequePayerGuess:{},chequePayerBank:{},chequeHashes:{},chequeAccounts:{},chequeLedger:[],fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{},hiddenCards:[],maslaka:null,realEstate:[],balanceAssets:[],balanceLiabs:[],loanKinds:{}});
+  const data=await chrome.storage.local.get({viewSince:'',viewSinceInit:false,collectSince:'',accounts:[],discoveredAccounts:[],selectedAccountKeys:null,syncScope:'business',accountFilter:'both',accountKinds:{},privateOwnerName:'',hideMortgages:false,isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardLastCards:[],calLastCards:[],maxLastCards:[],cardNewMarks:{},chequeInfo:{},chequePayers:{},chequePayerDoubt:{},chequePayerMeta:{},chequePayerGuess:{},chequePayerBank:{},chequeHashes:{},chequeAccounts:{},chequeLedger:[],chequePayerSource:{},fibiConnectionNames:{},syncStatus:'טרם בוצע',syncProgress:null,statusBySource:{},bankDiagnostics:{},hiddenCards:[],maslaka:null,realEstate:[],balanceAssets:[],balanceLiabs:[],loanKinds:{}});
   maslaka=data.maslaka||null;loanKinds=data.loanKinds||{};realEstate=Array.isArray(data.realEstate)?data.realEstate:[];balanceAssets=Array.isArray(data.balanceAssets)?data.balanceAssets:[];balanceLiabs=Array.isArray(data.balanceLiabs)?data.balanceLiabs:[];
   hiddenCards=(data.hiddenCards||[]).map(x=>String(x).replace(/\D/g,'')).filter(Boolean);
   // כרטיס שהוסתר אינו חוזר דרך סנכרון: הסינון כאן, לפני כל רינדור.
@@ -64,17 +64,13 @@ async function load(){
   // לכן חלון התצוגה מאותחל פעם אחת לערך הגבול הישן — המסך נראה בדיוק
   // כמו קודם — ומכאן השניים עצמאיים לגמרי.
   if(!data.viewSinceInit){viewSince=String(data.collectSince||'');chrome.storage.local.set({viewSince,viewSinceInit:true})}
-  accounts=data.accounts;discovered=data.discoveredAccounts;syncScope=data.syncScope;accountFilter=data.accountFilter;accountKinds=data.accountKinds;privateOwnerName=data.privateOwnerName;hideMortgages=Boolean(data.hideMortgages);isracardUnassigned=data.isracardUnassigned||[];calUnassigned=data.calUnassigned||[];maxUnassigned=data.maxUnassigned||[];isracardLastCards=data.isracardLastCards||[];calLastCards=data.calLastCards||[];maxLastCards=data.maxLastCards||[];cardNewMarks=data.cardNewMarks||{};chequeInfo=data.chequeInfo||{};chequePayers=data.chequePayers||{};chequePayerDoubt=data.chequePayerDoubt||{};chequePayerMeta=data.chequePayerMeta||{};chequePayerGuess=data.chequePayerGuess||{};chequePayerBank=data.chequePayerBank||{};chequeHashes=data.chequeHashes||{};chequeAccounts=data.chequeAccounts||{};chequeLedger=data.chequeLedger||[];setTimeout(()=>{try{refreshPayerButton()}catch(e){}},0);
-  // ⚠⚠ הגירה חד-פעמית: שמות שנשמרו בגרסאות 1.75-1.80 נכתבו **ישירות**
-  // מפלט המודל, בלי שאיש הביט בהם. שתי ראיות של טל הראו ששניים מהם
-  // המציאו שם. לכן הם יורדים לדרגת **הצעה** במקום להישאר עובדות בחיפוש.
-  // שום נתון לא נמחק - הכול עובר ל-chequePayerGuess וממתין לאישור.
-  if(!data.chequePayerReviewed&&Object.keys(chequePayers).length){
-   const moved={...chequePayerGuess};
-   for(const [id,name] of Object.entries(chequePayers))if(!moved[id])moved[id]={name,crop:name,full:'',stamp:(chequePayerMeta[id]||{}).stamp||'',agree:true};
-   chequePayerGuess=moved;chequePayers={};
-   await chrome.storage.local.set({chequePayers:{},chequePayerGuess:moved,chequePayerReviewed:true});
-  }
+  accounts=data.accounts;discovered=data.discoveredAccounts;syncScope=data.syncScope;accountFilter=data.accountFilter;accountKinds=data.accountKinds;privateOwnerName=data.privateOwnerName;hideMortgages=Boolean(data.hideMortgages);isracardUnassigned=data.isracardUnassigned||[];calUnassigned=data.calUnassigned||[];maxUnassigned=data.maxUnassigned||[];isracardLastCards=data.isracardLastCards||[];calLastCards=data.calLastCards||[];maxLastCards=data.maxLastCards||[];cardNewMarks=data.cardNewMarks||{};chequeInfo=data.chequeInfo||{};chequePayers=data.chequePayers||{};chequePayerDoubt=data.chequePayerDoubt||{};chequePayerMeta=data.chequePayerMeta||{};chequePayerGuess=data.chequePayerGuess||{};chequePayerBank=data.chequePayerBank||{};chequeHashes=data.chequeHashes||{};chequeAccounts=data.chequeAccounts||{};chequeLedger=data.chequeLedger||[];chequePayerSource=data.chequePayerSource||{};setTimeout(()=>{try{refreshPayerButton()}catch(e){}},0);
+  // ⚠⚠⚠ **כאן ישבה הגירה שהורידה שמות ל"הצעה", והיא הוסרה - זה היה באג.**
+  // היא סימנה את עצמה כבוצעה **רק כשהיה מה להעביר**. אצל טל לא היה,
+  // ולכן היא נשארה דרוכה - ואחרי שהייבוא מהנהלת החשבונות מילא שמות
+  // אמיתיים, היא הורידה **גם אותם** בטעינה הבאה. בצילום שלו נראה
+  // "יפרח מזל ?" באדום: שם נכון שהוצג כניחוש.
+  // **הלקח: הגירה שמסמנת את עצמה רק כשהיא פועלת היא מוקש דרוך.**
   selectedKeys=(Array.isArray(data.selectedAccountKeys)?data.selectedAccountKeys:accounts.map(a=>a.selectionKey||a.id)).map(k=>String(k).includes('|')?k:`business|${k}`);
   // תיקון רשומות בינלאומי שכבר נשמרו לפני אימות לוח הסילוקין. הערכים נמדדו
   // ישירות בלוחות שסופקו: מספר התשלום הקרוב והתקופה עד מועד הפירעון הסופי.
@@ -143,7 +139,9 @@ function chequePayerHtml(id){
  }
  if(name){
   const bank=chequePayerBank[id]||'';
-  const how=[bank?`בנק השיק: ${bank}`:'',m.stamp?`אושר מול החותמת (${m.stamp})`:m.kind==='private'?'לא נמצאה חותמת — שיק פרטי':''].filter(Boolean).join(' · ')||'שם מוסר השיק';
+  const src=chequePayerSource[id];
+  const how=[src==='ledger'?'מהנהלת החשבונות — נתון ודאי':src==='manual'?'הוקלד ידנית':'',
+   bank?`בנק השיק: ${bank}`:'',m.stamp?`אושר מול החותמת (${m.stamp})`:m.kind==='private'?'לא נמצאה חותמת — שיק פרטי':''].filter(Boolean).join(' · ')||'שם מוסר השיק';
   return ` <button type="button" class="payer-tag${m.stamp?' stamped':''}" data-payer="${esc(id)}" title="${esc(how)}. לחיצה לתיקון.">${esc(name)}${bank?` <small>${esc(bank)}</small>`:''}</button>`;
  }
  const d=chequePayerDoubt[id];
@@ -662,7 +660,7 @@ async function paintPayerReview(){
  const full=document.createElement('button');full.type='button';full.textContent='הצג שיק מלא';
  save.onclick=async()=>{
    const name=input.value.trim(),bk=bank.value;
-   if(name)chequePayers[id]=name;else delete chequePayers[id];
+   if(name){chequePayers[id]=name;chequePayerSource[id]='manual'}else{delete chequePayers[id];delete chequePayerSource[id]}
    if(bk)chequePayerBank[id]=bk;else delete chequePayerBank[id];
    delete chequePayerGuess[id];
    // ⚠ ההחלה על הקבוצה קורית **רק כשיש שם**: להחיל "ריק" על עשרה שיקים
@@ -670,10 +668,10 @@ async function paintPayerReview(){
    let spread=0;
    const picked=[...grid.querySelectorAll('input:checked')].map(x=>x.value);
    if(name)for(const other of picked){
-     chequePayers[other]=name;if(bk)chequePayerBank[other]=bk;
+     chequePayers[other]=name;chequePayerSource[other]='manual';if(bk)chequePayerBank[other]=bk;
      delete chequePayerGuess[other];spread++;
    }
-   await chrome.storage.local.set({chequePayers,chequePayerBank,chequePayerGuess});
+   await chrome.storage.local.set({chequePayers,chequePayerBank,chequePayerGuess,chequePayerSource});
    payerQueue=payerQueue.filter((x,i)=>i!==payerAt&&!picked.includes(x));
    if(spread)toast(`הוחל גם על ${spread} שיקים מאותו חשבון`);
    await paintPayerReview();render();scheduleMovementSearch();refreshPayerButton();
@@ -804,6 +802,7 @@ async function applyLedger(){
    accBefore:before,accAfter:after,confidence:pick.confidence,reason:pick.reason});
   // ⚠ הייצוא הוא האמת: הוא נכתב בהנהלת החשבונות, לא נקרא מתמונה.
   chequePayers[id]=pick.row.name;
+  chequePayerSource[id]='ledger';
   if(after)chequeAccounts[id]={bank:pick.row.bank,branch:pick.row.branch,account:pick.row.account,
     raw:acc.raw||'',agree:true,fromLedger:true};
   delete chequePayerGuess[id];
@@ -811,7 +810,7 @@ async function applyLedger(){
   // מה שטל רואה. מונה שסופר משהו אחר מהתצוגה הוא מלכודת.
   if(nameBefore&&nameBefore!==pick.row.name)fixed++;else confirmed++;
  }
- await chrome.storage.local.set({chequePayers,chequeAccounts,chequePayerGuess,chequeLedgerReport:report.slice(0,300)});
+ await chrome.storage.local.set({chequePayers,chequeAccounts,chequePayerGuess,chequePayerSource,chequeLedgerReport:report.slice(0,300)});
  render();scheduleMovementSearch();refreshPayerButton();
  showLedgerReport({total:ids.length,report,fixed,confirmed,unsure,none});
  return{fixed,confirmed,unsure,none,report};
@@ -898,11 +897,11 @@ async function nameWholeAccount(key){
  const bank=prompt('בנק המוסר (אפשר להשאיר ריק):',chequePayerBank[g.ids[0]]||'');
  if(bank===null)return;
  for(const id of g.ids){
-  if(clean)chequePayers[id]=clean;else delete chequePayers[id];
+  if(clean){chequePayers[id]=clean;chequePayerSource[id]='manual'}else{delete chequePayers[id];delete chequePayerSource[id]}
   if(String(bank).trim())chequePayerBank[id]=String(bank).trim();
   delete chequePayerGuess[id];
  }
- await chrome.storage.local.set({chequePayers,chequePayerBank,chequePayerGuess});
+ await chrome.storage.local.set({chequePayers,chequePayerBank,chequePayerGuess,chequePayerSource});
  toast(clean?`${clean} — הוחל על ${g.ids.length} שיקים`:`השם נמחק מ-${g.ids.length} שיקים`);
  await openChequeAccounts();render();scheduleMovementSearch();refreshPayerButton();
 }
@@ -910,9 +909,9 @@ async function nameOneCheque(id){
  const name=prompt('שם המוסר:',chequePayers[id]||'');
  if(name===null)return;
  const clean=String(name).trim();
- if(clean)chequePayers[id]=clean;else delete chequePayers[id];
+ if(clean){chequePayers[id]=clean;chequePayerSource[id]='manual'}else{delete chequePayers[id];delete chequePayerSource[id]}
  delete chequePayerGuess[id];
- await chrome.storage.local.set({chequePayers,chequePayerGuess});
+ await chrome.storage.local.set({chequePayers,chequePayerGuess,chequePayerSource});
  toast(clean?`נשמר: ${clean}`:'השם נמחק');
  await openChequeAccounts();render();scheduleMovementSearch();refreshPayerButton();
 }
@@ -950,9 +949,9 @@ async function editChequePayer(id){
  const val=prompt(hint+'שם מוסר השיק (ריק = מחיקה):',cur||d?.crop||d?.full||'');
  if(val===null)return;
  const name=String(val).trim();
- if(name)chequePayers[id]=name;else delete chequePayers[id];
+ if(name){chequePayers[id]=name;chequePayerSource[id]='manual'}else{delete chequePayers[id];delete chequePayerSource[id]}
  delete chequePayerDoubt[id];
- await chrome.storage.local.set({chequePayers,chequePayerDoubt});
+ await chrome.storage.local.set({chequePayers,chequePayerDoubt,chequePayerSource});
  toast(name?`נשמר: ${name}`:'השם נמחק');render();scheduleMovementSearch();
 }
 document.addEventListener('click',e=>{const p=e.target.closest('[data-payer]');if(!p)return;
