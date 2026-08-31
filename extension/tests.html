@@ -17,12 +17,12 @@ const t=(name,fn)=>{try{const v=fn();results.push({name,ok:v===true,info:v===tru
 const get=async f=>await (await fetch(f+'?v='+Date.now(),{cache:'no-store'})).text();
 (async()=>{
 const bg=await get('background.js'), lc=await get('leumi-content.js'), btb=await get('btb-content.js');
-const dash=await get('dashboard.js'), dashHtml=await get('dashboard.html'), ch=await get('card-history.js');
+const dash=await get('dashboard.js'), dashHtml=await get('dashboard.html'), ch=await get('card-history.js'), ocr=await get('cheque-ocr.js');
 
 // ── פרסינג: כל הקבצים נטענים ──
 for(const [f,txt] of [['background.js',bg],['leumi-content.js',lc],['btb-content.js',btb],
     ['dashboard.js',await get('dashboard.js')],['discount-content.js',await get('discount-content.js')],
-    ['fibi-content.js',await get('fibi-content.js')],['cheque-store.js',await get('cheque-store.js')]])
+    ['fibi-content.js',await get('fibi-content.js')],['cheque-store.js',await get('cheque-store.js')],['cheque-ocr.js',ocr]])
   t('פרסינג: '+f,()=>{new Function(txt);return true});
 
 // ── 1.33.4: תאריך דבוק לסכום (btb) ──
@@ -396,11 +396,12 @@ t('שיקים: התצוגה מסומנת כטקסט מהאתר ולא כשדה �
 t('חיפוש: פסיק מפצל למונחים, והתוצאות מאוחדות',()=>{
   const split=(dash.match(/terms=q\.split\(','\)[^;]*;/)||[])[0];
   if(!split)return 'פיצול המונחים לא נמצא ב-dashboard.js';
-  const cond=(dash.match(/\(!terms\.length\|\|terms\.some\(term=>r\.name\.toLocaleLowerCase\('he'\)\.includes\(term\)\)\)/)||[])[0];
+  const cond=(dash.match(/\(!terms\.length\|\|terms\.some\(term=>r\.hay\.includes\(term\)\)\)/)||[])[0];
   if(!cond)return 'תנאי ההתאמה אינו מאחד מונחים';
   const mk=new Function('q','return '+split.replace(/^terms=/,'').replace(/;$/,''));
   const match=new Function('terms','r','return '+cond+';');
-  const rows=[{name:'ארנונה עיריית גדרה'},{name:'תאגיד מים'},{name:'חשמל'},{name:'ביטוח לאומי'}];
+  const mkRow=(name,payer='')=>({name,hay:`${name} ${payer}`.toLocaleLowerCase('he')});
+  const rows=[mkRow('ארנונה עיריית גדרה'),mkRow('תאגיד מים'),mkRow('חשמל'),mkRow('ביטוח לאומי'),mkRow('הפקדת שיק','נוגה מושב עובדים')];
   const hits=q=>rows.filter(r=>match(mk(q.trim().toLocaleLowerCase('he')),r)).map(r=>r.name);
   const cases=[
     ['מונח יחיד','ארנונה',['ארנונה עיריית גדרה']],
@@ -410,6 +411,8 @@ t('חיפוש: פסיק מפצל למונחים, והתוצאות מאוחדות
     ['פסיק תלוי בסוף','ארנונה,',['ארנונה עיריית גדרה']],
     ['פסיקים ריקים','ארנונה,,,מים',['ארנונה עיריית גדרה','תאגיד מים']],
     ['רק פסיקים = בלי סינון',' , , ',rows.map(r=>r.name)],
+    ['חיפוש לפי שם מוסר השיק','נוגה',['הפקדת שיק']],
+    ['מוסר + ספק באותו חיפוש','ארנונה, נוגה',['ארנונה עיריית גדרה','הפקדת שיק']],
     ['מונח שלא קיים','ארנונה, ירח',['ארנונה עיריית גדרה']]];
   for(const [name,q,want] of cases){
     const got=hits(q);
@@ -417,6 +420,66 @@ t('חיפוש: פסיק מפצל למונחים, והתוצאות מאוחדות
   }
   return /perTerm=terms\.length>1/.test(dash)&&/movement-search-terms/.test(dash)
     ||'מונה התוצאות לכל מונח חסר'});
+
+// -- 1.75.0: חילוץ שם מוסר השיק מהסריקה (Gemini Nano מובנה) --
+// ⚠ המודל עצמו לא מורץ כאן - זו בדיקה של החיתוך, של ניקוי התשובה ושל
+// השלד. איכות הזיהוי עצמה נמדדת רק על שיק אמיתי, אצל טל.
+{
+ const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+   if(txt.slice(i-6,i)==='async ')i-=6;
+   let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+   throw new Error('לא נסגרה '+name)};
+ let bad=[];
+ try{
+  const box=JSON.parse((ocr.match(/const CHQ_CROP=(\{[^}]*\})/)||[])[1].replace(/(\w+):/g,'"$1":'));
+  if(!(box.right>0&&box.right<1&&box.top>0&&box.top<1))bad.push('גזרה לא חוקית: '+JSON.stringify(box));
+  // ⚠ x מחושב מהקצה **הימני**. אם מישהו יחליף ל-0 החיתוך יביא את הלוגו של הבנק.
+  if(!/const x=img\.naturalWidth-w/.test(ocr))bad.push('החיתוך אינו מהקצה הימני');
+  const crop=new Function(cut(ocr,'chequeCropTopRight')+';return chequeCropTopRight')();
+  // תמונה אמיתית 100x50: הפינה הימנית העליונה שחורה, השאר לבן
+  const c=document.createElement('canvas');c.width=100;c.height=50;const g=c.getContext('2d');
+  g.fillStyle='#fff';g.fillRect(0,0,100,50);g.fillStyle='#000';g.fillRect(50,0,50,16);
+  const blob=await crop(c.toDataURL('image/png'),{right:0.5,top:0.34,scale:2});
+  const bmp=await createImageBitmap(blob);
+  const o=document.createElement('canvas');o.width=bmp.width;o.height=bmp.height;
+  o.getContext('2d').drawImage(bmp,0,0);
+  const px=o.getContext('2d').getImageData(2,2,1,1).data;
+  if(bmp.width!==100||bmp.height!==34)bad.push(`מידות החיתוך ${bmp.width}x${bmp.height} במקום 100x34`);
+  if(px[0]>=40)bad.push('הפינה שנחתכה אינה הימנית-העליונה (פיקסל '+px[0]+')');
+ }catch(e){bad.push('חריגה: '+e.message)}
+ t('שיקים: החיתוך לוקח את הפינה הימנית-העליונה',()=>!bad.length||bad.join(' · '));
+}
+
+t('שיקים: ניקוי התשובה משאיר שם ומסלק פרטי חשבון',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}};
+    const clean=new Function((ocr.match(/const CHQ_DROP=[^\n]*\n/)||[''])[0]+cut(ocr,'chequeCleanName')+';return chequeCleanName')();
+  const cases=[
+    ['שם נקי','נוגה מושב עובדים להתיישבות חקלאית','נוגה מושב עובדים להתיישבות חקלאית'],
+    ['שם ואחריו כתובת','שמעי - משק עובדים\nד.נ שקמים\nת.ד 570010124','שמעי - משק עובדים'],
+    ['שורת ת.ד ראשונה נזרקת','ת.ד 5700\nנוגה מושב עובדים','נוגה מושב עובדים'],
+    ['טלפון נזרק','טלפון 08-8591087\nשמעי משק עובדים','שמעי משק עובדים'],
+    ['רק ספרות','557453560\n08-8592264',''],
+    ['לא זוהה','לא זוהה',''],
+    ['מרכאות נחתכות','"נוגה מושב עובדים"','נוגה מושב עובדים'],
+    ['ריק','',''] ];
+  for(const [name,raw,want] of cases){
+    const got=clean(raw);
+    if(got!==want)return name+': '+JSON.stringify(got)+' במקום '+JSON.stringify(want);
+  }
+  return true});
+
+t('שיקים: החילוץ לא מתחיל מעצמו ולא שולח כלום החוצה',()=>{
+  // ⚠ הורדת מודל של ג'יגה-בייטים ו/או קריאת סריקות בנק חייבות להיות
+  // ביוזמת המשתמש בלבד. אם מישהו יקרא ל-chequeOcrRunAll מטעינת הדף,
+  // הבדיקה הזאת תיפול.
+  if(!/\$\('#ocrCheques'\)\?\.addEventListener\('click'/.test(dash))return 'אין כפתור מפורש';
+  const auto=dash.split('chequeOcrRunAll').length-1;
+  if(auto!==1)return `chequeOcrRunAll נקרא ${auto} פעמים בדשבורד — צריך אחת, מהכפתור`;
+  if(!/confirm\(/.test(dash))return 'אין אישור לפני הורדת המודל';
+  if(/fetch\('https?:/.test(ocr)||/XMLHttpRequest/.test(ocr))return 'הקובץ פונה לרשת';
+  return /LanguageModel\.create/.test(ocr)&&/session\.clone\(\)/.test(ocr)
+    ||'הסשן אינו משוכפל לכל שיק — ההקשר ייערם'});
 
 // ── סיכום ──
 const ul=document.getElementById('out');
