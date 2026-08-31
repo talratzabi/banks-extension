@@ -112,6 +112,49 @@ t('חיפוש: הסיכום נמדד על כל ההתאמות ולא על 500 ה
     &&/movement-search-total/.test(dash)&&/<tfoot>/.test(dash)
     ||'הסיכום עדיין נגזר מהשורות המוצגות'});
 
+// -- 1.68.0: בורר המקורות — הפונקציות האמיתיות מהקובץ, על DOM אמיתי --
+// ⚠ לא לוגיקה מקבילה: הגוף נחתך מ-dashboard.js ורץ כפי שהוא.
+t('חיפוש: בורר המקורות מקבץ, ממיין, מסמן ומגזם',()=>{
+  const cut=(txt,name)=>{const i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+    throw new Error('לא נסגרה '+name)};
+  const host=document.createElement('div');host.style.display='none';
+  host.innerHTML='<details><summary id="movementSourceSummary"></summary><div id="movementSourceList"></div></details>';
+  document.body.appendChild(host);
+  try{
+    const pick=new Set();
+    const $$=sel=>document.querySelector(sel);
+    const esc2=v=>{const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;')};
+    const api=new Function('$','esc','movementSourcePick','movementSourceSig','scheduleMovementSearch',
+      cut(dash,'renderMovementSources')+';'+cut(dash,'movementSourceAction')+
+      ';return{renderMovementSources,movementSourceAction}')($$,esc2,pick,'',()=>{});
+    const rows=[{source:'לאומי · 800-1',type:'bank'},{source:'לאומי · 800-1',type:'bank'},
+                {source:'ישראכרט · 1234',type:'card'},{source:'פועלים · 12-345',type:'bank'}];
+    api.renderMovementSources(rows);
+    const boxes=()=>[...document.querySelectorAll('#movementSourceList input[data-src]')];
+    const types=boxes().map(b=>b.dataset.type).join(',');
+    if(boxes().length!==3)return 'מספר מקורות '+boxes().length;
+    if(types!=='bank,bank,card')return 'סדר שגוי: '+types;
+    if(!$$('#movementSourceSummary').textContent.includes('(3)'))return 'סיכום: '+$$('#movementSourceSummary').textContent;
+    const leumi=boxes().find(b=>b.dataset.src.startsWith('לאומי'));
+    if(!leumi.parentElement.querySelector('.msrc-tag').textContent.includes('2'))return 'שתי שורות לאומי לא קובצו';
+    api.movementSourceAction('cards');
+    if(pick.size!==1||!pick.has('ישראכרט · 1234'))return 'כרטיסים בלבד: '+[...pick].join(',');
+    api.renderMovementSources(rows);
+    if(!$$('#movementSourceSummary').textContent.includes('1 מתוך 3'))return 'סיכום חלקי: '+$$('#movementSourceSummary').textContent;
+    if(!boxes().find(b=>b.dataset.type==='card').checked)return 'הסימון לא שוחזר לתיבה';
+    api.renderMovementSources(rows.filter(r=>r.type==='bank'));
+    return pick.size===0||'מקור שנעלם לא נגזם מהבחירה';
+  }finally{host.remove()}});
+
+t('חיפוש: הבורר מחובר למסנן ולניקוי',()=>{
+  const doc=new DOMParser().parseFromString(dashHtml,'text/html');
+  return !!doc.querySelector('#movementSourceList')&&!!doc.querySelector('#movementSourceSummary')
+    &&/!movementSourcePick\.size\|\|movementSourcePick\.has\(r\.source\)/.test(dash)
+    &&/renderMovementSources\(rows\)/.test(dash)
+    &&/kindPick\.value='both';movementSourcePick\.clear\(\)/.test(dash)
+    ||'הבורר לא מחובר לחיפוש או ל"נקה"'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
