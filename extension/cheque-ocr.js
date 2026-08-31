@@ -74,6 +74,21 @@ async function chequeOcrSession(onDownload){
   });
 }
 
+// ⚠⚠ 31.08.2026 - טל צירף שיק של מזרחי טפחות שבו הבלוק המודפס אומר
+// "ועד מקומי מושב יד-נתן", והחותמת ליד החתימה אומרת את אותו דבר - והתוסף
+// רשם **"מופז גל"**. שם שאינו מופיע בשיק בשום מקום.
+// **הלקח:** קריאה אחת של מודל אינה ראיה. שתי קריאות בלתי-תלויות שמסכימות
+// הן ראיה סבירה; שתיים שחלוקות פירושן "לא יודע", ו"לא יודע" עדיף בהרבה
+// על שם שגוי שנכנס לחיפוש ומזהם אותו בשקט.
+const chqNorm=v=>String(v||'').replace(/[\s"'׳״,.\-–—]/g,'').toLocaleLowerCase('he');
+function chequeNamesAgree(a,b){
+  const x=chqNorm(a),y=chqNorm(b);
+  if(!x||!y)return false;
+  // הכלה ולא שוויון: קריאה אחת עשויה לקצר ("ועד מקומי מושב יד-נתן" מול
+  // "ועד מקומי מושב יד-נתן תאגיד לא רשום"), וזו עדיין אותה ישות.
+  return x===y||x.includes(y)||y.includes(x);
+}
+
 async function chequeReadPayer(session,front){
   const ask=async blob=>{
     const s=await session.clone();
@@ -82,26 +97,29 @@ async function chequeReadPayer(session,front){
     finally{try{s.destroy()}catch(e){}}
   };
   const cropped=await chequeCropTopRight(front);
-  const first=await ask(cropped);
-  if(first)return{name:first,from:'crop'};
-  // ⚠ נפילה לאחור לשיק המלא: סריקה נטויה או שוליים רחבים מוציאים את
-  // הבלוק מהגזרה. עדיף ניסיון שני על התמונה כולה מאשר "לא זוהה" שקרי.
+  const fromCrop=await ask(cropped);
+  // ⚠ **שתי הקריאות רצות תמיד**, גם כשהראשונה החזירה משהו. הגרסה הקודמת
+  // עצרה בהצלחה הראשונה - ולכן קריאה שגויה אחת התקבלה בלי שום ערעור.
   const whole=await (await fetch(front)).blob();
-  const second=await ask(whole);
-  return second?{name:second,from:'full'}:{name:'',from:''};
+  const fromFull=await ask(whole);
+  if(chequeNamesAgree(fromCrop,fromFull))
+    // הארוך מהשניים: הוא זה שנשא את הפרטים המלאים.
+    return{name:chqNorm(fromCrop).length>=chqNorm(fromFull).length?fromCrop:fromFull,agree:true,crop:fromCrop,full:fromFull};
+  return{name:'',agree:false,crop:fromCrop,full:fromFull};
 }
 
 // מעבר על כל הצילומים השמורים שאין להם עדיין שם. נקרא רק מלחיצה מפורשת.
 // ⚠ chequeKeys ואז chequeGet אחד-אחד, ולא chequeAll: אחרת כל התמונות
 // (45KB לשיק) יושבות בזיכרון בבת אחת.
-// ⚠ שמירה אחרי כל הצלחה ולא בסוף: הריצה יכולה לקחת דקות, וטל עלול לסגור
-// את הדף באמצע. מה שכבר זוהה - נשאר.
-async function chequeOcrRunAll({onProgress,onDownload,limit=0}={}){
-  const st=await chrome.storage.local.get({chequePayers:{}}),payers=st.chequePayers||{};
-  const ids=[...await chequeKeys()].filter(id=>!payers[id]);
-  if(!ids.length)return{total:0,done:0,found:0,already:Object.keys(payers).length};
+// ⚠ שמירה אחרי כל שיק ולא בסוף: הריצה יכולה לקחת דקות, וטל עלול לסגור
+// את הדף באמצע. מה שכבר הוכרע - נשאר.
+async function chequeOcrRunAll({onProgress,onDownload,limit=0,retryDoubt=false}={}){
+  const st=await chrome.storage.local.get({chequePayers:{},chequePayerDoubt:{}});
+  const payers=st.chequePayers||{},doubt=st.chequePayerDoubt||{};
+  const ids=[...await chequeKeys()].filter(id=>!payers[id]&&(retryDoubt||!doubt[id]));
+  if(!ids.length)return{total:0,done:0,found:0,unsure:Object.keys(doubt).length,already:Object.keys(payers).length};
   const session=await chequeOcrSession(onDownload);
-  let done=0,found=0;
+  let done=0,found=0,unsure=0;
   try{
     for(const id of ids){
       if(limit&&done>=limit)break;
@@ -109,12 +127,16 @@ async function chequeOcrRunAll({onProgress,onDownload,limit=0}={}){
       done++;
       if(rec?.front){
         try{
-          const {name}=await chequeReadPayer(session,rec.front);
-          if(name){payers[id]=name;found++;await chrome.storage.local.set({chequePayers:payers})}
+          const r=await chequeReadPayer(session,rec.front);
+          // ⚠ שם נשמר **רק** כששתי הקריאות מסכימות. חלוקות = ספק מתועד,
+          // לא ניחוש. הספק מוצג לטל עם שני המועמדים, והוא מכריע.
+          if(r.agree&&r.name){payers[id]=r.name;delete doubt[id];found++}
+          else{doubt[id]={crop:r.crop||'',full:r.full||''};unsure++}
+          await chrome.storage.local.set({chequePayers:payers,chequePayerDoubt:doubt});
         }catch(e){}
       }
-      onProgress?.({done,total:ids.length,found});
+      onProgress?.({done,total:ids.length,found,unsure});
     }
   }finally{try{session.destroy()}catch(e){}}
-  return{total:ids.length,done,found,already:Object.keys(payers).length};
+  return{total:ids.length,done,found,unsure,already:Object.keys(payers).length};
 }

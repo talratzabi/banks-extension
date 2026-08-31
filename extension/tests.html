@@ -481,6 +481,7 @@ t('שיקים: החילוץ לא מתחיל מעצמו ולא שולח כלום 
   return /LanguageModel\.create/.test(ocr)&&/session\.clone\(\)/.test(ocr)
     ||'הסשן אינו משוכפל לכל שיק — ההקשר ייערם'});
 
+
 // -- 1.76.0: פילוח לפי מונח חיפוש, כשיש יותר ממונח אחד --
 t('חיפוש: פילוח לפי מונח — סדר הקלדה, חפיפה נספרת, ומוצע רק מעל מונח אחד',()=>{
   const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
@@ -589,6 +590,43 @@ t('שיקים: כפתור האבחון תמיד מעתיק משהו',()=>{
   if(before<0||gate<0||before>gate)return 'ההעתקה אינה קודמת לבדיקת קיום הביקורת';
   return /chequeAuditForce:5/.test(h)&&/confirm\(/.test(h)&&/צילומים_שמורים/.test(h)
     ||'חסרה הצעת הקצירה החוזרת או ספירת הצילומים'});
+
+// -- 1.79.0: "מופז גל" על שיק שכתוב עליו "ועד מקומי מושב יד-נתן" --
+t('שיקים: שם נשמר רק כששתי קריאות מסכימות',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    if(txt.slice(i-6,i)==='async ')i-=6;
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+    throw new Error('לא נסגרה '+name)};
+  const agree=new Function((ocr.match(/const chqNorm=[^\n]*\n/)||[''])[0]+cut(ocr,'chequeNamesAgree')+';return chequeNamesAgree')();
+  const cases=[
+    ['זהות','ועד מקומי מושב יד-נתן','ועד מקומי מושב יד-נתן',true],
+    ['אחת ארוכה יותר','ועד מקומי מושב יד-נתן','ועד מקומי מושב יד-נתן תאגיד לא רשום',true],
+    ['רווחים ומקף','ועד מקומי מושב יד נתן','ועד מקומי מושב יד-נתן',true],
+    ['⚠ המקרה של טל','מופז גל','ועד מקומי מושב יד-נתן',false],
+    ['אחת ריקה','','ועד מקומי מושב יד-נתן',false],
+    ['שתיהן ריקות','','',false]];
+  for(const [name,a,b,want] of cases){
+    if(agree(a,b)!==want)return name+': התקבל '+agree(a,b)+' במקום '+want;
+  }
+  // ⚠ הגרסה הקודמת עצרה בהצלחה הראשונה, ולכן קריאה שגויה אחת התקבלה
+  // בלי ערעור. שתי הקריאות חייבות לרוץ תמיד.
+  const body=cut(ocr,'chequeReadPayer');
+  if(/if\(first\)return/.test(body))return 'עדיין נעצר אחרי הקריאה הראשונה';
+  if(!(body.includes('fromCrop')&&body.includes('fromFull')))return 'אין שתי קריאות';
+  if(!/agree:false/.test(body))return 'אין מסלול של אי-הסכמה';
+  return /chequePayerDoubt/.test(ocr)&&/if\(r\.agree&&r\.name\)/.test(ocr)
+    ||'שם נשמר גם בלי הסכמה'});
+
+t('שיקים: אין "מוסר", יש תיקון ידני, ומוצג מה שהמודל קרא',()=>{
+  // בקשת טל 31.08: השם עומד לבדו, בלי המילה "מוסר".
+  if(/מוסר: \$\{/.test(dash))return 'המילה "מוסר" עדיין נכתבת לפני השם';
+  if(!/class="payer-tag" data-payer=/.test(dash))return 'התגית אינה ניתנת ללחיצה';
+  if(!/class="payer-doubt" data-payer=/.test(dash))return 'שם שלא הוכרע אינו מסומן כספק';
+  if(!/function editChequePayer\(/.test(dash))return 'אין תיקון ידני';
+  if(!/\[data-payer\]/.test(dash))return 'התגיות אינן מחוברות לתיקון';
+  // "המודל טעה" מול "החיתוך פספס" הם שני מצבים שונים שנראו זהה עד עכשיו
+  return /cheque-crop/.test(dash)&&/האזור שנשלח לזיהוי השם/.test(dash)
+    ||'החיתוך שנשלח לזיהוי אינו מוצג'});
 
 // ── סיכום ──
 const ul=document.getElementById('out');
