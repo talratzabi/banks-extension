@@ -226,7 +226,7 @@ t('כרטיסים: המפתח מוגדר פעם אחת, והתג מחובר בש
     ||'המפתח שוכפל, או שהתג לא מחובר'});
 
 // -- 1.69.0: פילוח הסיכום לפי חודש/מקור — הפונקציות האמיתיות מ-dashboard.js --
-t('חיפוש: פילוח לפי חודש ולפי מקור, על DOM אמיתי',()=>{
+t('חיפוש: פילוח לפי חודש, לפי מקור, ושילוב — על DOM אמיתי',()=>{
   const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
     if(txt.slice(i-6,i)==='async ')i-=6;
     let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
@@ -237,7 +237,7 @@ t('חיפוש: פילוח לפי חודש ולפי מקור, על DOM אמיתי
     const $$=sel=>document.querySelector(sel);
     const esc2=v=>{const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;')};
     const mk=(mode,rows)=>new Function('$','esc','money','movementBreakdown','movementLastMatched',
-      cut(dash,'movementMonthTitle')+';'+cut(dash,'movementGroups')+';'+cut(dash,'paintMovementBreakdown')+
+      cut(dash,'movementMonthTitle')+';'+cut(dash,'movementMonthKey')+';'+cut(dash,'movementMonthDesc')+';'+cut(dash,'movementGroups')+';'+cut(dash,'paintMovementBreakdown')+
       ';return{paintMovementBreakdown,movementGroups}')($$,esc2,new Function(cut(dash,'money')+';return money')(),mode,rows);
     const dateKey=new Function(cut(dash,'dateKey')+';return dateKey')();
     const D=(d,src,flow,amt)=>({when:dateKey(d),date:d,source:src,flow,amount:amt});
@@ -259,10 +259,30 @@ t('חיפוש: פילוח לפי חודש ולפי מקור, על DOM אמיתי
     if(!document.querySelector('#movementBreakdownBox button[data-bd="source"]'))return '"לפי מקור" חסר למרות שני מקורות';
     if(!bodyRows[0].textContent.includes('אוגוסט'))return 'שם החודש בעברית חסר: '+bodyRows[0].textContent;
 
-    // מקור יחיד — הכפתור "לפי מקור" לא מוצע כלל
+    // "חודש ומקור": תא חודש אחד נמתח על כל מקורותיו
+    mk('both',rows).paintMovementBreakdown();
+    const bothRows=[...document.querySelectorAll('#movementBreakdownBox tbody tr')];
+    if(bothRows.length!==5)return 'שורות שילוב (4 צירופים + סה״כ): '+bothRows.length;
+    // יולי הוא החודש עם שני מקורות בנתוני הבדיקה (ישראכרט + לאומי);
+    // אוגוסט כולו לאומי, ולכן תא אחד בלבד.
+    const span=document.querySelector('#movementBreakdownBox .bd-month[rowspan="2"]');
+    if(!span||!span.textContent.includes('יולי'))return 'תא יולי לא נמתח על שני המקורות';
+    const augCell=[...document.querySelectorAll('#movementBreakdownBox .bd-month')].find(c=>c.textContent.includes('אוגוסט'));
+    if(!augCell||augCell.getAttribute('rowspan')!=='1')return 'אוגוסט (מקור יחיד) לא קיבל rowspan=1';
+    const augCells=[...bothRows[0].children].map(c=>c.textContent.trim());
+    if(augCells.length!==6)return 'שורת השילוב אינה בת שש עמודות: '+augCells.length;
+    if(!document.querySelector('#movementBreakdownBox button[data-bd="both"].on'))return 'הכפתור "חודש ומקור" לא סומן פעיל';
+    const bothGroups=mk('both',rows).movementGroups(rows,'both');
+    if(bothGroups.length!==4)return 'צירופי חודש×מקור: '+bothGroups.length;
+    if(bothGroups[bothGroups.length-1].month!=='ללא תאריך')return 'חסר-תאריך לא נדחף לסוף בשילוב';
+    const aug=bothGroups.filter(g=>g.month==='2026-08');
+    if(aug.length!==1||aug[0].n!==2||aug[0].debit!==100||aug[0].credit!==40)return 'סכומי אוגוסט בשילוב: '+JSON.stringify(aug);
+
+    // מקור יחיד — הכפתורים "לפי מקור"/"חודש ומקור" לא מוצעים כלל
     const one=rows.filter(r=>r.source.startsWith('לאומי'));
     mk('none',one).paintMovementBreakdown();
     if(document.querySelector('#movementBreakdownBox button[data-bd="source"]'))return '"לפי מקור" הוצע על מקור יחיד';
+    if(document.querySelector('#movementBreakdownBox button[data-bd="both"]'))return '"חודש ומקור" הוצע על מקור יחיד';
     return document.querySelectorAll('#movementBreakdownBox tbody tr').length===0||'פילוח צויר במצב "ללא"';
   }finally{host.remove()}});
 
