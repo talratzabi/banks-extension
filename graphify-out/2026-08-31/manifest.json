@@ -36,9 +36,9 @@
     "semantic_hash": ""
   },
   "extension/discount-content.js": {
-    "mtime": 1788188754.447709,
-    "seen": 1788188972.9385567,
-    "ast_hash": "511bc41760da066450124456a56a260e",
+    "mtime": 1788189188.4914474,
+    "seen": 1788189295.5332115,
+    "ast_hash": "1f0997cdd3765d738775eb2fc53b9855",
     "semantic_hash": ""
   },
   "extension/fibi-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1788188773.4867203,
-    "seen": 1788188972.9385567,
-    "ast_hash": "7c31d98d19207be5c086e8909e71fc53",
+    "mtime": 1788189213.4542768,
+    "seen": 1788189295.5332115,
+    "ast_hash": "deb67c45f25280ba7e282f8390b90322",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1788188968.094877,
-    "seen": 1788188972.9385567,
-    "ast_hash": "b64d281f716139594bbe0181d03c534b",
+    "mtime": 1788189290.6817713,
+    "seen": 1788189295.5332115,
+    "ast_hash": "a0ead1f6a859f2b2610311ad86fbcfe6",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
@@ -198,9 +198,9 @@
     "semantic_hash": ""
   },
   "extension/tests.html": {
-    "mtime": 1788188865.4739306,
-    "seen": 1788188972.9385567,
-    "ast_hash": "277f7ccf40722ef80f075d555c53391b",
+    "mtime": 1788189213.4542768,
+    "seen": 1788189295.5332115,
+    "ast_hash": "3d4ddd52d3bdff5e3fd3e8bc2c82534a",
     "semantic_hash": ""
   },
   "extension/viewer.html": {
