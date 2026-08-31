@@ -17,12 +17,12 @@ const t=(name,fn)=>{try{const v=fn();results.push({name,ok:v===true,info:v===tru
 const get=async f=>await (await fetch(f+'?v='+Date.now(),{cache:'no-store'})).text();
 (async()=>{
 const bg=await get('background.js'), lc=await get('leumi-content.js'), btb=await get('btb-content.js');
-const dash=await get('dashboard.js'), dashHtml=await get('dashboard.html'), ch=await get('card-history.js'), ocr=await get('cheque-ocr.js');
+const dash=await get('dashboard.js'), dashHtml=await get('dashboard.html'), ch=await get('card-history.js'), ocr=await get('cheque-ocr.js'), led=await get('cheque-ledger.js');
 
 // ── פרסינג: כל הקבצים נטענים ──
 for(const [f,txt] of [['background.js',bg],['leumi-content.js',lc],['btb-content.js',btb],
     ['dashboard.js',await get('dashboard.js')],['discount-content.js',await get('discount-content.js')],
-    ['fibi-content.js',await get('fibi-content.js')],['cheque-store.js',await get('cheque-store.js')],['cheque-ocr.js',ocr]])
+    ['fibi-content.js',await get('fibi-content.js')],['cheque-store.js',await get('cheque-store.js')],['cheque-ocr.js',ocr],['cheque-ledger.js',led]])
   t('פרסינג: '+f,()=>{new Function(txt);return true});
 
 // ── 1.33.4: תאריך דבוק לסכום (btb) ──
@@ -835,6 +835,68 @@ t('שיקים: הקלדה ידנית עוברת את אותו אימות מבנ�
   if(key(parse('2951079 20 433 251592'))!=='20-433-251592')return 'הקלדה תקינה נדחתה';
   if(key(parse('שטויות'))!=='')return 'קלט לא חוקי התקבל';
   return true});
+
+// -- 1.88.0: הייצוא מהנהלת חשבונות מתקן את הסריקה --
+// ⚠⚠ שלושת המקרים כאן הם **המקרים האמיתיים של טל**, עם השורות האמיתיות
+// מ"תקבולים המחאות 2026.pdf". זו לא סימולציה - זו הרגרסיה עצמה.
+t('שיקים: הייצוא מתקן את שלוש הטעויות שנמדדו אצל טל',()=>{
+  const L=new Function(led+';return{ledgerParse,ledgerPick,ledgerKey,ledgerNameClose,ledgerDigitScore}')();
+  const rows=L.ledgerParse(JSON.stringify({rows:[
+    {date:'12/01/2026',name:'מושב ינון',amount:4720,cheque:'1824',bank:'11',branch:'153',account:'82043'},
+    {date:'06/07/2026',name:'ועד מקומי שחר',amount:4720,cheque:'11994',bank:'12',branch:'645',account:'297331'},
+    {date:'10/07/2026',name:'ועד מקומי תירוש',amount:4720,cheque:'431607',bank:'20',branch:'450',account:'283006'},
+    {date:'27/08/2026',name:'ועד מקומי יד נתן',amount:4720,cheque:'1079',bank:'20',branch:'433',account:'251592'},
+    {date:'18/02/2026',name:'פרידמן מאיר',amount:354,cheque:'745',bank:'11',branch:'153',account:'54074'},
+    {date:'26/08/2026',name:'פרידמן מאיר',amount:354,cheque:'766',bank:'11',branch:'153',account:'54074'},
+    {date:'31/08/2026',name:'יפרח מזל',amount:5200,cheque:'1478',bank:'10',branch:'916',account:'3398618'}]}));
+  if(rows.length!==7)return 'הייבוא החזיר '+rows.length;
+
+  // 1. "מופז גל" — ארבע שורות באותו סכום, והתאריך+הספרות מכריעים
+  const a=L.ledgerPick(rows,{amount:4720,date:'27.08.2026',micr:'2951079 20 43300 251592',nameGuess:'מופז גל'});
+  if(a.row?.name!=='ועד מקומי יד נתן')return 'מקרה 1: '+JSON.stringify(a.row);
+  if(L.ledgerKey(a.row)!=='20-433-251592')return 'מקרה 1 חשבון: '+L.ledgerKey(a.row);
+  if(a.candidates!==4)return 'מקרה 1 מועמדים: '+a.candidates;
+  if(a.confidence!=='high')return 'מקרה 1 ודאות: '+a.confidence;
+
+  // 2. "יצחק שומר" — שתי שורות של אותו מוסר; שתיהן נותנות את השם הנכון
+  const b=L.ledgerPick(rows,{amount:354,date:'26.08.2026',micr:'80000766 11 15345 0000054074',nameGuess:'יצחק שומר'});
+  if(b.row?.name!=='פרידמן מאיר')return 'מקרה 2: '+JSON.stringify(b.row);
+  if(b.row?.cheque!=='766')return 'מקרה 2 לא בחר את השיק הנכון: '+b.row?.cheque;
+
+  // 3. "יפרה אלישע" — סכום ייחודי, ולכן ודאות מלאה גם בלי ספרות
+  const c=L.ledgerPick(rows,{amount:5200,date:'27.08.2026',micr:'',nameGuess:'יפרה אלישע'});
+  if(c.row?.name!=='יפרח מזל')return 'מקרה 3: '+JSON.stringify(c.row);
+  if(c.confidence!=='single')return 'מקרה 3 ודאות: '+c.confidence;
+
+  // ⚠ סכום שאינו בייצוא לא מייצר התאמה — עדיף כלום מאשר שיוך שגוי
+  const d=L.ledgerPick(rows,{amount:999,date:'01.01.2026',micr:'123'});
+  if(d.row||d.confidence!=='none')return 'סכום לא קיים ייצר התאמה';
+
+  // ⚠ קריאה **רועשת** של הספרות עדיין בוחרת נכון, כי הסכום והתאריך נושאים
+  const e=L.ledgerPick(rows,{amount:4720,date:'27.08.2026',micr:'20 330 13669',nameGuess:''});
+  if(e.row?.name!=='ועד מקומי יד נתן')return 'קריאה רועשת הכשילה: '+JSON.stringify(e.row);
+  return true});
+
+t('שיקים: השוואת שמות רכה תופסת את "יפרה" מול "יפרח"',()=>{
+  const L=new Function(led+';return{ledgerNameClose,ledgerParse}')();
+  const yes=[['יפרה אלישע','יפרח מזל'],['פרידמן מאיר','פרידמן מאיר, פרידמן שושנה'],['מושב ינון','ועד מקומי ינון']];
+  const no=[['מופז גל','ועד מקומי יד נתן'],['יצחק שומר','פרידמן מאיר'],['','פרידמן מאיר']];
+  for(const [a,b] of yes)if(!L.ledgerNameClose(a,b))return `היה צריך להתאים: ${a} ~ ${b}`;
+  for(const [a,b] of no)if(L.ledgerNameClose(a,b))return `לא היה צריך להתאים: ${a} ~ ${b}`;
+  // CSV מתוכנת הנהלת חשבונות
+  const csv='תאריך,שם,סכום,מס\' שיק,בנק,סניף,חשבון\n27/08/2026,ועד מקומי יד נתן,"4,720.00",1079,20,433,251592';
+  const r=L.ledgerParse(csv);
+  return (r.length===1&&r[0].amount===4720&&r[0].account==='251592'&&r[0].name==='ועד מקומי יד נתן')
+    ||'ייבוא CSV נכשל: '+JSON.stringify(r)});
+
+t('שיקים: הייצוא הוא האמת, והתיקון מדווח',()=>{
+  if(!/function applyLedger\(/.test(dash))return 'אין החלת ייצוא';
+  // ⚠ הסכום מגיע מהבנק ולא מתמונה — הוא העוגן
+  if(!/chequeTxIndex\(\)/.test(dash))return 'אין אינדקס סכום+תאריך מהתנועות';
+  if(!/fromLedger:true/.test(dash))return 'חשבון מהייצוא אינו מסומן ככזה';
+  if(!/pick\.confidence==='low'/.test(dash))return 'התאמה חלשה אינה נדחית';
+  if(!/chequeLedgerReport/.test(dash))return 'אין דוח של מה תוקן';
+  return /תיקנו קריאה שגויה/.test(dash)||'התיקון אינו מדווח למשתמש'});
 
 // ── סיכום ──
 const ul=document.getElementById('out');
