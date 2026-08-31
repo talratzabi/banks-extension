@@ -83,7 +83,21 @@ trigger:f(text(entityButton())).slice(0,80),expanded:entityButton()?.getAttribut
 menuItems:[...document.querySelectorAll('[role="menu"] *,[role="listbox"] *')].map(el=>f(text(el))).filter(Boolean).slice(0,15),
 nineDigit:[...new Set((f(document.body.innerText).match(/\b\d{9}\b/g)||[]))].slice(0,12),
 buttons:[...document.querySelectorAll('button,[role="button"],[role="combobox"]')].map(b=>({t:f(text(b)).slice(0,60),pop:b.getAttribute('aria-haspopup'),exp:b.getAttribute('aria-expanded')})).filter(x=>x.t).slice(0,20),
-head:f(document.body.innerText).slice(0,500)}}catch(e){return{probeError:e.message}}}
+head:f(document.body.innerText).slice(0,500),
+// ⚠⚠ 31.08.2026 - נוסף אחרי שלושה סבבי ניחוש על "דיסקונט פרטי לא מזהה
+// חשבונות". **הגשש הכללי לא ענה על השאלה הקונקרטית:** כמה כל סלקטור
+// של רשימת החשבונות מוצא, כמה מהשורות בכלל נקראות כחשבון, והאם
+// הפותחן קיים. שלושת אלה מכריעים בין "הבורר לא נפתח", "נפתח ולא נקרא"
+// ו"הסלקטורים כבר לא תואמים לדף". קריאה בלבד - בלי לחיצות.
+privateSets:Object.fromEntries(PRIVATE_ITEM_SETS.map(sel=>[sel,document.querySelectorAll(sel).length])),
+privateParsed:(()=>{const seen=new Set(),out=[];
+  for(const sel of PRIVATE_ITEM_SETS)for(const el of document.querySelectorAll(sel)){if(seen.has(el))continue;seen.add(el);out.push(el)}
+  const acc=out.map(r=>privateAccountFromRow(r)).filter(Boolean);
+  return{rows:out.length,accounts:acc.length,keys:[...new Set(acc.map(a=>a.key))].slice(0,12)}})(),
+privateTrigger:(()=>{const t=document.querySelector(PRIVATE_TRIGGER);
+  return t?{found:true,tag:t.tagName.toLowerCase(),cls:f(t.className).slice(0,60),
+    expanded:t.getAttribute('aria-expanded')||'',text:f(t.textContent).slice(0,60)}:{found:false}})()
+}}catch(e){return{probeError:e.message}}}
 const entityButton=()=>{const all=[...document.querySelectorAll('button[aria-haspopup],[role="combobox"],button,[role="button"]')].filter(b=>ENTITY.test(text(b))&&!b.closest('[role="menu"],[role="listbox"],[role="dialog"]'));return all.find(b=>b.hasAttribute('aria-haspopup')||b.hasAttribute('aria-expanded'))||all[0]};
 const entityId=v=>(String(v).match(/\b(\d{9})\b/)||[])[1]||'';
 // ⚠ 18.08.2026 — נמדד מתוך discountProbe של הריצה שנכשלה, ולא שוחזר בהשערה:

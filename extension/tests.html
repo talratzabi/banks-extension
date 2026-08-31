@@ -1124,6 +1124,42 @@ t('בחירה: חשבון שזוהה אינו מסומן מאליו',()=>{
  t('דיסקונט פרטי: כל הסלקטורים מאוחדים, ולא הראשון שמצא משהו',()=>!bad.length||bad.join(' · '));
 }
 
+// -- 1.96.0: הגשש עונה על השאלה הקונקרטית --
+{
+ let bad=[];
+ try{
+  const dc=await get('discount-content.js');
+  // ⚠ אחרי שלושה סבבים על "דיסקונט לא מזהה חשבונות", הגשש חייב להכריע
+  // בין שלוש האפשרויות: הבורר לא נפתח · נפתח ולא נקרא · סלקטור מיושן.
+  for(const f of ['privateSets:','privateParsed:','privateTrigger:'])
+    if(!dc.includes(f))bad.push('חסר בגשש: '+f);
+  // הרצה על DOM אמיתי: בורר סגור עם שורות שאינן חשבונות
+  const host=document.createElement('div');host.style.display='none';
+  host.innerHTML='<button class="commonDropdown__button" aria-expanded="false">בחר חשבון</button>'
+   +'<div role="menu"><div role="radio">כל החשבונות</div></div>'
+   +'<ul><li class="commonDropdown__menuItem"><p>0150497352</p><p>רצבי טל</p></li></ul>';
+  document.body.appendChild(host);
+  try{
+   const SETS=((dc.match(/const PRIVATE_ITEM_SETS=\[(.*?)\];/)||[])[1]||'').split(/'\s*,\s*'/).map(x=>x.replace(/^'|'$/g,'')).filter(Boolean);
+   const TRIG=((dc.match(/const PRIVATE_TRIGGER='(.*?)';/)||[])[1]||'');
+   if(!TRIG)bad.push('סלקטור הפותחן לא חולץ');
+   const parse=new Function('text','const privateAccountFromRow='+(dc.match(/privateAccountFromRow=row=>\{[\s\S]*?\};/)||[''])[0].replace(/^privateAccountFromRow=/,'')+'return privateAccountFromRow')
+     (el=>String(el.textContent||'').replace(/\s+/g,' ').trim());
+   const sets=Object.fromEntries(SETS.map(sel=>[sel,document.querySelectorAll(sel).length]));
+   const seen=new Set(),rows=[];
+   for(const sel of SETS)for(const el of document.querySelectorAll(sel)){if(seen.has(el))continue;seen.add(el);rows.push(el)}
+   const acc=rows.map(r=>parse(r)).filter(Boolean);
+   // ⚠ זה בדיוק המצב שמבלבל: **שתי שורות נמצאו, אבל רק אחת היא חשבון.**
+   // בלי ההפרדה הזאת "נמצאו שורות" נראה כמו הצלחה.
+   if(rows.length!==2)bad.push('שורות: '+rows.length);
+   if(acc.length!==1)bad.push('חשבונות: '+acc.length);
+   if(!document.querySelector(TRIG))bad.push('הפותחן לא נמצא ב-DOM לדוגמה');
+   if(sets['li.commonDropdown__menuItem']!==1)bad.push('ספירת li שגויה');
+  }finally{host.remove()}
+ }catch(e){bad.push('חריגה: '+e.message)}
+ t('דיסקונט: הגשש מפריד בין "שורות" ל"חשבונות" ומדווח על הפותחן',()=>!bad.length||bad.join(' · '));
+}
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
