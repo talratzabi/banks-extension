@@ -795,17 +795,46 @@ t('שיקים: דוח החשבונות נפתח מיד, והמונה בתוך ה
   if(/await\s+chequeOcrAvailability/.test(h))return 'בדיקת הזמינות עדיין קודמת לפתיחת החלון';
   if(!/openChequeAccounts\(\)\.catch/.test(h))return 'הפתיחה אינה מוגנת מכשל';
   // המונה יושב בתוך החלון, לא בשורת הגיבוי הרחוקה
-  const open=dash.slice(dash.indexOf('async function openChequeAccounts'),dash.indexOf('async function readChequeAccounts'));
+  const open=dash.slice(dash.indexOf('async function openChequeAccounts'),dash.indexOf('async function setAccountManually'));
   if(!/id="chequeAccountsStatus"/.test(open))return 'אין מונה בתוך החלון';
   if(/ocrChequesState/.test(open))return 'המונה עדיין נכתב לשורת הגיבוי';
-  if(!/nChq\(stored\)/.test(open))return 'החלון אינו מדווח כמה צילומים יש';
-  if(!/עדיין לא נקראו/.test(open))return 'החלון אינו מדווח כמה עוד לא נקראו';
+  if(!/nChq\(all\.length\)/.test(open))return 'החלון אינו מדווח כמה צילומים יש';
+  if(!/בלי חשבון/.test(open))return 'החלון אינו מדווח כמה עוד לא נקראו';
   // ⚠ קריאה שתולה חייבת להיגמר בהודעה, לא בשקט
   const read=dash.slice(dash.indexOf('async function readChequeAccounts'),dash.indexOf('async function nameWholeAccount'));
   if(!/Promise\.race/.test(read)||!/'timeout'/.test(read))return 'אין תקרת זמן לבדיקת הזמינות';
   if(!/לא השיב תוך 8 שניות/.test(read))return 'תקרת הזמן שקטה';
   return /onProgress:\(\{done,total,read\}\)=>chequeAccountsStatus/.test(read)
     ||'ההתקדמות אינה מדווחת לחלון'});
+
+// -- 1.86.0: "אין צילום שיק איך ארשום שם" + 89 בלי חשבון --
+t('שיקים: הדוח מציג תמונה, ומאפשר להתקדם גם כשהקריאה נכשלה',()=>{
+  const open=dash.slice(dash.indexOf('async function openChequeAccounts'),dash.indexOf('async function setAccountManually'));
+  // 1. בלי תמונה אי אפשר לדעת של מי החשבון
+  if(!/acct-pic/.test(open)||!/acctThumb\(td\.dataset\.thumb,'top'\)/.test(open))return 'אין תמונה בשורת החשבון';
+  // 2+3. ⚠ "לא זוהה" הוא כשל קריאה ולא קטגוריה — כל שיק נמשך מחשבון
+  if(!/החשבון לא נקרא/.test(open))return 'הכותרת אינה מציגה זאת ככשל קריאה';
+  if(!/אינם "בלי חשבון"/.test(open))return 'חסר ההסבר שכל שיק נמשך מחשבון';
+  if(!/acct-card/.test(open))return 'אין כרטיס לשיק שלא נקרא';
+  if(!/acctThumb\(id,'micr'\)/.test(open))return 'שורת הספרות אינה מוצגת להקלדה';
+  if(!/acctUnreadShown/.test(open))return 'אין הגבלת תצוגה — 89 תמונות בבת אחת';
+  // דרך ידנית: הקלדת חשבון, ושם לשיק בודד
+  if(!/async function setAccountManually\(/.test(dash))return 'אין הקלדה ידנית של חשבון';
+  if(!/manual:true/.test(dash))return 'הקלדה ידנית אינה מסומנת';
+  if(!/async function nameOneCheque\(/.test(dash))return 'אין קביעת שם לשיק בודד';
+  return /input\[data-acct-for\]/.test(dash)&&/e\.key==='Enter'/.test(dash)
+    ||'הקלדת החשבון אינה נשמרת ב-Enter'});
+
+t('שיקים: הקלדה ידנית עוברת את אותו אימות מבנה',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}};
+  const parse=new Function(cut(ocr,'chequeParseMicr')+';return chequeParseMicr')();
+  const key=new Function(cut(ocr,'chequeAccountKey')+';return chequeAccountKey')();
+  // ⚠ מה שטל יקליד עובר בדיוק את אותו שער כמו קריאת המודל — אין דלת אחורית
+  if(key(parse('20 433 251592'))!=='')return 'שלוש קבוצות בלי מס\' שיק התקבלו כמבנה מלא';
+  if(key(parse('2951079 20 433 251592'))!=='20-433-251592')return 'הקלדה תקינה נדחתה';
+  if(key(parse('שטויות'))!=='')return 'קלט לא חוקי התקבל';
+  return true});
 
 // ── סיכום ──
 const ul=document.getElementById('out');
