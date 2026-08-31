@@ -44,6 +44,19 @@ const CHQ_ASK=[
   'אם אין שם קריא בתמונה, החזר בדיוק: לא זוהה'
 ].join(' ');
 
+// ⚠⚠ ידע שטל מסר, 31.08.2026: **רק חברות, מושבים וועדים מקומיים חותמים
+// בחותמת לצד החתימה. לאדם פרטי אין חותמת.** לכן החותמת אינה "עוד מקור
+// לשם" - היא **סימן לסוג המוסר**, והיא משנה את רף ההוכחה:
+//   יש חותמת -> ישות. השם המודפס חייב להיות מאושר מולה.
+//   אין חותמת -> אדם פרטי. אין מה להצליב, ולכן נדרשות שתי קריאות
+//   מסכימות של הבלוק המודפס - ואין להסיק "כשל" מהיעדר חותמת.
+const CHQ_STAMP_ASK=[
+ 'בתמונה שיק ישראלי. הסתכל **רק על אזור החתימה** בתחתית השיק.',
+ 'האם מוטבעת שם חותמת (חותמת מלבנית או עגולה עם שם מודפס, לצד או מעל החתימה)?',
+ 'אם יש חותמת - החזר אך ורק את השם שכתוב בתוכה, בלי ח.פ, בלי כתובת ובלי שום מילה נוספת.',
+ 'אם אין חותמת כלל, החזר בדיוק: אין חותמת'
+].join(' ');
+
 // שורות שהן רק ספרות/סימנים, או שנפתחות בתווית של פרט שאינו שם, נזרקות.
 // זו רשת ביטחון על תשובת המודל, לא תחליף להנחיה.
 const CHQ_DROP=/^(ת\.?ד|טל|טלפון|פקס|מיקוד|ח\.?פ|ע\.?מ|עוסק|מס['׳]?\s|רח['׳]?\s|רחוב|סניף|בנק|d\.?n|p\.?o)/i;
@@ -90,22 +103,33 @@ function chequeNamesAgree(a,b){
 }
 
 async function chequeReadPayer(session,front){
-  const ask=async blob=>{
+  const ask=async(blob,question)=>{
     const s=await session.clone();
     try{return chequeCleanName(await s.prompt([{role:'user',content:[
-      {type:'text',value:CHQ_ASK},{type:'image',value:blob}]}]))}
+      {type:'text',value:question},{type:'image',value:blob}]}]))}
     finally{try{s.destroy()}catch(e){}}
   };
   const cropped=await chequeCropTopRight(front);
-  const fromCrop=await ask(cropped);
-  // ⚠ **שתי הקריאות רצות תמיד**, גם כשהראשונה החזירה משהו. הגרסה הקודמת
-  // עצרה בהצלחה הראשונה - ולכן קריאה שגויה אחת התקבלה בלי שום ערעור.
   const whole=await (await fetch(front)).blob();
-  const fromFull=await ask(whole);
+  const fromCrop=await ask(cropped,CHQ_ASK);
+  const fromFull=await ask(whole,CHQ_ASK);
+  const stampRaw=await ask(whole,CHQ_STAMP_ASK);
+  const stamp=/אין חותמת/.test(stampRaw)?'':stampRaw;
+  const both={crop:fromCrop,full:fromFull,stamp};
+
+  // ── יש חותמת: ישות. החותמת היא העדות החזקה, והשם המודפס נבדק מולה. ──
+  if(stamp){
+    const backed=[fromCrop,fromFull].filter(v=>chequeNamesAgree(v,stamp));
+    if(!backed.length)return{...both,name:'',agree:false,kind:'entity'};
+    // הארוך מבין המאושרים: הוא נושא את הפרטים המלאים.
+    const name=backed.concat(stamp).sort((a,b)=>chqNorm(b).length-chqNorm(a).length)[0];
+    return{...both,name,agree:true,kind:'entity'};
+  }
+
+  // ── אין חותמת: אדם פרטי. אין מה להצליב, ולכן שתי קריאות חייבות להסכים. ──
   if(chequeNamesAgree(fromCrop,fromFull))
-    // הארוך מהשניים: הוא זה שנשא את הפרטים המלאים.
-    return{name:chqNorm(fromCrop).length>=chqNorm(fromFull).length?fromCrop:fromFull,agree:true,crop:fromCrop,full:fromFull};
-  return{name:'',agree:false,crop:fromCrop,full:fromFull};
+    return{...both,name:chqNorm(fromCrop).length>=chqNorm(fromFull).length?fromCrop:fromFull,agree:true,kind:'private'};
+  return{...both,name:'',agree:false,kind:'private'};
 }
 
 // מעבר על כל הצילומים השמורים שאין להם עדיין שם. נקרא רק מלחיצה מפורשת.
@@ -114,8 +138,8 @@ async function chequeReadPayer(session,front){
 // ⚠ שמירה אחרי כל שיק ולא בסוף: הריצה יכולה לקחת דקות, וטל עלול לסגור
 // את הדף באמצע. מה שכבר הוכרע - נשאר.
 async function chequeOcrRunAll({onProgress,onDownload,limit=0,retryDoubt=false}={}){
-  const st=await chrome.storage.local.get({chequePayers:{},chequePayerDoubt:{}});
-  const payers=st.chequePayers||{},doubt=st.chequePayerDoubt||{};
+  const st=await chrome.storage.local.get({chequePayers:{},chequePayerDoubt:{},chequePayerMeta:{}});
+  const payers=st.chequePayers||{},doubt=st.chequePayerDoubt||{},meta=st.chequePayerMeta||{};
   const ids=[...await chequeKeys()].filter(id=>!payers[id]&&(retryDoubt||!doubt[id]));
   if(!ids.length)return{total:0,done:0,found:0,unsure:Object.keys(doubt).length,already:Object.keys(payers).length};
   const session=await chequeOcrSession(onDownload);
@@ -130,9 +154,12 @@ async function chequeOcrRunAll({onProgress,onDownload,limit=0,retryDoubt=false}=
           const r=await chequeReadPayer(session,rec.front);
           // ⚠ שם נשמר **רק** כששתי הקריאות מסכימות. חלוקות = ספק מתועד,
           // לא ניחוש. הספק מוצג לטל עם שני המועמדים, והוא מכריע.
+          // ⚠ סוג המוסר נשמר תמיד, גם כשהשם בספק: "יש חותמת" הוא עובדה
+          // שנצפתה בתמונה, והיא נכונה גם אם הקריאה נכשלה.
+          meta[id]={kind:r.kind||'',stamp:r.stamp||''};
           if(r.agree&&r.name){payers[id]=r.name;delete doubt[id];found++}
-          else{doubt[id]={crop:r.crop||'',full:r.full||''};unsure++}
-          await chrome.storage.local.set({chequePayers:payers,chequePayerDoubt:doubt});
+          else{doubt[id]={crop:r.crop||'',full:r.full||'',stamp:r.stamp||''};unsure++}
+          await chrome.storage.local.set({chequePayers:payers,chequePayerDoubt:doubt,chequePayerMeta:meta});
         }catch(e){}
       }
       onProgress?.({done,total:ids.length,found,unsure});

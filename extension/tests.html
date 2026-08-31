@@ -620,13 +620,59 @@ t('שיקים: שם נשמר רק כששתי קריאות מסכימות',()=>{
 t('שיקים: אין "מוסר", יש תיקון ידני, ומוצג מה שהמודל קרא',()=>{
   // בקשת טל 31.08: השם עומד לבדו, בלי המילה "מוסר".
   if(/מוסר: \$\{/.test(dash))return 'המילה "מוסר" עדיין נכתבת לפני השם';
-  if(!/class="payer-tag" data-payer=/.test(dash))return 'התגית אינה ניתנת ללחיצה';
+  if(!/class="payer-tag\$\{m\.stamp\?' stamped':''\}" data-payer=/.test(dash))return 'התגית אינה ניתנת ללחיצה';
   if(!/class="payer-doubt" data-payer=/.test(dash))return 'שם שלא הוכרע אינו מסומן כספק';
   if(!/function editChequePayer\(/.test(dash))return 'אין תיקון ידני';
   if(!/\[data-payer\]/.test(dash))return 'התגיות אינן מחוברות לתיקון';
   // "המודל טעה" מול "החיתוך פספס" הם שני מצבים שונים שנראו זהה עד עכשיו
   return /cheque-crop/.test(dash)&&/האזור שנשלח לזיהוי השם/.test(dash)
     ||'החיתוך שנשלח לזיהוי אינו מוצג'});
+
+// -- 1.80.0: חותמת = סימן לסוג המוסר, לא עוד מקור לשם --
+// ⚠ ידע שטל מסר: רק חברות/מושבים/ועדים חותמים. לאדם פרטי אין חותמת.
+{
+ const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+   if(txt.slice(i-6,i)==='async ')i-=6;
+   let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+   throw new Error('לא נסגרה '+name)};
+ let bad=[];
+ try{
+  // גוף ההכרעה **מהקובץ**, עם ה-IO בלבד מוחלף: החיתוך והבאת התמונה
+  // מוחלפים במחרוזות, ו-ask מחזיר תשובה מוכנה לפי השאלה שנשאלה.
+  const body=cut(ocr,'chequeReadPayer')
+    .replace(/const cropped=await chequeCropTopRight\(front\);/,'const cropped="crop";')
+    .replace(/const whole=await \(await fetch\(front\)\)\.blob\(\);/,'const whole="full";')
+    .replace(/const ask=async\([^)]*\)=>\{[\s\S]*?\n  \};/,'');
+  const src=(ocr.match(/const chqNorm=[^\n]*\n/)||[''])[0];
+  const chqNorm=new Function(src+';return chqNorm')();
+  const chequeNamesAgree=new Function(src+cut(ocr,'chequeNamesAgree')+';return chequeNamesAgree')();
+  const make=new Function('ask','CHQ_ASK','CHQ_STAMP_ASK','chequeNamesAgree','chqNorm',body+';return chequeReadPayer');
+  const run=(crop,full,stampAns)=>{
+    const ask=async(blob,q)=>q==='STAMP'?stampAns:(blob==='crop'?crop:full);
+    return make(ask,'NAME','STAMP',chequeNamesAgree,chqNorm)(null,null);
+  };
+  const YAD='ועד מקומי מושב יד-נתן';
+  const [a,b,c,d,e]=await Promise.all([
+    run(YAD,YAD,'אין חותמת'),
+    run('מופז גל',YAD,YAD),
+    run('מופז גל','דוד לוי','אין חותמת'),
+    run(YAD,'שגיאה כלשהי',YAD),
+    run('אבי כהן','אבי כהן','אין חותמת')]);
+  if(!(a.agree&&a.kind==='private'&&a.name===YAD))bad.push('בלי חותמת, שתי קריאות מסכימות: '+JSON.stringify(a));
+  if(!(b.agree&&b.kind==='entity'&&b.name===YAD))bad.push('החותמת לא הכריעה מול "מופז גל": '+JSON.stringify(b));
+  if(!(!c.agree&&c.kind==='private'))bad.push('חלוקות בלי חותמת נשמרו בכל זאת: '+JSON.stringify(c));
+  if(!(d.agree&&d.kind==='entity'&&d.name===YAD))bad.push('קריאה אחת מאושרת מול חותמת נדחתה: '+JSON.stringify(d));
+  if(!(e.agree&&e.kind==='private'&&e.name==='אבי כהן'))bad.push('שיק פרטי תקין נדחה: '+JSON.stringify(e));
+ }catch(err){bad.push('חריגה: '+err.message)}
+ t('שיקים: החותמת מאשרת ישות, והיעדרה אינו כשל',()=>!bad.length||bad.join(' · '));
+}
+
+t('שיקים: סוג המוסר נשמר ומוצג',()=>{
+  return /CHQ_STAMP_ASK/.test(ocr)&&/אין חותמת/.test(ocr)
+    &&/meta\[id\]=\{kind:r\.kind\|\|'',stamp:r\.stamp\|\|''\}/.test(ocr)
+    &&/chequePayerMeta/.test(dash)&&/אושר מול החותמת/.test(dash)
+    &&/בלי חותמת — שיק פרטי/.test(dash)
+    ||'סוג המוסר אינו נשמר או אינו מוצג'});
 
 // ── סיכום ──
 const ul=document.getElementById('out');
