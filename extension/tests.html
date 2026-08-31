@@ -787,6 +787,26 @@ t('שיקים: הדוח מקבץ לפי חשבון, ומפריד את מה של�
   return /async function nameWholeAccount\(/.test(dash)&&/הוחל על \$\{g\.ids\.length\} שיקים/.test(dash)
     ||'אין קביעת שם לכל החשבון'});
 
+// -- 1.85.0: "לחצתי וזה לא עושה כלום, אין מונה" --
+t('שיקים: דוח החשבונות נפתח מיד, והמונה בתוך החלון',()=>{
+  const h=dash.slice(dash.indexOf("$('#chequeAccounts')?.addEventListener"),dash.length).slice(0,400);
+  if(!h)return 'המאזין לא נמצא';
+  // ⚠ שום await לפני שנפתח משהו — אחרת הלחיצה נראית כאילו לא קרה כלום
+  if(/await\s+chequeOcrAvailability/.test(h))return 'בדיקת הזמינות עדיין קודמת לפתיחת החלון';
+  if(!/openChequeAccounts\(\)\.catch/.test(h))return 'הפתיחה אינה מוגנת מכשל';
+  // המונה יושב בתוך החלון, לא בשורת הגיבוי הרחוקה
+  const open=dash.slice(dash.indexOf('async function openChequeAccounts'),dash.indexOf('async function readChequeAccounts'));
+  if(!/id="chequeAccountsStatus"/.test(open))return 'אין מונה בתוך החלון';
+  if(/ocrChequesState/.test(open))return 'המונה עדיין נכתב לשורת הגיבוי';
+  if(!/nChq\(stored\)/.test(open))return 'החלון אינו מדווח כמה צילומים יש';
+  if(!/עדיין לא נקראו/.test(open))return 'החלון אינו מדווח כמה עוד לא נקראו';
+  // ⚠ קריאה שתולה חייבת להיגמר בהודעה, לא בשקט
+  const read=dash.slice(dash.indexOf('async function readChequeAccounts'),dash.indexOf('async function nameWholeAccount'));
+  if(!/Promise\.race/.test(read)||!/'timeout'/.test(read))return 'אין תקרת זמן לבדיקת הזמינות';
+  if(!/לא השיב תוך 8 שניות/.test(read))return 'תקרת הזמן שקטה';
+  return /onProgress:\(\{done,total,read\}\)=>chequeAccountsStatus/.test(read)
+    ||'ההתקדמות אינה מדווחת לחלון'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
