@@ -1,16 +1,16 @@
 # Graph Report - banks-extension  (2026-08-31)
 
 ## Corpus Check
-- 34 files · ~169,809 words
+- 34 files · ~170,494 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1207 nodes · 2014 edges · 98 communities (84 shown, 14 thin omitted)
+- 1214 nodes · 2022 edges · 99 communities (85 shown, 14 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 12 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `15411821`
+- Built from commit: `82265a3d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -108,6 +108,7 @@
 - 1.83.0 - קיבוץ לפי חשבון: אוטומטי **נמדד ונפסל**, ידני-בלחיצה נשלח
 - 1.86.0 - תמונה בכל שורה, ומסלול ידני ל-89 שלא נקראו
 - 1.84.0 - קיבוץ לפי **מספר החשבון המודפס**, ואישור לכל החשבון במכה אחת
+- 1.87.0 - ⚠⚠⚠ הקובץ של טל הכריע: **גם קריאת הספרות שגויה**
 
 ## God Nodes (most connected - your core abstractions)
 1. `HANDOFF — מסירה בין סוכנים` - 238 edges
@@ -134,7 +135,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (98 total, 14 thin omitted)
+## Communities (99 total, 14 thin omitted)
 
 ### Community 0 - "HANDOFF — מסירה בין סוכנים"
 Cohesion: 0.01
@@ -417,8 +418,8 @@ Cohesion: 0.40
 Nodes (5): 1.73.0 - פרטי השיק מלאומי, בחלון החשבון ובחיפוש · ⚠ מבנה החלון לא נמדד, ההחלטה: ללכוד את החלון כולו, לא לנחש שדה, התצוגה - שלושה מקומות, מה זה אומר בפועל לטל, ⚠⚠ מה שנמדד לפני שנכתבה שורה אחת
 
 ### Community 87 - "cheque-ocr.js"
-Cohesion: 0.15
-Nodes (21): chequeAccountKey(), chequeAccountsAll(), chequeBlockHash(), chequeCleanName(), chequeCropMicr(), chequeCropTopRight(), chequeHashAll(), chequeHashDistance() (+13 more)
+Cohesion: 0.14
+Nodes (22): chequeAccountKey(), chequeAccountsAll(), chequeBlockHash(), chequeCleanName(), chequeCropMicr(), chequeCropTopRight(), chequeHashAll(), chequeHashDistance() (+14 more)
 
 ### Community 89 - "paintPayerReview"
 Cohesion: 0.13
@@ -445,15 +446,19 @@ Cohesion: 0.50
 Nodes (4): 1.83.0 - קיבוץ לפי חשבון: אוטומטי **נמדד ונפסל**, ידני-בלחיצה נשלח, הרעיון היה נכון. הביצוע האוטומטי נפל במדידה., מה כן נשלח: דירוג + הכרעה של טל, בלחיצה אחת, שתי הבקשות הנוספות
 
 ### Community 96 - "1.86.0 - תמונה בכל שורה, ומסלול ידני ל-89 שלא נקראו"
-Cohesion: 0.67
-Nodes (3): 1.86.0 - תמונה בכל שורה, ומסלול ידני ל-89 שלא נקראו, ⚠ ההכרעה שנשארה פתוחה, מסלול ידני, כי אי אפשר להישאר תקוע
+Cohesion: 0.50
+Nodes (4): 1.86.0 - תמונה בכל שורה, ומסלול ידני ל-89 שלא נקראו, ⚠ ההכרעה שנשארה פתוחה, כיוון עתידי שטל ציין (לא לעכשיו), מסלול ידני, כי אי אפשר להישאר תקוע
 
 ### Community 97 - "1.84.0 - קיבוץ לפי **מספר החשבון המודפס**, ואישור לכל החשבון במכה אחת"
 Cohesion: 0.67
 Nodes (3): 1.84.0 - קיבוץ לפי **מספר החשבון המודפס**, ואישור לכל החשבון במכה אחת, מה נמדד משני הצילומים שטל צירף, מה נשלח
 
+### Community 98 - "1.87.0 - ⚠⚠⚠ הקובץ של טל הכריע: **גם קריאת הספרות שגויה**"
+Cohesion: 0.40
+Nodes (5): 1.87.0 - ⚠⚠⚠ הקובץ של טל הכריע: **גם קריאת הספרות שגויה**, המסלול שנפתח במקומו - בלי OCR בכלל, התשובה לשאלה של טל, ⚠⚠ ומה שהקובץ הוכיח בדרך, מה כן שונה בקוד בגרסה הזאת
+
 ## Knowledge Gaps
-- **569 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+564 more)
+- **575 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+570 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **14 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -461,13 +466,13 @@ Nodes (3): 1.84.0 - קיבוץ לפי **מספר החשבון המודפס**, ו
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `HANDOFF — מסירה בין סוכנים` connect `HANDOFF — מסירה בין סוכנים` to `HANDOFF.md`, `2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבעלות עוברת אליך.`, `2026-08-22 · Claude · אין לוח שנה — בורר התקופה הוא קבוצת רדיו — 1.1.6`, `2026-08-22 · Claude · לאומי סופר שורות, לא תאריכים — 1.1.5`, `2026-08-22 · Claude · „מאומת" בלאומי היה הבטחה שהקוד לא קיים — 1.1.2`, `2026-08-22 · Claude · לאומי מבקש טווח לפי collectSince — 1.2.0`, `2026-08-18 · Claude · הגלגל גם בטעינת השנה — 0.83.2`, `2026-08-17 · Claude · חלונית כניסה, והחזרה מכל מסלול — 0.74.0`, `2026-08-17 · Claude · לולאת הסנכרון האוטומטי בפועלים פרטי — 0.64.0`, `2026-08-25 · Claude · סיכום יום · יהב מוגבל לחצי שנה · נקודת עצירה`, `2026-08-18 · Claude · ישראכרט חוזר למארח שלו, ומחיקת כרטיס — 0.83.0`, `2026-08-18 · Claude · דף אינו סשן עד שהוא מוכיח זאת — 0.83.1`, `2026-08-17 · Claude · טבעת אחוזים, והלשונית חוזרת לחלון הראשי — 0.62.0`, `2026-08-22 · Claude · loadAllRows הוחזר — התיקון שלי החמיר — 1.2.5`, `2026-08-22 · Claude · הבורר לא נפתח כי שריד תפריט סגור ענה במקומו — 1.1.1`, `2026-08-23 · Claude · הסניף והחשבון נדבקו זה לזה — 1.3.0`, `2026-08-17 10:15 · Claude · לאומי — הרענון ב-startLeumi הרס את הסשן, 0.57.0`, `2026-08-18 · Claude · הגלגל מציג את מספר הכרטיס — 0.82.0`, `2026-08-18 · Claude · כאל, מקס ולאומי — הושלם — 0.79.0`, `2026-08-22 · Claude · הטווח עובד; נקרא עמוד אחד — 1.2.3`, `2026-08-22 · Claude · זיכרון מספרי חשבון ששורד מחיקה — 1.0.25`, `2026-08-23 · Claude · המשטח השלישי: אריח הבנק — 1.2.9`?**
-  _High betweenness centrality (0.092) - this node is a cross-community bridge._
+  _High betweenness centrality (0.096) - this node is a cross-community bridge._
+- **Why does `2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבעלות עוברת אליך.` connect `2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבעלות עוברת אליך.` to `HANDOFF — מסירה בין סוכנים`?**
+  _High betweenness centrality (0.005) - this node is a cross-community bridge._
 - **Why does `1.75.0 - חילוץ שם מוסר השיק מהסריקה, עם המודל המובנה של Chrome` connect `1.75.0 - חילוץ שם מוסר השיק מהסריקה, עם המודל המובנה של Chrome` to `HANDOFF.md`?**
-  _High betweenness centrality (0.008) - this node is a cross-community bridge._
-- **Why does `סיכום 28.08.2026 (המשך) - גיבוי, viewer וניתוח חודשי (1.49.0 -> 1.58.0)` connect `סיכום 28.08.2026 (המשך) - גיבוי, viewer וניתוח חודשי (1.49.0 -> 1.58.0)` to `HANDOFF.md`?**
   _High betweenness centrality (0.005) - this node is a cross-community bridge._
 - **What connects `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart` to the rest of the system?**
-  _569 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _575 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `HANDOFF — מסירה בין סוכנים` be split into smaller, more focused modules?**
   _Cohesion score 0.009216589861751152 - nodes in this community are weakly interconnected._
 - **Should `discount-content.js` be split into smaller, more focused modules?**
