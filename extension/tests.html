@@ -976,9 +976,11 @@ t('בחירה: הבנק הנוכחי נקבע במפורש, וזיהוי טרי 
   if(r.current[0]?.source!=='leumi')return 'נפילה לאחור לחותם נכשלה';
   // ⚠⚠ מיקוד על בנק **בלי ממתינים** אינו נופל אחורה לבנק אחר — זו בדיוק
   // התלונה של טל. התשובה חייבת להיות "אין", ולא חשבונות של לאומי.
+  // ⚠ שונה ב-1.97.0: מיקוד ריק **כן** נופל לאחור להצגת מה שממתין, כי
+  // מסך ריק כשיש נתונים חסם את טל לחלוטין. הנפילה מסומנת ומוסברת.
   r=mk([],disc,{source:'yahav',at:1});
-  if(r.current.length)return 'בנק בלי ממתינים הציג חשבונות של בנק אחר: '+JSON.stringify(r.current.map(a=>a.key));
-  if(r.older.length!==disc.length)return 'השאר לא סווג כישן';
+  if(!r.current.length)return 'מסך ריק למרות חשבונות ממתינים';
+  if(r.fallback!=='yahav')return 'הנפילה לאחור אינה מסומנת';
   return true});
 
 t('בחירה: הבורר מציג את הבנק הנוכחי בלבד',()=>{
@@ -987,7 +989,7 @@ t('בחירה: הבורר מציג את הבנק הנוכחי בלבד',()=>{
   const sel=dash.slice(dash.indexOf('function renderSelection'),dash.indexOf('function updateSelectionCount'));
   if(/older-choices/.test(sel))return 'הסעיף המקופל עדיין מרונדר';
   if(/split\.older\.map\(choiceRow\)/.test(sel))return 'חשבונות מבנקים אחרים עדיין מוצגים';
-  if(!/box\.innerHTML=discovered\.map\(choiceRow\)\.join\(''\);/.test(sel))return 'הרינדור אינו של הבנק הנוכחי בלבד';
+  if(!/\+discovered\.map\(choiceRow\)\.join\(''\);/.test(sel))return 'הרינדור אינו של הבנק הנוכחי בלבד';
   // המונה סופר את המוצג בלבד
   if(/totalPending/.test(sel))return 'המונה עדיין כולל בנקים שאינם על המסך';
   // ⚠ אבל המידע לא נמחק — במסך הריק נאמר כמה ממתינים בבנקים אחרים
@@ -1025,7 +1027,10 @@ t('בחירה: חשבון שכבר נשמר יורד מהבורר',()=>{
   return true});
 
 t('בחירה: הסינון הוא תצוגה בלבד, ואינו מוחק נתונים',()=>{
-  const fn=dash.slice(dash.indexOf('function pendingDiscovered'),dash.indexOf('function renderSelection'));
+  // ⚠ הגבול חייב להיות סוף הפונקציה עצמה: בין pendingDiscovered ל-
+  // renderSelection נכנסו מאז גם copyChooserAudit ו-splitDiscovered.
+  const ps=dash.indexOf('function pendingDiscovered');
+  const fn=dash.slice(ps,dash.indexOf(String.fromCharCode(10)+'}',ps)+2);
   // ⚠ בדיוק כאן נולדו 1.0.22 ו-1.11.2 — מחיקה מהאחסון. אסור שתחזור.
   if(/storage\.local\.set/.test(fn))return 'הסינון כותב לאחסון';
   if(/discoveredAccounts/.test(fn))return 'הסינון נוגע ברשימה השמורה';
@@ -1159,6 +1164,45 @@ t('בחירה: חשבון שזוהה אינו מסומן מאליו',()=>{
  }catch(e){bad.push('חריגה: '+e.message)}
  t('דיסקונט: הגשש מפריד בין "שורות" ל"חשבונות" ומדווח על הפותחן',()=>!bad.length||bad.join(' · '));
 }
+
+// -- 1.97.0: "אין בורר" בזמן שהסטטוס אומר "נמצא 3 חשבון" --
+t('בחירה: מסך ריק לעולם לא כשיש חשבונות ממתינים',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    let p=txt.indexOf('(',txt.indexOf(name,i)),d=0,j=p;
+    for(;j<txt.length;j++){if(txt[j]==='(')d++;else if(txt[j]===')'&&!--d)break}
+    let b=txt.indexOf('{',j),k=b,e=0;
+    for(;k<txt.length;k++){if(txt[k]==='{')e++;else if(txt[k]==='}'&&!--e)return txt.slice(i,k+1)}};
+  const mk=(accts,disc,focus)=>new Function('accounts','discovered','chooserFocus',
+    cut(dash,'savedAccountKeys')+';'+cut(dash,'pendingDiscovered')+';'+cut(dash,'splitDiscovered')+';return splitDiscovered')(accts,disc,focus)();
+  const three=[
+   {key:'discount-private|015-0497352',source:'discount-private',branch:'015',accountNumber:'0497352',at:5000},
+   {key:'discount-private|016-3327612',source:'discount-private',branch:'016',accountNumber:'3327612',at:5000},
+   {key:'discount-private|017-1111111',source:'discount-private',branch:'017',accountNumber:'1111111',at:5000}];
+  // המקרה של טל: שלושה חשבונות זוהו, והמסך היה ריק
+  let r=mk([],three,{source:'discount-private'});
+  if(r.current.length!==3)return 'שלושה חשבונות שזוהו לא הוצגו: '+r.current.length;
+  // ⚠⚠ מיקוד שמצביע על בנק בלי שורות, כשיש שורות ממתינות אחרות —
+  // **חייב להציג משהו.** מסך ריק כשיש נתונים חוסם את המשתמש לחלוטין.
+  r=mk([],three,{source:'yahav'});
+  if(!r.current.length)return 'מסך ריק למרות שלושה חשבונות ממתינים';
+  if(r.fallback!=='yahav')return 'הנפילה לאחור אינה מסומנת: '+JSON.stringify(r.fallback);
+  // ובלי שום דבר ממתין — ריק זה נכון
+  r=mk([],[],{source:'discount-private'});
+  if(r.current.length)return 'ריק אמיתי החזיר שורות';
+  // המשתמש מקבל הסבר, לא רק שורות
+  if(!/chooser-note/.test(dash))return 'אין הודעה שמסבירה את הנפילה לאחור';
+  return /לא החזיר חשבונות לבחירה, ולכן מוצג כל מה שממתין/.test(dash)||'ההסבר חסר'});
+
+t('בחירה: יש אבחון שמעתיק את מצב הבורר',()=>{
+  // ⚠ שלושה סבבים של ניחוש על דיסקונט. הכלי הזה מחליף את הניחוש הרביעי.
+  if(!/async function copyChooserAudit\(/.test(dash))return 'אין אבחון בחירה';
+  const fn=dash.slice(dash.indexOf('async function copyChooserAudit'),dash.indexOf('function splitDiscovered'));
+  for(const f of ['מיקוד:','זוהו_באחסון:','אחרי_סינון:','מוצג_בפועל:','נפילה_לאחור:','דיסקונט_גשש:'])
+    if(!fn.includes(f))return 'חסר באבחון: '+f;
+  // ⚠ ההשוואה בין "מה באחסון" ל"מה מוצג" היא כל העניין — בלעדיה אי אפשר
+  // לדעת אם הבעיה בזיהוי או בתצוגה.
+  if(!/pendingDiscovered\(\)/.test(fn)||!/split\.current/.test(fn))return 'האבחון אינו משווה אחסון מול תצוגה';
+  return /#chooserAudit/.test(dash)||'אין כפתור'});
 
 // ── סיכום ──
 const ul=document.getElementById('out');
