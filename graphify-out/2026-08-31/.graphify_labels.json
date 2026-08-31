@@ -6,7 +6,7 @@
   "4": "host_permissions",
   "5": "dashboard.js",
   "6": "HANDOFF.md",
-  "7": "render",
+  "7": "kindOf",
   "8": "poalim-content.js",
   "9": "syncLeumi",
   "10": "toast",
@@ -17,7 +17,7 @@
   "15": "syncSelected",
   "16": "esc",
   "17": "card-history.js",
-  "18": "money",
+  "18": "render",
   "19": "CDP",
   "20": "AGENTS — תוסף הבנקים",
   "21": "סוכן „תוסף\" — חזרה לעבודה על תוסף הבנקים",
@@ -84,5 +84,6 @@
   "82": "time-daterange.js",
   "83": "try-daterange.js",
   "84": "accountForCard",
-  "85": "renderScope"
+  "85": "blAdd",
+  "86": "reAdd"
 }
