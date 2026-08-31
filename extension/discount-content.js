@@ -227,8 +227,16 @@ async function privateAccountOptions(deadline=0){
       for(const el of hit){if(seen.has(el))continue;seen.add(el);out.push(el)}
     }
     return out};
+  // ⚠⚠ 31.08.2026 - טל: "אין בורר ואין חשבונות דיסקונט פרטי". **זו הייתה
+  // רגרסיה שלי מ-1.94.0.** התנאי לפתיחת הבורר היה "לא נמצאו שורות", ואחרי
+  // שאיחדתי את הסלקטורים `[role="menu"] [role="radio"]` תפס אלמנטים
+  // שקיימים בדף **עוד לפני** שהבורר נפתח - ולכן `rows.length` היה חיובי,
+  // הפותחן לא נלחץ, ורשימת החשבונות האמיתית לא נפתחה מעולם.
+  // **הקריטריון הנכון הוא "כמה שורות נותחו לחשבון", לא "כמה שורות נמצאו".**
+  // שורה שאינה חשבון אינה עדות לכך שהבורר פתוח.
+  const accountsIn=list=>list.filter(r=>privateAccountFromRow(r)).length;
   let rows=found();
-  if(!rows.length){
+  if(!accountsIn(rows)){
     const trigger=document.querySelector(PRIVATE_TRIGGER);
     if(!trigger){try{await chrome.storage.local.set({discountPrivateTriggerProbe:privateTriggerProbe()})}catch(e){}
       throw Error('בורר החשבונות הפרטיים לא נמצא')}
@@ -237,7 +245,7 @@ async function privateAccountOptions(deadline=0){
       if(deadline&&Date.now()>deadline)break;
       await wait(250);
       rows=found();
-      if(rows.length)break;
+      if(accountsIn(rows))break;
     }
   }
   // ⚠ הגשש רושם עכשיו **כמה כל סלקטור מצא בנפרד**, וכמה מהשורות נותחו

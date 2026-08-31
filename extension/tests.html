@@ -1068,6 +1068,18 @@ t('בחירה: חשבון שזוהה אינו מסומן מאליו',()=>{
   if(!/const perSel=\{\}/.test(dc))bad.push('אין ספירה לכל סלקטור בנפרד');
   if(!/parsed:rows\.map\(r=>privateAccountFromRow\(r\)\)\.filter\(Boolean\)\.length/.test(dc))
     bad.push('הגשש אינו מדווח כמה שורות נותחו לחשבון');
+  // ⚠⚠ רגרסיה מ-1.94.0: האיחוד גרם ל-found() להחזיר שורות **לפני**
+  // שהבורר נפתח (אלמנטים שקיימים בדף ממילא), ולכן הפותחן לא נלחץ
+  // ורשימת החשבונות לא נפתחה. הקריטריון חייב להיות "שורות שנותחו
+  // לחשבון", לא "שורות שנמצאו".
+  // ⚠ הבדיקה ממוקדת ל-privateAccountOptions בלבד: `if(!rows.length)` קיים
+  // גם בקריאת התנועות (שורה אחרת לגמרי), והרג'קס הרחב האשים את הקוד לשווא.
+  const opts=cut(dc,'privateAccountOptions');
+  if(/if\(!rows\.length\)\{/.test(opts))bad.push('פתיחת הבורר עדיין מותנית במספר השורות');
+  if(!/const accountsIn=list=>list\.filter\(r=>privateAccountFromRow\(r\)\)\.length/.test(dc))
+    bad.push('אין ספירת שורות שנותחו לחשבון');
+  if(!/if\(!accountsIn\(rows\)\)\{/.test(dc))bad.push('התנאי אינו נגזר משורות שנותחו');
+  if(!/if\(accountsIn\(rows\)\)break;/.test(dc))bad.push('ההמתנה אינה נגזרת משורות שנותחו');
 
   // ה-DOM האמיתי מהתקלה: חלק מהחשבונות ב-li, חלק ב-role=radio בלבד
   const host=document.createElement('div');host.style.display='none';
