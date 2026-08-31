@@ -30,9 +30,9 @@
     "semantic_hash": ""
   },
   "extension/dashboard.js": {
-    "mtime": 1788173102.4408994,
-    "seen": 1788173247.7788732,
-    "ast_hash": "550947c6ca9432628cf605ecf7c81fdb",
+    "mtime": 1788173699.016291,
+    "seen": 1788173951.7195878,
+    "ast_hash": "aae984ff44cbdedb93acd31eb30fd4ee",
     "semantic_hash": ""
   },
   "extension/discount-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1788173144.7962985,
-    "seen": 1788173247.7788732,
-    "ast_hash": "3834bae8bdbcf71f03af078a9c1826ef",
+    "mtime": 1788173736.7033818,
+    "seen": 1788173951.7195878,
+    "ast_hash": "7f61c6477116ebc05d3d1c86cf724add",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1788173243.1888583,
-    "seen": 1788173247.7788732,
-    "ast_hash": "6fffe3393cc7785376fdbf74a15566f1",
+    "mtime": 1788173948.2618556,
+    "seen": 1788173951.7195878,
+    "ast_hash": "b9d89d7e6194cc998deb8a75b47e0621",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
@@ -186,9 +186,9 @@
     "semantic_hash": ""
   },
   "extension/dashboard.html": {
-    "mtime": 1788168606.835325,
-    "seen": 1788168943.600102,
-    "ast_hash": "5dff848b61a2c89aeaf6fbade4e4e6bc",
+    "mtime": 1788173698.9531848,
+    "seen": 1788173951.7195878,
+    "ast_hash": "ae437d9552a84abdf9554c742d7489cd",
     "semantic_hash": ""
   },
   "extension/popup.html": {
@@ -198,9 +198,9 @@
     "semantic_hash": ""
   },
   "extension/tests.html": {
-    "mtime": 1788173144.7962985,
-    "seen": 1788173247.7788732,
-    "ast_hash": "d5302a311a269feb67785b0d1254284c",
+    "mtime": 1788173828.1219325,
+    "seen": 1788173951.7195878,
+    "ast_hash": "fade81ab18a0e661f1623bf23cb375e1",
     "semantic_hash": ""
   },
   "extension/viewer.html": {
@@ -276,9 +276,9 @@
     "semantic_hash": ""
   },
   "extension/cheque-ocr.js": {
-    "mtime": 1788173053.3019,
-    "seen": 1788173247.7788732,
-    "ast_hash": "ef738054b93d41616c7b8bec632a18ec",
+    "mtime": 1788173790.6698942,
+    "seen": 1788173951.7195878,
+    "ast_hash": "c344524f8b231ddb9e658012a1ac197d",
     "semantic_hash": ""
   }
 }
