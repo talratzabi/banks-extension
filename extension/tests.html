@@ -319,6 +319,38 @@ t('MAX: סכום שהאתר לא מסר לא מאפס את הכרטיס',()=>{
   return cardTotal({amount:0,transactions:[]}).includes('0.00')||'חודש ריק אמיתי לא הוצג כאפס';
 });
 
+// -- 1.72.0: צילום שיק נפתח מתוך תוצאות החיפוש --
+t('חיפוש: כפתור צילום השיק נולד רק כשהצילום קיים במסד',()=>{
+  const line=(dash.match(/const chqId=[^;]+;/)||[])[0];
+  if(!line)return 'שורת בניית מזהה השיק לא נמצאה ב-dashboard.js';
+  const gate=(dash.match(/cheque:chqId&&chequeIds\.has\(chqId\)\?chqId:''/)||[])[0];
+  if(!gate)return 'השדה cheque אינו מגודר ב-chequeIds.has';
+  // שני הקטעים מורכבים יחד ורצים כפי שהם - זו ההחלטה האמיתית מהקובץ.
+  const decide=new Function('a','t','chequeIds','chequeId','accountKey',
+    line+"return "+gate.replace(/^cheque:/,'')+';');
+  const id=(k,r)=>k+'|'+r,key=a=>a.selectionKey;
+  const leumi={source:'leumi',selectionKey:'business|921-348300'};
+  const other={source:'poalim',selectionKey:'business|645-690300'};
+  const chq={cheque:true,reference:'55123'},plain={cheque:false,reference:''};
+  const have=new Set(['business|921-348300|55123']);
+  const cases=[
+    ['לאומי עם צילום שמור',leumi,chq,have,'business|921-348300|55123'],
+    ['לאומי בלי צילום במסד',leumi,chq,new Set(),''],
+    ['לאומי בלי אסמכתא',leumi,{cheque:true,reference:''},have,''],
+    ['תנועה רגילה',leumi,plain,have,''],
+    ['בנק אחר',other,chq,new Set(['business|645-690300|55123']),'']];
+  for(const [name,a,t2,set,want] of cases){
+    const got=decide(a,t2,set,id,key);
+    if(got!==want)return name+': התקבל '+JSON.stringify(got)+' במקום '+JSON.stringify(want);
+  }
+  // ⚠ chequeAll קורא ~45KB base64 לכל שיק; בחיפוש חייבים chequeKeys בלבד.
+  if(!/chequeIds=await chequeKeys\(\)/.test(dash))return 'החיפוש אינו משתמש ב-chequeKeys';
+  if(/await chequeAll\(\)/.test(dash.slice(dash.indexOf('async function renderMovementSearch'),dash.indexOf('function renderSelection'))))
+    return 'chequeAll נקרא בתוך החיפוש';
+  return /class="cheque-view"/.test(dash)&&/closest\('\.cheque-view'\)/.test(dash)
+    &&/showCheque\(record,\{date:chq\.dataset\.date\}\)/.test(dash)
+    ||'הכפתור לא מחובר ל-showCheque'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
