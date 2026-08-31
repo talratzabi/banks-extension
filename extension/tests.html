@@ -898,6 +898,34 @@ t('שיקים: הייצוא הוא האמת, והתיקון מדווח',()=>{
   if(!/chequeLedgerReport/.test(dash))return 'אין דוח של מה תוקן';
   return /תיקנו קריאה שגויה/.test(dash)||'התיקון אינו מדווח למשתמש'});
 
+// -- 1.89.0: "לא מבין מה נעשה, אין זיהוי של שקים" --
+t('שיקים: הזיהוי אינו תלוי בקיום צילום',()=>{
+  // ⚠⚠ שני באגים שהפכו את הייבוא לחסר תוצאה:
+  //   1. ההחלה רצה על chequeKeys() — כלומר רק על שיקים שיש להם **צילום**.
+  //      89 שיקים בלי צילום תקין נשארו בלי שם למרות שהייצוא ידע מי הם.
+  //   2. תגית השם נתלתה ב-r.cheque (מזהה הצילום), ולכן גם שם שנקבע לא הוצג.
+  const apply=dash.slice(dash.indexOf('async function applyLedger'),dash.indexOf('function showLedgerReport'));
+  if(!apply)return 'applyLedger לא נמצאה';
+  if(/\[\.\.\.await chequeKeys\(\)\]/.test(apply))return 'ההחלה עדיין רצה על הצילומים ולא על התנועות';
+  if(!/const tx=chequeTxIndex\(\),ids=Object\.keys\(tx\)/.test(apply))return 'ההחלה אינה עוברת על התנועות';
+  if(!/לא נמצאו תנועות שיק/.test(apply))return 'אין הודעה כשאין תנועות שיק כלל';
+  // התגית תלויה במזהה הלוגי, והכפתור בצילום — שני דברים נפרדים
+  if(!/chq:chqId/.test(dash))return 'השורה אינה נושאת מזהה לוגי נפרד מהצילום';
+  if(!/\$\{r\.chq\?chequePayerHtml\(r\.chq\):''\}/.test(dash))return 'התגית עדיין תלויה בקיום צילום';
+  if(!/data-cheque="\$\{esc\(r\.cheque\)\}"/.test(dash))return 'כפתור הצילום התנתק מהצילום';
+  return true});
+
+t('שיקים: התוצאה מוצגת במסך ולא ב-toast חולף',()=>{
+  // ⚠ טל: "לא מבין מה נעשה". הודעה חולפת אינה דיווח.
+  if(!/function showLedgerReport\(/.test(dash))return 'אין מסך תוצאה';
+  const rep=dash.slice(dash.indexOf('function showLedgerReport'),dash.indexOf("$('#ledgerFile')"));
+  for(const f of ['תנועות שיק בחשבונות','זוהו מהייצוא','קיבלו שם לראשונה','תיקנו קריאה שגויה','לא הוכרעו','אין שורה בסכום'])
+    if(!rep.includes(f))return 'חסר במסך: '+f;
+  // ⚠ "מה תוקן" חייב להראות את שני הצדדים — בלי זה אי אפשר לדעת שהתיקון נכון
+  if(!/נקרא בטעות/.test(rep)||!/האמת מהייצוא/.test(rep))return 'הטבלה אינה מציגה לפני ואחרי';
+  if(!/was-wrong/.test(dash))return 'הקריאה השגויה אינה מסומנת חזותית';
+  return /אף תנועה לא הותאמה/.test(rep)||'אין הסבר כשלא הותאם כלום'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
