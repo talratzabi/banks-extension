@@ -348,7 +348,7 @@ t('חיפוש: כפתור צילום השיק נולד רק כשהצילום ק�
   if(/await chequeAll\(\)/.test(dash.slice(dash.indexOf('async function renderMovementSearch'),dash.indexOf('function renderSelection'))))
     return 'chequeAll נקרא בתוך החיפוש';
   return /class="cheque-view"/.test(dash)&&/closest\('\.cheque-view'\)/.test(dash)
-    &&/showCheque\(record,\{date:chq\.dataset\.date\}\)/.test(dash)
+    &&/showCheque\(record,\{date:chq\.dataset\.date,amount:chq\.dataset\.amount\}\)/.test(dash)
     ||'הכפתור לא מחובר ל-showCheque'});
 
 // -- 1.73.0: טקסט חלון השיק מלאומי מוצג בשני המקומות --
@@ -520,6 +520,44 @@ t('חיפוש: פילוח לפי מונח — סדר הקלדה, חפיפה נס
     if(document.querySelector('#movementBreakdownBox button[data-bd="term"]'))return '"לפי מונח" הוצע על מונח יחיד';
     return document.querySelectorAll('#movementBreakdownBox tbody tr').length===0||'פילוח צויר למרות מונח יחיד';
   }finally{host.remove()}});
+
+// -- 1.77.0: "אין קשר בין הצילומים לסכומים" — ביקורת, לא ניחוש --
+t('שיקים: הכפתור הנכון מועדף, והביקורת רושמת את מה שיכריע',()=>{
+  // ⚠ אין כאן טענה שהבאג תוקן. הבדיקה מוודאת שהמדידה קיימת ושהעדפת
+  // הכפתור אינה משנה התנהגות כשאין כפתור מזוהה.
+  if(!/const rowBtns=\[\.\.\.hit\.row\.querySelectorAll\('button,\[role="button"\]'\)\]/.test(lc))
+    return 'הכפתורים אינם נאספים כרשימה';
+  const pick=(lc.match(/const chosen=rowBtns\.find\([^;]+\)\|\|rowBtns\[0\];/)||[])[0];
+  if(!pick)return 'בחירת הכפתור לא נמצאה';
+  const label=new Function('el',"return String(el?.label||'')");
+  const choose=new Function('rowBtns','btnLabel',pick+'return chosen;');
+  const cases=[
+    ['אין תווית — הראשון, בדיוק כמו קודם',[{label:''},{label:''}],0],
+    ['כפתור "צילום שיק" מנצח את הראשון',[{label:'הצג פרטים'},{label:'צילום שיק'}],1],
+    ['aria באנגלית',[{label:'expand'},{label:'cheque image'}],1],
+    ['הראשון הוא הנכון',[{label:'צילום השיק'},{label:'פרטים'}],0],
+    ['שורה בלי כפתורים',[],-1]];
+  for(const [name,btns,want] of cases){
+    const got=choose(btns,label);
+    const idx=btns.indexOf(got);
+    if(want===-1){if(got!==undefined)return name+': התקבל משהו במקום undefined';continue}
+    if(idx!==want)return name+': נבחר '+idx+' במקום '+want;
+  }
+  // הביקורת רושמת בדיוק את מה שדרוש כדי להכריע בין שני החשודים
+  for(const field of ['want:reference','cells:hit.cells','buttons:rowBtns.map','clicked:btnLabel','imgs:0'])
+    if(!lc.includes(field))return 'שדה חסר בביקורת: '+field;
+  if(!/leumiChequeAudit:\{at:new Date\(\)\.toISOString\(\),rows:audit\.slice\(0,25\)\}/.test(lc))
+    return 'הביקורת אינה נשמרת ל-storage';
+  return /auditRow\.imgs=fresh\.length/.test(lc)||'מספר התמונות לא נרשם'});
+
+t('שיקים: החלון מצהיר לאיזו תנועה הצילום שויך',()=>{
+  return /cheque-claim/.test(dash)&&/התוסף שייך את הצילום הזה לתנועה/.test(dash)
+    &&/data-amount="\$\{r\.amount\}"/.test(dash)
+    &&/showCheque\(record,\{date:chq\.dataset\.date,amount:chq\.dataset\.amount\}\)/.test(dash)
+    &&/#chequeAudit/.test(dash)&&/#clearCheques/.test(dash)
+    // מחיקה מלאה חייבת לאפס גם את זיכרון ה"אין צילום", אחרת הקציר ידלג 30 יום
+    &&/leumiChequeMissing:\{\}/.test(dash)
+    ||'ההצהרה או כלי התחזוקה חסרים'});
 
 // ── סיכום ──
 const ul=document.getElementById('out');

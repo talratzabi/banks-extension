@@ -88,6 +88,18 @@ const ensureWindowFor=async(dateStr)=>{
 // מקטע נטען פעם אחת והשיקים שבתוכו נקצרים ברצף.
 wanted.sort((a,b)=>(ilToMs(a.date)||0)-(ilToMs(b.date)||0));
 if(!Number.isFinite(chqSince)){await applyLeumiRange();await openCurrentAccount();await loadAllRows();}
+// ⚠⚠ 31.08.2026 - טל: "אין קשר בין הצילומים של השקים לסכומים."
+// **אין לי מדידה שמכריעה מי משני החשודים זה**, ולכן לא נכתב תיקון מנוחש:
+//   1. `hit.row.querySelector('button')` לוקח את **הכפתור הראשון בשורה**.
+//      אם בשורת לאומי יש יותר מאינטראקטיבי אחד (חץ פירוט לצד צילום השיק),
+//      נלחץ הלא-נכון - והחלון שנפתח שייך לשיק אחר.
+//   2. רשת וירטואלית: `datedRows()` רואה רק שורות מרונדרות, ו-`rowCellEls`
+//      נופל במקרה הגרוע ל"כל העלים של השורה" - שבמבנה שטוח עלול לבלוע
+//      שורות שכנות, כך שה-hit מצביע על גוש ולא על שורה.
+// הביקורת למטה רושמת בדיוק את מה שיכריע: תאי השורה שנלחצה, כל הכפתורים
+// שהיו בה, מי נלחץ בפועל, כמה תמונות הגיעו, ומה היה בחלון.
+const audit=[];
+const btnLabel=el=>String(el?.getAttribute?.('aria-label')||el?.getAttribute?.('title')||el?.innerText||'').replace(/\s+/g,' ').trim().slice(0,60);
 const out={};const dataSrc=()=>[...document.querySelectorAll('img')].map(i=>i.src).filter(s=>s.startsWith('data:image'));
 // ⚠ חלון הצילום נשאר פתוח אחרי שיק: הוא מכסה את הטבלה וחוסם את
 // הלחיצה הבאה, וגם מוסיף את תמונותיו ל-before כך שתמונה חדשה
@@ -97,7 +109,15 @@ for(const item of wanted){const reference=String(item.reference||'');await ensur
 // saved:0, failed:0". עכשיו נספר ומדווח, כדי שלא ייראה שוב כהצלחה.
 if(!hit){notFound.push(reference);continue}
 chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_PROGRESS',done:offset+wanted.indexOf(item)+1,total:total||wanted.length,reference}).catch(()=>{});
-await closeViewer();const before=new Set(dataSrc());hit.row.querySelector('button,[role="button"]')?.click();
+await closeViewer();const before=new Set(dataSrc());
+const rowBtns=[...hit.row.querySelectorAll('button,[role="button"]')];
+// כפתור שמזהה את עצמו כצילום/שיק עדיף על "הראשון בשורה". אם אין כזה -
+// ההתנהגות זהה לקודם בדיוק, ולכן זה לא ניחוש אלא העדפה בטוחה.
+const chosen=rowBtns.find(b=>/שיק|צילום|תמונה|image|cheque|check/i.test(btnLabel(b)))||rowBtns[0];
+const auditRow={want:reference,date:item.date,cells:hit.cells.slice(0,12),
+  buttons:rowBtns.map(btnLabel),clicked:btnLabel(chosen),byLabel:chosen!==rowBtns[0],imgs:0,dialog:''};
+audit.push(auditRow);
+chosen?.click();
 // 4 שניות היו קצרות, אבל 12 הוציאו את האצווה מתקרת ה-120 שניות
 // וכל ששת השיקים נזרקו. 8 שניות עם יציאה מוקדמת, והתקרה הורחבה ל-300.
 let fresh=[];
@@ -118,6 +138,7 @@ if(!fresh.length)noImage.push(reference);
 // הגשש למטה שומר את הטקסט הראשון בריצה; ממנו ייכתב הפירוק לשם/בנק/סניף.
 const dlgEl=document.querySelector('[role="dialog"]');
 const info=dlgEl?String(txt(dlgEl)||'').replace(/\s+/g,' ').trim().slice(0,400):'';
+auditRow.imgs=fresh.length;auditRow.dialog=info.slice(0,200);
 if(info&&!chqProbe.dialog)chqProbe.dialog={reference,text:info,
   tags:[...dlgEl.querySelectorAll('*')].slice(0,60).map(el=>el.tagName.toLowerCase()+(el.className&&typeof el.className==='string'?'.'+el.className.split(/\s+/)[0]:'')).join(' ')};
 if(fresh.length){out[reference]={front:fresh[0],back:fresh[1]||'',info};
@@ -133,7 +154,8 @@ if(noImage.length)out.__noImage=noImage.slice(0,40);
 // ⚠ הגשש נשמר תמיד, גם בהצלחה: „0 החלות" מול „12 החלות ו-0 החטאות"
 // הם שני מצבים שונים לגמרי שנראים זהה בדוח השיקים.
 try{chqProbe.misses=chqProbe.misses.slice(0,25);
-  await chrome.storage.local.set({leumiChequeWindows:chqProbe})}catch{}
+  await chrome.storage.local.set({leumiChequeWindows:chqProbe,
+    leumiChequeAudit:{at:new Date().toISOString(),rows:audit.slice(0,25)}})}catch{}
 return out}
 function snapshot(){try{const dated=datedRows(),page=normalized(txt(document.body));return{url:location.href,tables:document.querySelectorAll('table').length,rows:gridRows().length,datedRows:dated.length,cols:dated[0]?dated[0].cells.length:0,firstRow:dated[0]?dated[0].cells.slice(0,10):[],tabs:accountTabs().length,chooser:txt(chooser()).slice(0,140),shekelBefore:/₪\s*-?[\d,]+\.\d{2}/.test(page),shekelAfter:/-?[\d,]+\.\d{2}\s*₪/.test(page),head:page.slice(0,500),...probe()}}catch(e){return{snapshotError:e.message,url:location.href}}}
 function probe(){try{const roleCounts={};for(const role of['table','grid','treegrid','row','rowgroup','gridcell','cell','columnheader','list','listitem']){const n=document.querySelectorAll(`[role="${role}"]`).length;if(n)roleCounts[role]=n}
