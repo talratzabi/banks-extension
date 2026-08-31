@@ -264,3 +264,105 @@ async function chequeHashAll({onProgress}={}){
   await chrome.storage.local.set({chequeHashes:hashes});
   return{computed:ids.length,total:Object.keys(hashes).length};
 }
+
+// ── מספר החשבון של המוסר, משורת ה-MICR שבתחתית השיק ────────────────────
+// ⚠⚠ תיקון הבנה (טל, 31.08.2026): "יש מספר חשבון בנק של המוסר. אם פרטי
+// החשבון זהים - תאשר אותם במכה אחת." הקיבוץ הוא לפי **הספרות המודפסות**,
+// לא לפי דמיון חזותי (שנמדד ונפסל, ראה למעלה).
+//
+// **מה נמדד משני השיקים שטל צירף:**
+//   מזרחי:  ⑈2951079 ⑆20⑈43300⑆ 251592⑈   והטקסט המודפס: "סניף 433 קרית גת"
+//   דיסקונט: ⑈80000766 ⑆11⑈15345⑆ 0000054074⑈  והטקסט: "סניף קרית מלאכי-153"
+// כלומר המבנה: מס' שיק ⑆ קוד בנק(2) + סניף(3) + מילוי ⑆ מס' חשבון.
+// **וזה נותן אימות עצמי:** קוד הבנק והסניף שנקראו חייבים להתאים ללוגו
+// ולטקסט "סניף NNN" שמודפסים בשיק - ספרות שהומצאו לא יתאימו לשניהם.
+const CHQ_MICR_CROP={right:1,top:1,scale:2,bottom:0.20};
+
+// גזירת רצועה תחתונה. משתמשת באותו קנבס כמו החיתוך העליון, עם היסט Y.
+function chequeCropMicr(src,box=CHQ_MICR_CROP){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>{
+      const h=Math.round(img.naturalHeight*box.bottom),y=img.naturalHeight-h;
+      const c=document.createElement('canvas');
+      c.width=Math.round(img.naturalWidth*box.scale);c.height=Math.round(h*box.scale);
+      const g=c.getContext('2d');g.imageSmoothingQuality='high';
+      g.drawImage(img,0,y,img.naturalWidth,h,0,0,c.width,c.height);
+      c.toBlob(b=>b?resolve(b):reject(Error('חיתוך שורת החשבון נכשל')),'image/png');
+    };
+    img.onerror=()=>reject(Error('הצילום לא נטען'));
+    img.src=src;
+  });
+}
+
+const CHQ_MICR_ASK=[
+ 'בתמונה שורת הספרות המודפסת בתחתית שיק ישראלי (שורת MICR).',
+ 'החזר **אך ורק ספרות ורווחים**, בדיוק בסדר שבו הן מופיעות, משמאל לימין.',
+ 'התעלם מהסמלים המיוחדים שבין הקבוצות והחלף כל אחד ברווח.',
+ 'אל תוסיף אותיות, מילים או הסבר. אם השורה אינה קריאה החזר: אין'
+].join(' ');
+
+// פירוק לקבוצות ספרות, ואז למבנה. שמרני בכוונה: אם המבנה לא מזוהה,
+// מוחזר raw בלבד ולא ניחוש - חשבון שגוי מקבץ שיקים של אנשים שונים.
+function chequeParseMicr(raw){
+  const groups=String(raw||'').replace(/[^\d ]+/g,' ').split(/\s+/).filter(Boolean);
+  if(groups.length<3)return{raw:String(raw||'').trim(),bank:'',branch:'',account:''};
+  // ⚠ נמדד על שני השיקים של טל: הסמלים ⑆⑈ מפרידים את קוד הבנק מהסניף,
+  // ולכן אחרי החלפתם ברווח מתקבלות **ארבע** קבוצות ולא שלוש:
+  //   [מס' שיק] [בנק] [סניף+מילוי] [חשבון]
+  // הניסיון הראשון הניח קבוצה אמצעית אחת, ולקח "43" כבנק במקום "20".
+  let bank='',branch='';
+  const account=String(groups[groups.length-1]||'').replace(/^0+/,'');
+  if(groups.length>=4){bank=groups[1];branch=String(groups[2]).slice(0,3)}
+  else{const mid=String(groups[1]||'');bank=mid.slice(0,2);branch=mid.slice(2,5)}
+  // אימות מבנה: קוד בנק 1-2 ספרות, סניף 3, חשבון 3 ומעלה. אחרת - ריק,
+  // כי מפתח חלקי מאחד מוסרים שונים תחת אותו חשבון.
+  if(!/^\d{1,2}$/.test(bank)||!/^\d{3}$/.test(branch)||!/^\d{3,}$/.test(account))
+    return{raw:String(raw||'').trim(),bank:'',branch:'',account:''};
+  return{raw:String(raw||'').trim(),bank,branch,account};
+}
+// מפתח החשבון: בנק-סניף-חשבון. זה מה שמקבץ, וזה מה שמוצג.
+function chequeAccountKey(a){return a&&a.bank&&a.account?`${a.bank}-${a.branch}-${a.account}`:''}
+
+async function chequeReadAccount(session,front){
+  const ask=async blob=>{
+    const s=await session.clone();
+    try{return String(await s.prompt([{role:'user',content:[
+      {type:'text',value:CHQ_MICR_ASK},{type:'image',value:blob}]}])||'').trim()}
+    finally{try{s.destroy()}catch(e){}}
+  };
+  const strip=await chequeCropMicr(front);
+  const first=chequeParseMicr(await ask(strip));
+  const second=chequeParseMicr(await ask(strip));
+  // ⚠ שתי קריאות של אותו מודל אינן עדות בלתי-תלויה (נמדד על שמות!), אבל
+  // **אי-הסכמה כן מוכיחה כישלון**. לכן היא פוסלת, גם אם הסכמה אינה מאשרת.
+  const agree=chequeAccountKey(first)&&chequeAccountKey(first)===chequeAccountKey(second);
+  return{...first,agree:!!agree,second:chequeAccountKey(second)};
+}
+
+// קריאת החשבון לכל צילום שאין לו עדיין. נפרד מקריאת השם בכוונה: הספרות
+// הן המפתח לקיבוץ, והשם הוא מה שמקובץ.
+async function chequeAccountsAll({onProgress,onDownload,limit=0}={}){
+  const st=await chrome.storage.local.get({chequeAccounts:{}}),accounts=st.chequeAccounts||{};
+  const ids=[...await chequeKeys()].filter(id=>!accounts[id]);
+  if(!ids.length)return{total:0,done:0,read:0};
+  const session=await chequeOcrSession(onDownload);
+  let done=0,read=0;
+  try{
+    for(const id of ids){
+      if(limit&&done>=limit)break;
+      const rec=await chequeGet(id).catch(()=>null);
+      done++;
+      if(rec?.front){
+        try{
+          const a=await chequeReadAccount(session,rec.front);
+          accounts[id]=a;
+          if(a.agree)read++;
+          await chrome.storage.local.set({chequeAccounts:accounts});
+        }catch(e){}
+      }
+      onProgress?.({done,total:ids.length,read});
+    }
+  }finally{try{session.destroy()}catch(e){}}
+  return{total:ids.length,done,read};
+}

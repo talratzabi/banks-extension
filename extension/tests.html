@@ -744,6 +744,49 @@ t('שיקים: ההחלה על קבוצה דורשת סימון, והבנק נל
   if(!/\.payer-guess\{[^}]*#fdecec/.test(dash))return 'תגית לא-מאושרת אינה אדומה';
   return /\$\{payerBank\}/.test(dash)||'בנק המוסר אינו נכנס לחיפוש'});
 
+// -- 1.84.0: קיבוץ לפי מספר החשבון המודפס (MICR), לא לפי דמיון --
+t('שיקים: פירוק שורת החשבון מהשיקים האמיתיים של טל',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    if(txt.slice(i-6,i)==='async ')i-=6;
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}};
+  const parse=new Function(cut(ocr,'chequeParseMicr')+';return chequeParseMicr')();
+  const key=new Function(cut(ocr,'chequeAccountKey')+';return chequeAccountKey')();
+  // ⚠ שתי השורות נלקחו מהצילומים שטל צירף, כולל האימות מול הטקסט המודפס:
+  //   מזרחי: "סניף 433 קרית גת"  · דיסקונט: "סניף קרית מלאכי-153"
+  const cases=[
+    ['מזרחי טפחות','2951079 20 43300 251592',{bank:'20',branch:'433',account:'251592'}],
+    ['דיסקונט','80000766 11 15345 0000054074',{bank:'11',branch:'153',account:'54074'}],
+    ['סמלי MICR הופכים לרווח','⑈2951079 ⑆20⑈43300⑆ 251592⑈',{bank:'20',branch:'433',account:'251592'}],
+    ['אפסים מובילים נחתכים','80000766 11 15345 0000012345',{bank:'11',branch:'153',account:'12345'}]];
+  for(const [name,raw,want] of cases){
+    const got=parse(raw);
+    if(got.bank!==want.bank||got.branch!==want.branch||got.account!==want.account)
+      return name+': '+JSON.stringify(got)+' במקום '+JSON.stringify(want);
+  }
+  // ⚠ שורה לא קריאה חייבת להחזיר מפתח **ריק**, לא מפתח חלקי — אחרת
+  // שיקים של מוסרים שונים היו מתאחדים תחת אותו מפתח שגוי.
+  for(const bad of ['','אין','12',' 7 ','abc','80000766 11 15345 0000000042'])
+    if(key(parse(bad)))return 'קלט לא קריא ייצר מפתח: '+JSON.stringify(bad)+' -> '+key(parse(bad));
+  if(key(parse('2951079 20 43300 251592'))!=='20-433-251592')return 'מפתח שגוי';
+  return true});
+
+t('שיקים: הדוח מקבץ לפי חשבון, ומפריד את מה שלא נקרא',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}};
+  const key=new Function(cut(ocr,'chequeAccountKey')+';return chequeAccountKey')();
+  const accounts={a1:{bank:'20',branch:'433',account:'251592'},a2:{bank:'20',branch:'433',account:'251592'},
+                  b1:{bank:'11',branch:'153',account:'54074'},z1:{bank:'',branch:'',account:''}};
+  const groups=new Function('chequeAccounts','chequePayers','chequeHashes','chequeAccountKey',
+    cut(dash,'chequeAccountGroups')+';return chequeAccountGroups')(accounts,{a1:'ועד יד-נתן'},{z1:'h'},key)();
+  const g=groups.groups;
+  if(g.length!==2)return 'קבוצות: '+g.length;
+  if(g[0].ids.length!==2||g[0].key!=='20-433-251592')return 'הגדולה אינה ראשונה: '+JSON.stringify(g[0]);
+  if(![...g[0].names][0]||[...g[0].names][0]!=='ועד יד-נתן')return 'שם מאושר לא נאסף לקבוצה';
+  // ⚠ שיק בלי חשבון קריא אינו מצטרף ל"חשבון ריק"
+  if(groups.unread.length!==1||groups.unread[0]!=='z1')return 'לא-נקראו: '+JSON.stringify(groups.unread);
+  return /async function nameWholeAccount\(/.test(dash)&&/הוחל על \$\{g\.ids\.length\} שיקים/.test(dash)
+    ||'אין קביעת שם לכל החשבון'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
