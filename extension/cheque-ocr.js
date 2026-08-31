@@ -137,11 +137,25 @@ async function chequeReadPayer(session,front){
 // (45KB לשיק) יושבות בזיכרון בבת אחת.
 // ⚠ שמירה אחרי כל שיק ולא בסוף: הריצה יכולה לקחת דקות, וטל עלול לסגור
 // את הדף באמצע. מה שכבר הוכרע - נשאר.
+// ⚠⚠⚠ 31.08.2026 - שתי ראיות של טל הכריעו נגד ההנחה שבבסיס הקובץ הזה:
+//   שיק "ועד מקומי מושב יד-נתן"  -> המודל אמר "מופז גל"
+//   שיק "פרידמן מאיר, פרידמן שושנה" -> המודל אמר "יצחק שומר"
+// **שני שמות אנושיים סבירים שאינם מופיעים בשיק בשום מקום**, והשני אף עבר
+// את מבחן שתי-הקריאות של 1.79.0 (התגית הייתה ירוקה).
+//
+// **הלקח:** שתי קריאות של **אותו מודל** עם **אותה שאלה** אינן עדויות
+// בלתי-תלויות. הן חוזרות על אותה הזיה, ולכן "הסכמה" אינה אימות.
+// המודל המובנה אינו קורא עברית מסריקות האלה - הוא ממציא שם סביר.
+//
+// **לכן פלט המודל ירד מדרגה מ"עובדה" ל"הצעה".** הוא נשמר ב-
+// chequePayerGuess ולעולם לא ב-chequePayers, ואינו נכנס לחיפוש עד
+// שטל מאשר אותו מול החיתוך. שם שגוי בחיפוש גרוע משדה ריק.
 async function chequeOcrRunAll({onProgress,onDownload,limit=0,retryDoubt=false}={}){
-  const st=await chrome.storage.local.get({chequePayers:{},chequePayerDoubt:{},chequePayerMeta:{}});
-  const payers=st.chequePayers||{},doubt=st.chequePayerDoubt||{},meta=st.chequePayerMeta||{};
-  const ids=[...await chequeKeys()].filter(id=>!payers[id]&&(retryDoubt||!doubt[id]));
-  if(!ids.length)return{total:0,done:0,found:0,unsure:Object.keys(doubt).length,already:Object.keys(payers).length};
+  const st=await chrome.storage.local.get({chequePayers:{},chequePayerGuess:{},chequePayerMeta:{}});
+  const payers=st.chequePayers||{},guess=st.chequePayerGuess||{},meta=st.chequePayerMeta||{};
+  // מדלגים על מה שטל כבר אישר ידנית, ועל מה שכבר יש לו הצעה ממתינה.
+  const ids=[...await chequeKeys()].filter(id=>!payers[id]&&(retryDoubt||!guess[id]));
+  if(!ids.length)return{total:0,done:0,found:0,unsure:0,already:Object.keys(payers).length};
   const session=await chequeOcrSession(onDownload);
   let done=0,found=0,unsure=0;
   try{
@@ -157,13 +171,15 @@ async function chequeOcrRunAll({onProgress,onDownload,limit=0,retryDoubt=false}=
           // ⚠ סוג המוסר נשמר תמיד, גם כשהשם בספק: "יש חותמת" הוא עובדה
           // שנצפתה בתמונה, והיא נכונה גם אם הקריאה נכשלה.
           meta[id]={kind:r.kind||'',stamp:r.stamp||''};
-          if(r.agree&&r.name){payers[id]=r.name;delete doubt[id];found++}
-          else{doubt[id]={crop:r.crop||'',full:r.full||'',stamp:r.stamp||''};unsure++}
-          await chrome.storage.local.set({chequePayers:payers,chequePayerDoubt:doubt,chequePayerMeta:meta});
+          // ההצעה נשמרת תמיד - גם כשהקריאות חלוקות, כי שלוש אפשרויות
+          // מול העין של טל שוות יותר משדה ריק.
+          guess[id]={name:r.name||'',crop:r.crop||'',full:r.full||'',stamp:r.stamp||'',agree:!!r.agree};
+          if(r.agree&&r.name)found++;else unsure++;
+          await chrome.storage.local.set({chequePayerGuess:guess,chequePayerMeta:meta});
         }catch(e){}
       }
       onProgress?.({done,total:ids.length,found,unsure});
     }
   }finally{try{session.destroy()}catch(e){}}
-  return{total:ids.length,done,found,unsure,already:Object.keys(payers).length};
+  return{total:ids.length,done,found,unsure,already:Object.keys(payers).length,pending:Object.keys(guess).length};
 }

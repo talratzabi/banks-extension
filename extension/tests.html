@@ -614,8 +614,8 @@ t('שיקים: שם נשמר רק כששתי קריאות מסכימות',()=>{
   if(/if\(first\)return/.test(body))return 'עדיין נעצר אחרי הקריאה הראשונה';
   if(!(body.includes('fromCrop')&&body.includes('fromFull')))return 'אין שתי קריאות';
   if(!/agree:false/.test(body))return 'אין מסלול של אי-הסכמה';
-  return /chequePayerDoubt/.test(ocr)&&/if\(r\.agree&&r\.name\)/.test(ocr)
-    ||'שם נשמר גם בלי הסכמה'});
+  return /chequePayerGuess/.test(ocr)&&!/payers\[id\]=r\.name/.test(ocr)
+    ||'פלט המודל עדיין נשמר כשם מאושר'});
 
 t('שיקים: אין "מוסר", יש תיקון ידני, ומוצג מה שהמודל קרא',()=>{
   // בקשת טל 31.08: השם עומד לבדו, בלי המילה "מוסר".
@@ -673,6 +673,31 @@ t('שיקים: סוג המוסר נשמר ומוצג',()=>{
     &&/chequePayerMeta/.test(dash)&&/אושר מול החותמת/.test(dash)
     &&/בלי חותמת — שיק פרטי/.test(dash)
     ||'סוג המוסר אינו נשמר או אינו מוצג'});
+
+// -- 1.81.0: פלט המודל ירד מדרגה מ"עובדה" ל"הצעה" --
+t('שיקים: המודל אינו כותב שמות לחיפוש, רק הצעות לאישור',()=>{
+  // ⚠⚠ שתי ראיות של טל: "מופז גל" ו"יצחק שומר" — שני שמות אנושיים סבירים
+  // שאינם על השיק, והשני עבר את מבחן שתי-הקריאות. שתי קריאות של אותו מודל
+  // עם אותה שאלה אינן עדויות בלתי-תלויות.
+  if(/payers\[id\]=r\.name/.test(ocr))return 'הריצה עדיין כותבת ישירות ל-chequePayers';
+  if(!/guess\[id\]=\{name:r\.name/.test(ocr))return 'ההצעה אינה נשמרת';
+  if(!/chequePayerGuess:guess/.test(ocr))return 'ההצעות אינן נכתבות לאחסון';
+  // המסך שהופך הצעה לנתון
+  if(!/function openPayerReview\(/.test(dash))return 'אין מסך אישור';
+  if(!/function payerPending\(/.test(dash))return 'אין ספירת ממתינים';
+  if(!/chequeCropTopRight\(rec\.front\)/.test(dash))return 'מסך האישור אינו מציג את החיתוך';
+  if(!/class="payer-guess"/.test(dash))return 'הצעה אינה מסומנת כהצעה';
+  // ⚠ הגירה: מה שנשמר בגרסאות הקודמות יורד לדרגת הצעה, בלי למחוק דבר
+  if(!/chequePayerReviewed/.test(dash))return 'אין הגירה לשמות שכבר נשמרו';
+  return /payerQueue\.splice\(payerAt,1\)/.test(dash)||'אישור אינו מסיר מהתור'});
+
+t('שיקים: תור האישור מתנהג נכון',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}};
+  const pending=new Function('chequePayerGuess','chequePayers',cut(dash,'payerPending')+';return payerPending')
+    ({'a|1':{name:'x'},'a|2':{name:'y'},'a|3':{name:''}},{'a|2':'אושר'})();
+  // מה שטל כבר אישר יוצא מהתור; הצעה ריקה נשארת — היא עדיין דורשת הכרעה
+  return pending.join(',')==='a|1,a|3'||'תור שגוי: '+pending.join(',')});
 
 // ── סיכום ──
 const ul=document.getElementById('out');
