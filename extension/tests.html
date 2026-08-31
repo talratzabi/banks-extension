@@ -351,6 +351,47 @@ t('חיפוש: כפתור צילום השיק נולד רק כשהצילום ק�
     &&/showCheque\(record,\{date:chq\.dataset\.date\}\)/.test(dash)
     ||'הכפתור לא מחובר ל-showCheque'});
 
+// -- 1.73.0: טקסט חלון השיק מלאומי מוצג בשני המקומות --
+{
+ const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+   if(txt.slice(i-6,i)==='async ')i-=6;
+   let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+   throw new Error('לא נסגרה '+name)};
+ let bad=[];
+ try{
+  // ⚠ אין כאן שום סלקטור פנימי של חלון לאומי - הלכידה היא של החלון כולו.
+  if(!/document\.querySelector\('\[role="dialog"\]'\)/.test(lc))bad.push('הלכידה אינה על [role="dialog"] כולו');
+  if(!/type:'LEUMI_CHEQUE_IMAGE',reference,front:fresh\[0\],back:fresh\[1\]\|\|'',info/.test(lc))bad.push('הטקסט אינו נשלח עם הצילום');
+  if(!/out\[reference\]=\{front:fresh\[0\],back:fresh\[1\]\|\|'',info\}/.test(lc))bad.push('הטקסט אינו חוזר גם במסלול האצווה');
+  if(!/chqProbe\.dialog/.test(lc))bad.push('הגשש למבנה החלון חסר');
+
+  // saveChequeInfo האמיתי: כתיבות רצופות על אותה מפה, בלי אובדן
+  let store={chequeInfo:{}};
+  const chromeStub={storage:{local:{
+    get:async d=>JSON.parse(JSON.stringify({chequeInfo:store.chequeInfo||d.chequeInfo})),
+    set:async o=>{store=JSON.parse(JSON.stringify({...store,...o}))}}}};
+  const api=new Function('chrome',"let chequeInfoQueue=Promise.resolve();"+cut(bg,'saveChequeInfo')+';return saveChequeInfo')(chromeStub);
+  api('a|1','שיק מאת ישראל ישראלי');
+  api('a|2','שיק מאת חברה בעמ');
+  api('a|3','   ');
+  api('','טקסט בלי מזהה');
+  await new Promise(r=>setTimeout(r,80));
+  const keys=Object.keys(store.chequeInfo).sort().join(',');
+  if(keys!=='a|1,a|2')bad.push('כתיבות רצופות לא נשמרו יחד: '+keys);
+  if(store.chequeInfo['a|1']!=='שיק מאת ישראל ישראלי')bad.push('הטקסט נדרס');
+ }catch(e){bad.push('חריגה: '+e.message)}
+ t('שיקים: הטקסט מלאומי נלכד, נשמר בתור, ומוצג בשתי התצוגות',()=>!bad.length||bad.join(' · '));
+}
+
+t('שיקים: התצוגה מסומנת כטקסט מהאתר ולא כשדה מנותח',()=>{
+  return /function chequeNoteHtml\(/.test(dash)
+    &&/chequeNoteHtml\(chequeId\(accountKey\(account\),t\.reference\|\|''\)\)/.test(dash)
+    &&/chequeNoteHtml\(r\.cheque\)/.test(dash)
+    &&/cheque-note-block/.test(dash)&&/chequeInfo=data\.chequeInfo\|\|\{\}/.test(dash)
+    // ⚠ אין להבטיח "מוסר השיק" כשדה מנותח - המבנה לא נמדד.
+    &&!/מוסר השיק:/.test(dash)
+    ||'התצוגה חסרה באחד המקומות, או מבטיחה שדה שלא נמדד'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;

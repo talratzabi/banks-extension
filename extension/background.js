@@ -457,9 +457,10 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   // נמדד: total 32 · saved 18 · failed 14 · why „לא השיב תוך 300 שניות". כל שיק
   // שנקלט נשמר עכשיו מיד, ולכן timeout מאבד לכל היותר את זה שבאוויר.
   if(m?.type==='LEUMI_CHEQUE_IMAGE'&&m.reference&&m.front){
+    saveChequeInfo(chequeId(chequeCtx.selectionKey||'',String(m.reference)),m.info);
     const key=chequeCtx.selectionKey;
     if(key){const id=chequeId(key,String(m.reference));
-      chequePut({id,selectionKey:key,reference:String(m.reference),front:m.front,back:m.back||'',savedAt:new Date().toISOString()})
+      chequePut({id,selectionKey:key,reference:String(m.reference),front:m.front,back:m.back||'',info:String(m.info||''),savedAt:new Date().toISOString()})
         .then(()=>{chequeCtx.savedRefs.add(String(m.reference))}).catch(()=>{})}
     reply({ok:true});return}
   // WHY: הפעימה היא ההוכחה היחידה שהעמוד חי. בלעדיה "ממתין" ו"מת" נראים זהה.
@@ -2177,12 +2178,23 @@ if(r?.images&&r.images.__notFound){notFoundAll.push(...r.images.__notFound);dele
       const n=(typeof prev==='number'?1:(prev?.n||0))+1;
       missing[id]={at:nowMs,n};}
     if(r?.images)delete r.images.__noImage;
-for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue;await chequePut({id:chequeId(a.selectionKey,reference),selectionKey:a.selectionKey,reference,front:img.front,back:img.back||'',savedAt:new Date().toISOString()});chequeCtx.savedRefs.add(String(reference));saved++}}}
+for(const[reference,img]of Object.entries(r.images||{})){if(!img?.front)continue;await chequePut({id:chequeId(a.selectionKey,reference),selectionKey:a.selectionKey,reference,front:img.front,back:img.back||'',info:String(img.info||''),savedAt:new Date().toISOString()});saveChequeInfo(chequeId(a.selectionKey,reference),img.info);chequeCtx.savedRefs.add(String(reference));saved++}}}
   saved=Math.max(saved,chequeCtx.savedRefs.size);
 await chrome.storage.local.set({leumiChequeMissing:missing,
   leumiChequeReport:{total:chequeCtx.total,already:chequeCtx.base,noReference:chequeCtx.noRef,asked,saved,failed,skippedMissing,remaining:outOfTime,notFound:notFoundAll.length,notFoundRefs:notFoundAll.slice(0,15),why,at:new Date().toISOString()}});
 if(asked&&!saved)await chrome.storage.local.set({syncStatus:`לאומי: לא נשמר אף צילום שיק מתוך ${asked} מבוקשים — ${why||'ללא סיבה'}`});
 return saved}
+// טקסט חלון הצילום של לאומי, לפי מזהה שיק. נשמר בנפרד מהתמונות כדי
+// שהדשבורד יוכל להציג אותו בכל שורה בלי לקרוא base64.
+let chequeInfoQueue=Promise.resolve();
+function saveChequeInfo(id,info){
+  const text=String(info||'').trim();if(!id||!text)return;
+  chequeInfoQueue=chequeInfoQueue.then(async()=>{
+    const st=await chrome.storage.local.get({chequeInfo:{}}),map=st.chequeInfo||{};
+    map[id]=text.slice(0,400);
+    await chrome.storage.local.set({chequeInfo:map});
+  }).catch(()=>{});
+}
 async function openLeumiCheque(m){const tabs=leumiSession(await chrome.tabs.query({url:['https://hb2.bankleumi.co.il/*']}));if(!tabs[0])throw Error('יש להתחבר ללאומי כדי להציג צילום שיק');await chrome.tabs.update(tabs[0].id,{url:'https://hb2.bankleumi.co.il/staticcontent/digitalfront/he/checks/cleared-checks/'});await delay(1600);const r=await chrome.tabs.sendMessage(tabs[0].id,{type:'LEUMI_OPEN_CHEQUE',branch:m.branch,accountNumber:m.accountNumber,date:m.date,amount:m.amount});if(!r?.ok)throw Error(r?.error||'צילום השיק לא נמצא');return{ok:true}}
 
 // ⚠ tabs[0] בחר לשונית שרירותית — לעיתים ישנה, מנותקת או בחלון אחר. המשתמש ראה

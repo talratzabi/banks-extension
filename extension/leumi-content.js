@@ -111,10 +111,19 @@ for(let i=0;i<32;i++){await wait(250);
   if(fresh.length>=2)break;
   if(i===4&&!fresh.length&&!document.querySelector('[role="dialog"]'))break}
 if(!fresh.length)noImage.push(reference);
-if(fresh.length){out[reference]={front:fresh[0],back:fresh[1]||''};
+// ⚠⚠ פרטי מוסר השיק: **מבנה חלון הצילום של לאומי לא נמדד מעולם בפרויקט
+// הזה.** לכן לא נבחר כאן שום סלקטור פנימי - נלקח הטקסט של החלון כולו,
+// כפי שהוא. בחירת סלקטור בלי מדידה היא בדיוק מה ש-§2 אוסר, והמחיר שלה
+// כאן הוא שדה ריק שנראה כמו "לבנק אין את המידע".
+// הגשש למטה שומר את הטקסט הראשון בריצה; ממנו ייכתב הפירוק לשם/בנק/סניף.
+const dlgEl=document.querySelector('[role="dialog"]');
+const info=dlgEl?String(txt(dlgEl)||'').replace(/\s+/g,' ').trim().slice(0,400):'';
+if(info&&!chqProbe.dialog)chqProbe.dialog={reference,text:info,
+  tags:[...dlgEl.querySelectorAll('*')].slice(0,60).map(el=>el.tagName.toLowerCase()+(el.className&&typeof el.className==='string'?'.'+el.className.split(/\s+/)[0]:'')).join(' ')};
+if(fresh.length){out[reference]={front:fresh[0],back:fresh[1]||'',info};
 // ⚠ שולחים כל צילום מיד ולא רק בסוף האצווה: אצווה שחורגת מהתקרה איבדה עד עכשיו
 // גם את מה שכבר צולם בהצלחה (נמדד 18.08.2026 — 14 מתוך 32 אבדו כך).
-chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_IMAGE',reference,front:fresh[0],back:fresh[1]||''}).catch(()=>{})}}
+chrome.runtime.sendMessage({type:'LEUMI_CHEQUE_IMAGE',reference,front:fresh[0],back:fresh[1]||'',info}).catch(()=>{})}}
 await closeViewer();
 // ⚠ הדילוגים נשלחים הלאה, אחרת הרשומה תמשיך לומר „failed:0" על כשל מלא.
 if(notFound.length)out.__notFound=notFound.slice(0,20);
