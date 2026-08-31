@@ -6,7 +6,7 @@
   "4": "host_permissions",
   "5": "dashboard.js",
   "6": "HANDOFF.md",
-  "7": "render",
+  "7": "esc",
   "8": "poalim-content.js",
   "9": "syncLeumi",
   "10": "toast",
@@ -15,7 +15,7 @@
   "13": "withTimeout",
   "14": "פרויקט „בנקים” — היסטוריה, כללים והנחיות המשך",
   "15": "syncMizrahiSelected",
-  "16": "esc",
+  "16": "renderAllCards",
   "17": "card-history.js",
   "18": "money",
   "19": "CDP",
@@ -88,6 +88,6 @@
   "86": "1.73.0 - פרטי השיק מלאומי, בחלון החשבון ובחיפוש · ⚠ מבנה החלון לא נמדד",
   "87": "cheque-ocr.js",
   "88": "1.74.0 - פסיק בשדה החיפוש = חיפוש נוסף",
-  "89": "renderMaslaka",
+  "89": "renderScope",
   "90": "1.75.0 - חילוץ שם מוסר השיק מהסריקה, עם המודל המובנה של Chrome"
 }
