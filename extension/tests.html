@@ -1240,6 +1240,31 @@ t('בחירה: חישוב שנכשל אינו בולע את הבורר',()=>{
   if(!/split\.error/.test(sel))return 'התקלה אינה מוצגת למשתמש';
   return true});
 
+// -- 1.99.0: דיסקונט עסקי לא פתח חלון לבנק --
+t('דיסקונט: בורר הלשונית העסקי אינו תופס את הלשונית הפרטית',()=>{
+  // ⚠⚠ טל: "דיסקונט עסקי לא פותח לבנק". discountTab() חיפשה את **כל**
+  // start.telebank.co.il, ולכן מיד אחרי סנכרון פרטי היא מצאה את הלשונית
+  // שלו — `if(tab)` היה אמת, חלון ההתחברות העסקי לא נפתח, והזיהוי העסקי
+  // רץ על סשן פרטי.
+  const isPriv=(bg.match(/const isPrivateDiscountUrl=[^;]+;/)||[])[0];
+  if(!isPriv)return 'אין הפרדה בין פרטי לעסקי בבורר הלשונית';
+  const fn=new Function(isPriv+'return isPrivateDiscountUrl')();
+  const cases=[
+    ['פרטי','https://start.telebank.co.il/apollo/retail3/#/MY_ACCOUNT_HOMEPAGE',true],
+    ['עסקי','https://start.telebank.co.il/apollo/business2/#/accounts',false],
+    ['אחרי התחברות, עוד לא business2','https://start.telebank.co.il/apollo/',false],
+    ['ריק','',false]];
+  for(const [name,url,want] of cases)
+    if(fn(url)!==want)return name+': '+fn(url)+' במקום '+want;
+  // הסינון עצמו חייב להשתמש בזה, ולא רק להגדיר
+  const dt=bg.slice(bg.indexOf('async function discountTab'),bg.indexOf('async function discountTab')+400);
+  if(!/!isPrivateDiscountUrl\(t\.url\)/.test(dt))return 'הסינון אינו מחיל את ההפרדה';
+  // ⚠ ולא לצמצם ל-business2: אחרי התחברות יש רגע שבו הלשונית עוד לא שם
+  if(/apollo\/business2/.test(dt))return 'הסינון צומצם ל-business2 ויפספס לשונית טרייה';
+  // הפרטי ממשיך לחפש רק את שלו
+  const pt=bg.slice(bg.indexOf('async function discountPrivateTab'),bg.indexOf('async function discountPrivateTab')+300);
+  return /apollo\/retail3/.test(pt)||'הבורר הפרטי כבר אינו מוגבל ל-retail3'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;

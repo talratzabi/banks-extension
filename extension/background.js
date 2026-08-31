@@ -2216,8 +2216,17 @@ async function openLeumiCheque(m){const tabs=leumiSession(await chrome.tabs.quer
 // start.telebank.co.il, **חלונית ההתחברות עצמה נראתה כמו סשן מחובר** —
 // דיסקונט עסקי „מצא חיבור", לא פתח חלון, וניסה לזהות חשבונות על דף הכניסה.
 // **לשונית על /login/ אינה סשן.**
+// ⚠⚠ 31.08.2026 - טל: "דיסקונט עסקי לא פותח לבנק". **השורש: הפונקציה
+// הזאת תפסה גם את הלשונית של דיסקונט הפרטי.** היא מחפשת את כל
+// start.telebank.co.il, ולכן מיד אחרי סנכרון פרטי היא מצאה את הלשונית
+// שלו, `if(tab)` היה אמת, **חלון ההתחברות העסקי לא נפתח מעולם**,
+// והזיהוי העסקי רץ על סשן פרטי.
+// נמדד: פרטי יושב תחת `apollo/retail3`, עסקי תחת `apollo/business2`.
+// ⚠ **מוציאים את הפרטי ולא מצמצמים ל-business2**: אחרי התחברות יש רגע
+// שבו הלשונית העסקית עדיין לא הגיעה ל-business2, וצמצום היה מפספס אותה.
+const isPrivateDiscountUrl=u=>/\/apollo\/retail3\//.test(String(u||''));
 async function discountTab(){const all=await chrome.tabs.query({url:['https://start.telebank.co.il/*']});
-const tabs=all.filter(t=>!/\/login\//.test(t.url||''));
+const tabs=all.filter(t=>!/\/login\//.test(t.url||'')&&!isPrivateDiscountUrl(t.url));
 if(!tabs.length)return null;
 const [active]=await chrome.tabs.query({active:true,currentWindow:true});
 const pick=tabs.find(t=>t.id===active?.id)||tabs.find(t=>t.active)||[...tabs].sort((a,b)=>(b.lastAccessed||0)-(a.lastAccessed||0))[0];
