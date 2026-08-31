@@ -2662,7 +2662,24 @@ async function runMax(tabId,requestedSuffix=''){beginCardRun();
       break;
     }
   }
-  if(!monthly.length)throw Error('לא נקראו עסקאות חודשיות מ‑MAX');const latestBySuffix=new Map();for(const c of monthly)if(!latestBySuffix.has(c.suffix))latestBySuffix.set(c.suffix,c);const nowLabel=firstRead.label,nowKey=firstRead.key;await chrome.storage.local.set({syncStatus:`MAX: החיוב הקרוב — ${nowLabel}`});await chrome.tabs.sendMessage(tabId,{type:'MAX_SELECT_MONTH',label:nowLabel});await delay(1800);await prepareMax(tabId);let currentPage=await chrome.tabs.sendMessage(tabId,{type:'MAX_READ'});if(!currentPage?.ok||currentPage.month!==nowKey)currentPage={ok:true,month:nowKey,total:0,cards:{}};const details=[...latestBySuffix.keys()].map(suffix=>{const transactions=currentPage.cards?.[suffix]||[],onlyCard=latestBySuffix.size===1,amount=onlyCard&&Number.isFinite(Number(currentPage.total))?Number(currentPage.total):transactions.reduce((s,t)=>s+Math.abs(Number(t.amount)||0),0);return{...latestBySuffix.get(suffix),amount,transactions,month:currentPage.month}});
+  if(!monthly.length)throw Error('לא נקראו עסקאות חודשיות מ‑MAX');const latestBySuffix=new Map();for(const c of monthly)if(!latestBySuffix.has(c.suffix))latestBySuffix.set(c.suffix,c);const nowLabel=firstRead.label,nowKey=firstRead.key;await chrome.storage.local.set({syncStatus:`MAX: החיוב הקרוב — ${nowLabel}`});await chrome.tabs.sendMessage(tabId,{type:'MAX_SELECT_MONTH',label:nowLabel});await delay(1800);await prepareMax(tabId);let currentPage=await chrome.tabs.sendMessage(tabId,{type:'MAX_READ'});if(!currentPage?.ok||currentPage.month!==nowKey)currentPage={ok:true,month:nowKey,total:0,cards:{}};
+  // ⚠⚠ 31.08.2026 - טל: "למה בכרטיס הזה אין סיכום?" כרטיס MAX 2910 הציג
+  // 0.00 ₪ בכותרת מעל טבלה מלאה של 12 עסקאות. **השורש הוא Number(null)===0:**
+  // max-content מחזיר total=null כשהתווית "סה\"כ" לא נמצאת בדף (מקס החליפו
+  // ממשק ב-28.08.2026 - ראה ההערה בראש max-content.js), null עבר את
+  // Number.isFinite(Number(null)) כאילו היה מספר תקין, וה-0 שלו דרס את סכום
+  // העסקאות. אותה מלכודת קיימת ל-'' ול-undefined.
+  // שני תיקונים: הסכום מהאתר נבדק לפני ההמרה, ואפס מול עסקאות שסכומן חיובי
+  // נדחה - חודש עם תנועות אינו חודש של אפס.
+  const details=[...latestBySuffix.keys()].map(suffix=>{
+    const base=latestBySuffix.get(suffix),pageTx=currentPage.cards?.[suffix]||[],
+    // אם הקריאה החוזרת של חודש החיוב נכשלה - מה שנקרא בלולאה עדיף על ריק.
+      transactions=pageTx.length?pageTx:(base.transactions||[]),
+      sum=transactions.reduce((x,t)=>x+Math.abs(Number(t.amount)||0),0),
+      raw=currentPage.total,site=raw==null||raw===''?NaN:Number(raw),
+      onlyCard=latestBySuffix.size===1,
+      amount=onlyCard&&Number.isFinite(site)&&(site!==0||!sum)?site:sum;
+    return{...base,amount,transactions,month:currentPage.month}});
   // ⚠ 28.08.2026 - חומר למסלול 5 של מנוע השיוך: מקס אינו מוסר חשבון חיוב או
   // previousCharge. במקומם - סכום חודש-הכרטיס האחרון שהושלם, שחיובו כבר נחת
   // בבנק **בחודש שאחריו** (הלקח מ-1.57.1), ודרישת "מקס" בטקסט התנועה.

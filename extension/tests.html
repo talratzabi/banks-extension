@@ -266,6 +266,39 @@ t('חיפוש: פילוח לפי חודש ולפי מקור, על DOM אמיתי
     return document.querySelectorAll('#movementBreakdownBox tbody tr').length===0||'פילוח צויר במצב "ללא"';
   }finally{host.remove()}});
 
+// -- 1.70.0: כרטיס MAX 2910 הציג 0.00 ש"ח מעל 12 עסקאות --
+// ⚠ נולד ממסך אמיתי של טל, 31.08.2026. Number(null)===0 עבר את
+// Number.isFinite כאילו היה סכום תקין, ודרס את סכום העסקאות.
+t('MAX: סכום שהאתר לא מסר לא מאפס את הכרטיס',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    if(txt.slice(i-6,i)==='async ')i-=6;
+    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+    throw new Error('לא נסגרה '+name)};
+  // הביטוי עצמו מ-background.js, כפי שהוא, על ארבעה ערכי total מהשטח.
+  const expr=(bg.match(/raw=currentPage\.total,site=[^;]+;/)||[])[0];
+  if(!expr)return 'שורת חישוב הסכום לא נמצאה ב-background.js';
+  const calc=new Function('currentPage','transactions','latestBySuffix',
+    'const sum=transactions.reduce((x,t)=>x+Math.abs(Number(t.amount)||0),0),'+expr+'return amount');
+  const tx=[{amount:158.45},{amount:282.22},{amount:2455.90}],sum=2896.57,one=new Map([['2910',1]]);
+  const cases=[
+    ['התווית לא נמצאה בדף (null)',{total:null,cards:{}},sum],
+    ['שדה ריק',{total:'',cards:{}},sum],
+    ['אפס מול עסקאות אמיתיות',{total:0,cards:{}},sum],
+    ['סכום אמיתי מהאתר מנצח',{total:3000,cards:{}},3000],
+    ['חודש ריק באמת נשאר אפס',{total:0,cards:{}},0]];
+  for(const [name,page,want] of cases){
+    const rows=name.includes('ריק באמת')?[]:tx;
+    const got=calc(page,rows,one);
+    if(Math.abs(got-want)>0.005)return name+': התקבל '+got+' במקום '+want;
+  }
+  // התצוגה: 0 שמור מסנכרון ישן עדיין מציג את סכום העסקאות, ומסומן
+  const cardTotal=new Function('money',cut(dash,'cardTotal')+';return cardTotal')(n=>String(Number(n).toFixed(2)));
+  const shown=cardTotal({amount:0,transactions:tx});
+  if(!shown.includes('2896.57')||!shown.includes('מחושב מהעסקאות'))return 'התצוגה לא נחלצה מ-0 שמור: '+shown;
+  if(cardTotal({amount:1234,transactions:tx}).includes('מחושב'))return 'סכום אמיתי סומן בטעות כמחושב';
+  return cardTotal({amount:0,transactions:[]}).includes('0.00')||'חודש ריק אמיתי לא הוצג כאפס';
+});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;
