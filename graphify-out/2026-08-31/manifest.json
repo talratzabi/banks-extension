@@ -30,9 +30,9 @@
     "semantic_hash": ""
   },
   "extension/dashboard.js": {
-    "mtime": 1788176686.1924553,
-    "seen": 1788177067.2060008,
-    "ast_hash": "1f2bcce7a23a6399dc406be5448cb321",
+    "mtime": 1788177429.9478838,
+    "seen": 1788177712.4621394,
+    "ast_hash": "8e4626c6f222181cd690c77bacc2e351",
     "semantic_hash": ""
   },
   "extension/discount-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1788177063.5065458,
-    "seen": 1788177067.2060008,
-    "ast_hash": "d91f0691f2e8a0a1fc31daa1aedc5d52",
+    "mtime": 1788177482.3432457,
+    "seen": 1788177712.4621394,
+    "ast_hash": "b817f56c2282261b8990e5e7a7b4a085",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1788177063.6125214,
-    "seen": 1788177067.2060008,
-    "ast_hash": "b1310a2643a540272fd8fdcca3fbd193",
+    "mtime": 1788177708.8485892,
+    "seen": 1788177712.4621394,
+    "ast_hash": "bea5c0f9365d93384d33553058ee2c7a",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
@@ -186,9 +186,9 @@
     "semantic_hash": ""
   },
   "extension/dashboard.html": {
-    "mtime": 1788173698.9531848,
-    "seen": 1788173951.7195878,
-    "ast_hash": "ae437d9552a84abdf9554c742d7489cd",
+    "mtime": 1788177429.8792,
+    "seen": 1788177712.4621394,
+    "ast_hash": "dfc4faf36ceaed52e519133266d5bb72",
     "semantic_hash": ""
   },
   "extension/popup.html": {
@@ -198,9 +198,9 @@
     "semantic_hash": ""
   },
   "extension/tests.html": {
-    "mtime": 1788175085.3151164,
-    "seen": 1788175277.0435333,
-    "ast_hash": "ede04ff5d582f9f78900d8aeba9b3f17",
+    "mtime": 1788177482.3432457,
+    "seen": 1788177712.4621394,
+    "ast_hash": "0addae82d9c6f0a454ba6293a1ab6db0",
     "semantic_hash": ""
   },
   "extension/viewer.html": {
@@ -279,6 +279,12 @@
     "mtime": 1788176655.4771302,
     "seen": 1788177067.2060008,
     "ast_hash": "d995a4e58d6fc03254a5cd903096d846",
+    "semantic_hash": ""
+  },
+  "extension/cheque-ledger.js": {
+    "mtime": 1788177563.8393772,
+    "seen": 1788177712.4621394,
+    "ast_hash": "f8ee1da238549ec6f302a9bffa50921d",
     "semantic_hash": ""
   }
 }
