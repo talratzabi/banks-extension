@@ -601,10 +601,9 @@ function splitDiscovered(){
  // אין שום מידע על מי נוכחי - מציגים הכול, כדי לא להסתיר בשקט.
  if(!src)return{current:list,older:[],label:'',fallback:'no-source'};
  const current=list.filter(a=>a.source===src);
- // ⚠⚠ המיקוד הצביע על בנק שאין לו שורות, אבל יש שורות ממתינות אחרות.
- // **מסך ריק כשיש נתונים הוא כשל גרוע יותר מבורר רחב מדי**, ולכן
- // מציגים את מה שיש ואומרים למה.
- if(!current.length)return{current:list,older:[],label:'',fallback:src};
+ // ⚠ מיקוד שאין לו שורות מחזיר ריק **בכוונה**: זו הדרישה המפורשת של
+ // טל - רק הבנק שמתחברים אליו. המסך הריק מסביר את עצמו בהודעת ה-empty,
+ // כולל כמה ממתינים בבנקים אחרים.
  return{current,older:list.filter(a=>a.source!==src),label:(current[0]||{}).sourceLabel||''};
 }
 function renderSelection(){const box=$('#discoveredAccounts'),tab=$('#selectionTab');
@@ -651,7 +650,9 @@ const b=e.target.closest('[data-pick]');if(!b)return;const all=b.dataset.pick===
 // ⚠ בניית השורה הוצאה לפונקציה כדי שהסעיף המקופל יציג בדיוק את אותה
 // שורה - כולל תיבת סימון פעילה. "ישן" אינו "לקריאה בלבד".
 const choiceRow=a=>{const kind=accountKinds[a.key]||(a.source==='private'||a.source==='discount-private'?'private':'business'),ready=!!(a.branch&&a.accountNumber);return`<label class="choice ${ready?'':'identifying'}"><input type="checkbox" value="${esc(a.key)}" ${ready&&selectedKeys.includes(a.key)?'checked':''} ${ready?'':'disabled'}><span><b>${esc(a.nickname||a.owner||`חשבון ${a.accountNumber||''}`)} <span class="source-badge">${esc(a.sourceLabel||'פועלים עסקי')}</span></b><small class="choice-id">${ready?esc(a.branch)+"-"+esc(fullAccount(a)):'מזהה מספר חשבון…'}</small><small>${ready?'היתרה תיקרא רק לאחר אישור הסנכרון':'ממתין לזיהוי בלבד — עדיין לא מוריד נתונים'}</small><select class="discovered-kind" data-key="${esc(a.key)}" ${ready?'':'disabled'}><option value="business" ${kind==='business'?'selected':''}>עסקי</option><option value="private" ${kind==='private'?'selected':''}>פרטי</option></select></span></label>`};
-box.innerHTML=(split.error?`<div class="chooser-note">תקלה בסינון הבורר (${esc(split.error)}) — מוצג כל מה שזוהה.</div>`:split.fallback?`<div class="chooser-note">הבנק האחרון שהתחברת אליו לא החזיר חשבונות לבחירה, ולכן מוצג כל מה שממתין.</div>`:'')
+// ⚠ נשארת **רק** הודעת התקלה: היא מופיעה בקריסה אמיתית בלבד, והיא
+// הדבר היחיד שימנע מסך ריק אילם כמו זה שעלה שלושה סבבים.
+box.innerHTML=(split.error?`<div class="chooser-note">תקלה בסינון הבורר (${esc(split.error)}) — מוצג כל מה שזוהה.</div>`:'')
  +discovered.map(choiceRow).join('');box.onchange=async e=>{const c=e.target.closest('input[type=checkbox]');if(c){selectedKeys=c.checked?[...new Set([...selectedKeys,c.value])]:selectedKeys.filter(k=>k!==c.value);await chrome.storage.local.set({selectedAccountKeys:selectedKeys})}updateSelectionCount()};updateSelectionCount()}
 function updateSelectionCount(){const box=document.querySelector('#discoveredAccounts'),el=document.querySelector('#selectionCount');if(!box||!el)return;const n=box.querySelectorAll('input[type=checkbox]:checked').length,total=box.querySelectorAll('input[type=checkbox]').length;el.textContent=`${n} מתוך ${total} מסומנים`;const btn=document.querySelector('#confirmSelection');if(btn)btn.textContent=n?`אישור וסנכרון ${n} חשבונות`:'סמן לפחות חשבון אחד';}
 
