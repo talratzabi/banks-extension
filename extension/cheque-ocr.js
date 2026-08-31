@@ -324,6 +324,12 @@ function chequeParseMicr(raw){
 // מפתח החשבון: בנק-סניף-חשבון. זה מה שמקבץ, וזה מה שמוצג.
 function chequeAccountKey(a){return a&&a.bank&&a.account?`${a.bank}-${a.branch}-${a.account}`:''}
 
+// ⚠⚠ 89 מתוך 133 נכשלו. הרצועה התחתונה נחתכת ב-20% קבועים, אבל שוליים
+// לבנים, זווית צילום או חיתוך הסריקה מזיזים את שורת הספרות מחוץ לגזרה.
+// לכן במקום להיכשל - **מנסים כמה גזרות**, מהצרה לרחבה. הראשונה שמפיקה
+// מבנה תקין (בנק · סניף · חשבון) מנצחת; אם אף אחת לא - זה כישלון אמיתי.
+const CHQ_MICR_TRIES=[0.20,0.14,0.30,0.42];
+
 async function chequeReadAccount(session,front){
   const ask=async blob=>{
     const s=await session.clone();
@@ -331,20 +337,33 @@ async function chequeReadAccount(session,front){
       {type:'text',value:CHQ_MICR_ASK},{type:'image',value:blob}]}])||'').trim()}
     finally{try{s.destroy()}catch(e){}}
   };
-  const strip=await chequeCropMicr(front);
-  const first=chequeParseMicr(await ask(strip));
-  const second=chequeParseMicr(await ask(strip));
-  // ⚠ שתי קריאות של אותו מודל אינן עדות בלתי-תלויה (נמדד על שמות!), אבל
-  // **אי-הסכמה כן מוכיחה כישלון**. לכן היא פוסלת, גם אם הסכמה אינה מאשרת.
-  const agree=chequeAccountKey(first)&&chequeAccountKey(first)===chequeAccountKey(second);
-  return{...first,agree:!!agree,second:chequeAccountKey(second)};
+  const tried=[];
+  for(const bottom of CHQ_MICR_TRIES){
+    const strip=await chequeCropMicr(front,{...CHQ_MICR_CROP,bottom});
+    const raw=await ask(strip);
+    const parsed=chequeParseMicr(raw);
+    tried.push({bottom,raw:parsed.raw.slice(0,40)});
+    if(!chequeAccountKey(parsed))continue;
+    // ⚠ שתי קריאות של אותו מודל אינן עדות בלתי-תלויה (נמדד על שמות!), אבל
+    // **אי-הסכמה כן מוכיחה כישלון**. לכן היא פוסלת, גם אם הסכמה אינה מאשרת.
+    const second=chequeParseMicr(await ask(strip));
+    const agree=chequeAccountKey(parsed)===chequeAccountKey(second);
+    if(agree)return{...parsed,agree:true,bottom,tried};
+    tried[tried.length-1].second=chequeAccountKey(second);
+  }
+  return{raw:'',bank:'',branch:'',account:'',agree:false,tried};
 }
 
 // קריאת החשבון לכל צילום שאין לו עדיין. נפרד מקריאת השם בכוונה: הספרות
 // הן המפתח לקיבוץ, והשם הוא מה שמקובץ.
-async function chequeAccountsAll({onProgress,onDownload,limit=0}={}){
+async function chequeAccountsAll({onProgress,onDownload,limit=0,retryFailed=false}={}){
   const st=await chrome.storage.local.get({chequeAccounts:{}}),accounts=st.chequeAccounts||{};
-  const ids=[...await chequeKeys()].filter(id=>!accounts[id]);
+  // ⚠ קריאה שנכשלה נשמרת גם היא, ולכן בלי retryFailed היא נחסמת לנצח.
+  // הקלדה ידנית (manual) לעולם אינה נקראת מחדש - היא הכרעה של אדם.
+  const ids=[...await chequeKeys()].filter(id=>{const a=accounts[id];
+    if(!a)return true;
+    if(a.manual)return false;
+    return retryFailed&&!chequeAccountKey(a)});
   if(!ids.length)return{total:0,done:0,read:0};
   const session=await chequeOcrSession(onDownload);
   let done=0,read=0;
