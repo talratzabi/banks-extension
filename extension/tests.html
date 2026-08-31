@@ -943,6 +943,63 @@ t('שיקים: אין הגירה שמורידה שמות, וכל מקור מסו
   const saves=(dash.match(/chequePayerSource\}\)/g)||[]).length+(dash.match(/chequePayerSource,/g)||[]).length;
   return saves>=5||`המקור נשמר רק ב-${saves} מקומות`});
 
+// -- 1.91.0: הבורר מתרוקן בסיום הסנכרון, בלי להחזיר שתי תקלות עבר --
+t('בחירה: חשבון שכבר נשמר יורד מהבורר',()=>{
+  const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+    let p=txt.indexOf('(',txt.indexOf(name,i)),d=0,j=p;
+    for(;j<txt.length;j++){if(txt[j]==='(')d++;else if(txt[j]===')'&&!--d)break}
+    let b=txt.indexOf('{',j),k=b,e=0;
+    for(;k<txt.length;k++){if(txt[k]==='{')e++;else if(txt[k]==='}'&&!--e)return txt.slice(i,k+1)}};
+  const mk=(accts,disc)=>new Function('accounts','discovered',
+    cut(dash,'savedAccountKeys')+';'+cut(dash,'pendingDiscovered')+';return pendingDiscovered')(accts,disc)();
+  const leumiSaved={source:'leumi',selectionKey:'leumi|921-348300',branch:'921',accountNumber:'348300'};
+  const disc=[
+    {key:'leumi|921-348300',source:'leumi',branch:'921',accountNumber:'348300'},
+    {key:'leumi|921-876000',source:'leumi',branch:'921',accountNumber:'876000'},
+    {key:'mizrahi|433-271119',source:'mizrahi',branch:'433',accountNumber:'271119'}];
+  // ⚠ החשבון שסונכרן יורד; מה שעדיין לא סונכרן **נשאר**
+  let left=mk([leumiSaved],disc).map(a=>a.key);
+  if(left.join(',')!=='leumi|921-876000,mizrahi|433-271119')return 'סינון שגוי: '+left.join(',');
+  // ⚠⚠ 1.11.2: סנכרון בנק אחד לא מוחק את הבורר של בנק אחר
+  left=mk([leumiSaved,{source:'leumi',selectionKey:'leumi|921-876000'}],disc).map(a=>a.key);
+  if(left.join(',')!=='mizrahi|433-271119')return 'מזרחי נעלם בגלל סנכרון לאומי: '+left.join(',');
+  // ⚠⚠ 1.0.22: ישות אחת שסונכרנה אינה מסלקת ישויות אחרות
+  left=mk([{source:'discount-business',selectionKey:'discount-business|E1'}],
+          [{key:'discount-business|E1',source:'discount-business'},{key:'discount-business|E2',source:'discount-business'}]).map(a=>a.key);
+  if(left.join(',')!=='discount-business|E2')return 'ישות שנייה נעלמה: '+left.join(',');
+  // נפילה לאחור לחשבון ישן בלי selectionKey
+  left=mk([{source:'leumi',branch:'921',accountNumber:'348300'}],disc).map(a=>a.key);
+  if(left.includes('leumi|921-348300'))return 'חשבון ישן בלי selectionKey לא זוהה כשמור';
+  // בלי חשבונות שמורים — הכול ממתין
+  if(mk([],disc).length!==3)return 'סינון פעל בלי חשבונות שמורים';
+  return true});
+
+t('בחירה: הסינון הוא תצוגה בלבד, ואינו מוחק נתונים',()=>{
+  const fn=dash.slice(dash.indexOf('function pendingDiscovered'),dash.indexOf('function renderSelection'));
+  // ⚠ בדיוק כאן נולדו 1.0.22 ו-1.11.2 — מחיקה מהאחסון. אסור שתחזור.
+  if(/storage\.local\.set/.test(fn))return 'הסינון כותב לאחסון';
+  if(/discoveredAccounts/.test(fn))return 'הסינון נוגע ברשימה השמורה';
+  // הקריטריון הוא מצב החשבון, לא זהות הריצה
+  if(/syncedSources|pendingSources|syncScope/.test(fn))return 'הסינון תלוי בריצה ולא בחשבון';
+  return /savedAccountKeys\(\)/.test(fn)||'הסינון אינו נגזר מהחשבונות השמורים'});
+
+// -- 1.91.0: הסימון האוטומטי של חשבונות שזוהו הוסר --
+t('בחירה: חשבון שזוהה אינו מסומן מאליו',()=>{
+  // ⚠⚠ טל: "למה חשבונות של לאומי בדיפולט מוכנים לסנכרון כאשר אין פנייה
+  // לבקשת סנכרון". הקוד סימן **את כל** מה שזוהה ברגע שאף אחד לא היה
+  // מסומן. בלאומי הזיהוי מחזיר הכול בבת אחת, ולכן כולם נדלקו יחד.
+  // ⚠ AGENTS §9: "אין סנכרון אוטומטי בלי בחירת חשבון של המשתמש" —
+  // וחשבון שהתוסף סימן בעצמו **כן** נכנס לסנכרון האוטומטי דרך
+  // selectedAccountKeys. הבדיקה נשברת אם מישהו יחזיר את זה.
+  if(/autoPickedFor/.test(dash))return 'הסימון האוטומטי חזר (autoPickedFor)';
+  if(/fresh\.length===selectable\.length/.test(dash))return 'תנאי הסימון הגורף חזר';
+  if(/selectedKeys=\[\.\.\.new Set\(\[\.\.\.selectedKeys,\.\.\.selectable/.test(dash))return 'עדיין מסמן את כל מה שזוהה';
+  // ⚠ תיבת הסימון עדיין נגזרת מ-selectedKeys — כלומר מבחירה של טל בלבד
+  if(!/selectedKeys\.includes\(a\.key\)\?'checked':''/.test(dash))return 'תיבת הסימון התנתקה מהבחירה השמורה';
+  // הבחירה הידנית ממשיכה להישמר
+  return /selectedKeys=c\.checked\?\[\.\.\.new Set\(\[\.\.\.selectedKeys,c\.value\]\)\]/.test(dash)
+    ||'סימון ידני אינו נשמר'});
+
 // ── סיכום ──
 const ul=document.getElementById('out');
 let pass=0;

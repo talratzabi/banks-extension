@@ -84,9 +84,15 @@ async function load(){
   {const b=$('#syncAll');if(b&&!b.disabled)b.textContent=syncAllLabel();}
   $('#syncAll').textContent='סנכרון לפי הבחירה האחרונה';
   const totalLabel=$('#total')?.previousElementSibling;if(totalLabel)totalLabel.textContent='יתרה כוללת בכל החשבונות';
-  const selectable=discovered.filter(a=>a.branch&&a.accountNumber),fresh=selectable.filter(a=>!selectedKeys.includes(a.key));
-  // סימון ברירת מחדל קורה פעם אחת לכל זיהוי, ונשמר — לא מחושב מחדש בכל רינדור
-  {const fp=selectable.map(a=>a.key).sort().join(',');const picked=(await chrome.storage.local.get({autoPickedFor:''})).autoPickedFor;if(selectable.length&&fresh.length===selectable.length&&picked!==fp){selectedKeys=[...new Set([...selectedKeys,...selectable.map(a=>a.key)])];await chrome.storage.local.set({selectedAccountKeys:selectedKeys,autoPickedFor:fp});if(epoch!==loadEpoch)return}else if(selectable.length&&picked!==fp)await chrome.storage.local.set({autoPickedFor:fp})}
+  // ⚠⚠ 31.08.2026 - **הסימון האוטומטי הוסר, באישור טל.** כאן ישב בלוק
+  // שסימן **את כל** החשבונות שזוהו ברגע שאף אחד מהם לא היה מסומן, פעם
+  // אחת לכל "טביעת אצבע" של קבוצה. בלאומי הזיהוי מחזיר את כל החשבונות
+  // בבת אחת, ולכן כולם נדלקו יחד - וטל ראה חשבונות "מוכנים לסנכרון"
+  // שמעולם לא ביקש.
+  // **זה סתר את AGENTS §9: "אין סנכרון אוטומטי בלי בחירת חשבון של
+  // המשתמש".** חשבון שהתוסף סימן בעצמו אינו בחירה של המשתמש, והוא כן
+  // היה נכנס לסנכרון האוטומטי דרך selectedAccountKeys.
+  // מעכשיו: חשבון שזוהה מופיע **לא מסומן**, וממתין להחלטה.
   renderScope();renderIsracardAssignments();render();renderSelection();
   // כשזיהוי מסתיים, קופצים ללשונית הבחירה כדי שלא יצטרכו לחפש אותה
   setActiveView(discovered.length&&activeView!=='selection'?'selection':activeView);
@@ -508,11 +514,42 @@ async function renderMovementSearch(){
  box.innerHTML=`<div class="movement-search-summary"><span>נמצאו ${matched.length} תנועות</span><span>סכום מצטבר ${money(sum)}</span></div>${perTerm.length?`<div class="movement-search-terms">${perTerm.length} מונחי חיפוש · ${perTerm.map(x=>`<span class="mterm">${esc(x.term)} <b>${x.n}</b></span>`).join('')}</div>`:''}<table><thead><tr><th>תאריך</th><th>ספק / לקוח / פעולה</th><th>מקור</th><th>סוג</th><th>סכום</th></tr></thead><tbody>${filtered.map(r=>`<tr><td>${esc(r.date||'')}</td><td><b>${esc(r.name||'ללא פירוט')}</b>${r.chq?chequePayerHtml(r.chq):''}${r.fresh?' <span class="new-tag">חדש</span>':''}${r.cheque?` <button type="button" class="cheque-view" data-cheque="${esc(r.cheque)}" data-date="${esc(r.date||'')}" data-amount="${r.amount}" title="צילום השיק שמור מקומית — נפתח גם בלי חיבור לבנק">צילום שיק</button>${chequeNoteHtml(r.cheque)}`:''}</td><td>${esc(r.source)}</td><td>${esc(r.kind)}</td><td>${money(r.amount)}</td></tr>`).join('')}</tbody><tfoot><tr><th colspan="4">סה״כ ${matched.length} תנועות</th><th>${money(sum)}</th></tr></tfoot></table><div class="movement-search-total"><span class="mst-debit">חובה · ${debitRows.length} תנועות · ${money(debitSum)}</span><span class="mst-credit">זכות · ${creditRows.length} תנועות · ${money(creditSum)}</span><span>נטו (חובה פחות זכות) · ${money(debitSum-creditSum)}</span></div><div id="movementBreakdownBox"></div>${capped?`<div class="movement-search-note">מוצגות ${filtered.length} התנועות האחרונות מתוך ${matched.length}; הסיכום כולל את כולן.</div>`:''}`;
  movementLastMatched=matched;movementLastTerms=terms;paintMovementBreakdown();
 }
+// ⚠⚠ 31.08.2026 - טל: "זה עבד מקודם, בסיום הסנכרון הרשימה הייתה נעלמת."
+// **זו הייתה רגרסיה, ומצאתי את הקומיט.** עד 1.11.2 סיום סנכרון כתב
+// `discoveredAccounts:[]` - הבורר התרוקן. הקומיט ההוא תיקן תקלה הפוכה
+// ואמיתית ("סנכרון של בנק אחד מחק את הבורר של כולם") והחליף את האיפוס
+// בסינון **לפי מקור הריצה** - ומאז חשבון שנכנס לבורר ולא סונכרן דרך
+// syncSelected נשאר שם לנצח.
+//
+// **שתי ההתנהגויות שגויות. הנכונה היא שלישית:** חשבון יורד מהבורר כשהוא
+// **כבר שמור ב-accounts** - כי אז הוא חשבון קיים ולא "ממתין לבחירה".
+// הקריטריון הוא מצב החשבון עצמו, ולכן:
+//   · סנכרון בנק א' אינו נוגע בבורר של בנק ב'  (התיקון מ-1.11.2 נשמר)
+//   · סנכרון ישות אחת אינו מסלק ישויות אחרות    (התיקון מ-1.0.22 נשמר)
+// ⚠ זהו **סינון תצוגה בלבד** - שום נתון לא נמחק, ולכן אין כאן שום דרך
+// לשחזר את שתי התקלות ההן.
+function savedAccountKeys(){
+ const out=new Set();
+ for(const a of accounts){
+  if(a.selectionKey)out.add(String(a.selectionKey));
+  if(a.branch&&a.accountNumber)out.add(`${a.source||'business'}|${a.branch}-${a.accountNumber}`);
+ }
+ return out;
+}
+function pendingDiscovered(){
+ const saved=savedAccountKeys();
+ return discovered.filter(a=>{
+  if(saved.has(String(a.key)))return false;
+  if(a.branch&&a.accountNumber&&saved.has(`${a.source||'business'}|${a.branch}-${a.accountNumber}`))return false;
+  return true;
+ });
+}
 function renderSelection(){const box=$('#discoveredAccounts'),tab=$('#selectionTab');
+ const discovered=pendingDiscovered();
 // ⚠ הפאנל כבר לא מסתתר מעצמו — הלשונית שולטת בהצגה. קודם הוא נעלם כשלא היו חשבונות
 // שזוהו, ולכן לא היה שום מקום קבוע לחפש בו את הבחירה.
 if(tab)tab.textContent=discovered.length?`בחירה וסנכרון (${discovered.length})`:'בחירה וסנכרון';
-if(!discovered.length){box.innerHTML='<div class="empty">אין חשבונות שממתינים לבחירה. התחבר לבנק מלשונית "חשבונות", ובסיום ההתחברות החשבונות שזוהו יופיעו כאן לבחירה — הסנכרון לא מתחיל לפני שתאשר.</div>';
+if(!discovered.length){box.innerHTML='<div class="empty">אין חשבונות שממתינים לבחירה. חשבון שכבר סונכרן יורד מהרשימה — הוא מופיע בלשונית "חשבונות". התחבר לבנק כדי לזהות חשבונות חדשים; הסנכרון לא מתחיל לפני שתאשר.</div>';
   // ⚠⚠ 27.08.2026 — טל אמר פעמיים „בפנים" ומדידה לא הגיעה. **נמדד: הכפתור
   // „מדוד לשונית פעילה" יושב ב-`#selectionTools`, והשורה הזו הסירה את כל
   // הסרגל כשאין חשבונות שממתינים לבחירה.** ב-BTB אין מתאם ולכן אין „חשבונות
