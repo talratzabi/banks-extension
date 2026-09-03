@@ -1417,6 +1417,23 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    // restoreSyncTabs (finally) מנקה את הרישום, כדי ששגיאה לא תשאיר לשונית לסגירה ע"י מסלול אחר
    const rs=bg.slice(bg.indexOf('async function restoreSyncTabs'),bg.indexOf('async function restoreSyncTabs')+120);
    return /syncTabsToClose\.clear\(\)/.test(rs)||'restoreSyncTabs אינו מנקה'});
+ // -- 2.3.2: "הפעלתי סנכרון אוטומטי ונכנסתי לבינלאומי - לא בוצע סנכרון ולא זוהתה התחברות" --
+ t('סנכרון אוטומטי: הצ\'קבוקס בפאנל הבנקים נשמר - ואין onchange שדורס אותו',()=>{
+   const s=dash.indexOf('function renderScope('),seg=dash.slice(s,s+6000);
+   const handlers=(seg.match(/panel\.onchange=/g)||[]).length;
+   if(handlers!==1)return 'panel.onchange מוגדר '+handlers+' פעמים - האחרון דורס את הקודמים';
+   const h=seg.slice(seg.indexOf('panel.onchange='));
+   if(!/closest\('#autoSyncOnLogin'\)/.test(h)||!/set\(\{autoSyncOnLogin:auto\.checked\}\)/.test(h))return 'השומר אינו כותב autoSyncOnLogin';
+   return /accountFilter/.test(h)||'שומר סינון החשבונות נעלם'});
+ t('סנכרון אוטומטי: הודעת "כבוי" נבלעת רק מול תוצאה טרייה של אותו בנק',()=>{
+   const s=bg.indexOf('async function noteAutoSyncOff'),fn=bg.slice(s,bg.indexOf('async function maybeAutoRun',s));
+   return /cur\.includes\(label\)&&fresh/.test(fn)&&/10\*60\*1000/.test(fn)||'הדיכוי עדיין גורף'});
+ t('בינלאומי: כניסה עצמאית בוחרת את החיבור לפי מספר החשבון שבדף, לא את הראשון',()=>{
+   if(!/pendingFibiSlot:'auto'\}\);await syncFibi\(id\)/.test(bg))return 'המסלול האוטומטי עדיין בוחר את החיבור הראשון';
+   const s=bg.indexOf('async function syncFibi'),fn=bg.slice(s,s+3000);
+   if(!/pendingFibiSlot==='auto'/.test(fn)||!/a\.accountNumber===s\.data\.accountNumber\)/.test(fn))return 'syncFibi אינו פותר את auto לפי מספר החשבון';
+   // הפתרון חייב לקרות לפני בדיקת "אותו חשבון בחיבור האחר"
+   return fn.indexOf("pendingFibiSlot==='auto'")<fn.indexOf('זהו אותו חשבון שכבר נשמר')||'הפתרון מאוחר מדי'});
  t('דשבורד: כרטיס משויך מציג "מחויב מחשבון <בנק> <סניף-חשבון>"',()=>
    /מחויב מחשבון \$\{esc\(a\.sourceLabel\|\|''\)\} \$\{esc\(a\.branch\)\}-\$\{esc\(a\.accountNumber\)\}/.test(dash)||'המחרוזת לא נמצאה');
 }

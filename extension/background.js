@@ -540,7 +540,12 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(m?.type==='START_FIBI'){startFibi(m.slot).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='FIBI_OPEN_SCHEDULE'&&sender.tab?.id){openFibiSchedule(sender.tab.id,m.args||[]).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='FIBI_CLOSE_SCHEDULE'&&sender.tab?.id){closeFibiSchedule(sender.tab.id).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
-  if(m?.type==='FIBI_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingFibiSlot:''}).then(x=>{if(x.pendingFibiSlot)syncFibi(t).catch(()=>{});else maybeAutoRun('fibi','הבינלאומי',async id=>{const acc=(await chrome.storage.local.get({accounts:[]})).accounts.find(a=>String(a.source).startsWith('fibi-'));if(acc){await chrome.storage.local.set({pendingFibiSlot:acc.source});await syncFibi(id)}},t).catch(()=>{})});reply({ok:true});return}
+  if(m?.type==='FIBI_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingFibiSlot:''}).then(x=>{if(x.pendingFibiSlot)syncFibi(t).catch(()=>{});else maybeAutoRun('fibi','הבינלאומי',async id=>{
+    // ⚠ 03.09.2026 - טל: "יתכן וזה בגלל שיש שני חיבורים לבינלאומי." נכון: כאן
+    // נבחר תמיד החיבור **הראשון** (fibi-1, טל), וכניסה לחשבון של סופי (fibi-2)
+    // הייתה נופלת ב-syncFibi על "זהו אותו חשבון שכבר נשמר בחיבור האחר".
+    // עכשיו 'auto': syncFibi קורא את מספר החשבון מהדף ובוחר את החיבור שתואם.
+    const acc=(await chrome.storage.local.get({accounts:[]})).accounts.find(a=>String(a.source).startsWith('fibi-'));if(acc){await chrome.storage.local.set({pendingFibiSlot:'auto'});await syncFibi(id)}},t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='START_LEUMI'){startLeumi().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='START_DISCOUNT_BUSINESS'){startDiscountBusiness().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='START_DISCOUNT_PRIVATE'){startDiscountPrivate().then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
@@ -805,8 +810,13 @@ async function isracardOnAuth(tabId,fn){
 // ⚠ ההגנה כבר הייתה קיימת — **אבל רק לשגיאות.** הצלחה לא הוגנה. אסימטריה.
 const TERMINAL_STATUS=/הסתיים|סונכרנו|סונכרן|נשמרו|הושלם|שגיאה|נכשל/;
 async function noteAutoSyncOff(label){
-  const cur=(await chrome.storage.local.get({syncStatus:''})).syncStatus||'';
-  if(TERMINAL_STATUS.test(cur))return;
+  const st=await chrome.storage.local.get({syncStatus:'',lastAutoSync:''}),cur=st.syncStatus||'';
+  // ⚠ 03.09.2026 - "לא זוהתה התחברות": ההודעה נבלעה כי כל סטטוס סופי (גם של
+  // בנק אחר, גם מלפני שעות) דיכא אותה. עכשיו הדיכוי רק כשהסטטוס הסופי הוא של
+  // **אותו בנק** ומ-10 הדקות האחרונות - כדי לא לדרוס תוצאה טרייה בגלל
+  // ניווט באתר אחרי הסנכרון (הבינלאומי מדווח על כל שינוי hash).
+  const fresh=Date.now()-(Date.parse(st.lastAutoSync||'')||0)<10*60*1000;
+  if(TERMINAL_STATUS.test(cur)&&cur.includes(label)&&fresh)return;
   await chrome.storage.local.set({syncStatus:`זוהתה כניסה ל${label}, אך הסנכרון האוטומטי כבוי`});
 }
 async function maybeAutoRun(source,label,fn,tabId){
@@ -1324,6 +1334,11 @@ async function syncFibi(tabId){noteSyncTab(tabId);
     const s=await fibiRead(tabId,'FIBI_SUMMARY','קריאת סיכום הבינלאומי');
     await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/Online/OnAccountMngment/OnSummaryReports/createOwnerApproval'});await delay(1800);
     const ownerResult=await fibiRead(tabId,'FIBI_OWNER','קריאת שם בעל החשבון');const owner=ownerResult.data||{fullName:'',firstName:''};
+    if(state.pendingFibiSlot==='auto'){                                       // כניסה עצמאית: החיבור נקבע לפי מספר החשבון שבדף
+      const match=state.accounts.find(a=>a.source?.startsWith('fibi-')&&a.accountNumber===s.data.accountNumber);
+      if(!match)throw Error(`חשבון ${s.data.accountNumber} אינו אחד מחיבורי הבינלאומי שנשמרו`);
+      state.pendingFibiSlot=match.source;await chrome.storage.local.set({pendingFibiSlot:match.source});
+    }
     const existingSame=state.accounts.find(a=>a.source?.startsWith('fibi-')&&a.accountNumber===s.data.accountNumber&&a.source!==state.pendingFibiSlot);if(existingSame)throw Error('זהו אותו חשבון שכבר נשמר בחיבור האחר');
     // ⚠ 28.08.2026 - DELTA-AUDIT פער 4: יתרה זהה לשמור => ההלוואות ולוחות
     // הסילוקין (החלק הכבד - דיאלוג לכל הלוואה, עד 50 סבבים×250ms) נלקחים
