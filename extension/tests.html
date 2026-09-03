@@ -1379,6 +1379,24 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    return /LAST=\{isracardUnassigned:'isracardLastCards',calUnassigned:'calLastCards',maxUnassigned:'maxLastCards'\}/.test(rec)
      &&/hiddenCards/.test(rec)&&/isHidden\(s\)\|\|inAccount\(s\)/.test(rec)&&/bankChargeProbes=probes/.test(rec)
      ||'הטיפול ביתומים או בגששים המרובים חסר'});
+ // -- 2.2.0: "זוהה חיוב אחרון בחשבון X" מתחת לשם הכרטיס --
+ t('שיוך: findLastCharge מחזיר את החיוב האחרון, מעדיף טקסט מנפיק, ונופל לסכום בלבד',()=>{
+   const F=new Function(cut(bg,'txDayMs')+';'+cut(bg,'issuerTextRe')+';'+cut(bg,'findLastCharge')+';return{findLastCharge,issuerTextRe}')();
+   const disc={id:'d',transactions:[{date:'11/01/26',action:'ישראכרט חיוב',details:'',debit:2585.28},{date:'10/08/26',action:'ישראכרט חיוב',details:'',debit:2585.28},{date:'20/08/26',action:'עיריית קרי חיוב',details:'',debit:2585.28}]};
+   const hit=F.findLastCharge(disc,{suffix:'9238',issuer:'ישראכרט',previousCharge:2585.28});
+   if(!hit||hit.date!=='10/08/26')return 'לא בחר את האחרון עם שם המנפיק: '+JSON.stringify(hit);
+   const leumi={id:'l',transactions:[{date:'10.07.2026',action:'ל.מאסטרקרד)יש(',details:'',debit:19.9},{date:'10.08.2026',action:'ל.מאסטרקרד)יש(',details:'',debit:19.9}]};
+   const h2=F.findLastCharge(leumi,{suffix:'6334',issuer:'ישראכרט',previousCharge:19.9});
+   if(!h2||h2.date!=='10.08.2026')return 'נפילה לסכום בלבד לא עבדה: '+JSON.stringify(h2);
+   const h3=F.findLastCharge(disc,{suffix:'2910',issuer:'MAX',name:'כרטיס MAX',bankChargeProbes:[{amount:2585.28,monthKey:'08.2026',textRe:'מקס|max'}]});
+   if(h3)return 'גשש עם רגקס מנפיק תפס תנועה בלי "מקס"';
+   return F.issuerTextRe({issuer:'כאל'})==='כאל|ויזה|cal'||'רגקס מנפיק שגוי'});
+ t('שיוך: reconcile מטביע chargeMatch רק כשהחיוב משתנה, והדשבורד מציג אותו',()=>{
+   const start=bg.indexOf('async function reconcileUnassignedCards'),rec=bg.slice(start,bg.indexOf('chrome.storage.onChanged.addListener',start));
+   if(!/cur\.accountId===a\.id&&cur\.date===hit\.date/.test(rec))return 'אין שער "רק כשהשתנה" - המאזין היה מסתובב לנצח';
+   if(!/chargeMatch:\{accountId:a\.id,date:hit\.date,amount:hit\.amount,text:hit\.text,at:/.test(rec))return 'chargeMatch לא נכתב';
+   if(!/function chargeMatchLine\(c\)/.test(dash)||!/זוהה חיוב אחרון בחשבון/.test(dash))return 'הדשבורד לא מציג';
+   return (dash.match(/\$\{chargeMatchLine\(c\)\}/g)||[]).length===2||'השורה אינה בשני מסלולי התצוגה'});
  t('דשבורד: כרטיס משויך מציג "מחויב מחשבון <בנק> <סניף-חשבון>"',()=>
    /מחויב מחשבון \$\{esc\(a\.sourceLabel\|\|''\)\} \$\{esc\(a\.branch\)\}-\$\{esc\(a\.accountNumber\)\}/.test(dash)||'המחרוזת לא נמצאה');
 }

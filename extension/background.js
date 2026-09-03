@@ -262,6 +262,30 @@ function keepAssignedCards(prevList,fresh){
   const kept=prev.cards.filter(c=>cardDigits(c.suffix)&&!have.has(cardDigits(c.suffix)));
   return kept.length?{...fresh,cards:[...(fresh.cards||[]),...kept]}:fresh;
 }
+// ⚠ 03.09.2026 - טל: "חשוב שיהיה רשום מתחת לשם הכרטיס: זוהה חיוב אחרון
+// בחשבון זה וזה, ואת תאריך הזיהוי." findLastCharge מחזיר את התנועה
+// **האחרונה** בחשבון שמתאימה לחיוב הכרטיס: previousCharge ±0.02 או אחד
+// הגששים ±1 ש"ח. עדיפות להתאמה שגם שם המנפיק מופיע בה (דיסקונט "ישראכרט
+// חיוב", הבינלאומי/פועלים "ישראכרט בע"מ"); לאומי כותב "ל.מאסטרקרד)יש(" בלי
+// "ישראכרט", ולכן יש נפילה להתאמת סכום בלבד. הרישום נשמר על הכרטיס
+// כ-chargeMatch {accountId,date,amount,text,at} ומתעדכן רק כשהחיוב משתנה.
+function issuerTextRe(card){const s=`${card?.issuer||''} ${card?.name||''}`;return /כאל|\bCAL\b|ויזה/i.test(s)?'כאל|ויזה|cal':/מקס|\bMAX\b/i.test(s)?'מקס|max':/ישראכרט/i.test(s)?'ישראכרט':''}
+function findLastCharge(account,card){
+  const probes=[...(card?.bankChargeProbes||[]),card?.bankChargeProbe].filter(p=>p&&Number(p.amount)>0);
+  const textRe=issuerTextRe(card),re=textRe?new RegExp(textRe,'i'):null,prev=Number(card?.previousCharge)||0;
+  let withText=null,any=null;
+  for(const t of account?.transactions||[]){
+    const amount=Math.abs(Number(t.amount??t.debit??t.credit??0));if(!(amount>0))continue;
+    const text=`${t.action||''} ${t.details||''}`.replace(/\s+/g,' ').trim();
+    const hit=(prev>0&&Math.abs(amount-prev)<.02)||probes.some(p=>Math.abs(amount-Number(p.amount))<=1&&(!p.textRe||new RegExp(p.textRe,'i').test(text)));
+    if(!hit)continue;
+    const day=txDayMs(t.date||t.valueDate||t.transactionDate);if(!Number.isFinite(day))continue;
+    const row={day,date:String(t.date||''),amount,text:text.slice(0,60)};
+    if(re&&re.test(text)){if(!withText||day>withText.day)withText=row}
+    if(!any||day>any.day)any=row;
+  }
+  return withText||any;
+}
 // גששי חיוב מן ההיסטוריה השמורה: עד ארבעה חודשי-כרטיס שהושלמו, מהחדש לישן,
 // כל אחד עם חודש הנחיתה בבנק (החודש שאחריו) ורגקס שם המנפיק.
 function chargeProbesFromHistory(hist,suffix,issuerRe,textRe,nowNorm){
@@ -313,10 +337,11 @@ async function reconcileUnassignedCards(){
     // ⚠ 03.09.2026 - הגששים מחושבים מחדש בכל סבב (ולא רק כשחסרים): ההיסטוריה
     // גדלה בכל סנכרון מנפיק, וגשש יחיד שנשמר פעם אחת הצביע לנצח על חיוב
     // שטרם נחת. ארבעה חודשים אחורה, כדי שלפחות אחד כבר יהיה בבנק.
+    const d0=new Date(),nowNorm=String(d0.getMonth()+1).padStart(2,'0')+d0.getFullYear();
+    let histP=null;const getHist=()=>histP||(histP=cardHistAll().catch(()=>[]));
     if(lists.some(k=>(st[k]||[]).length)){
       try{
-        const d0=new Date(),nowNorm=String(d0.getMonth()+1).padStart(2,'0')+d0.getFullYear();
-        const hist=await cardHistAll();
+        const hist=await getHist();
         for(const k of lists)for(const c of st[k]||[]){
           const probes=chargeProbesFromHistory(hist,c.suffix,new RegExp(PROBE_RE[k],'i'),PROBE_RE[k],nowNorm);
           if(probes.length)c.bankChargeProbes=probes;
@@ -335,8 +360,23 @@ async function reconcileUnassignedCards(){
       }
       if(left.length!==list.length||patch[key])patch[key]=left;
     }
-    if(!moved&&!Object.keys(patch).length)return 0;
-    if(!moved){await chrome.storage.local.set(patch);return 0}
+    // "זוהה חיוב אחרון בחשבון X" - לכל כרטיס משויך, בכל סבב. נכתב רק כשהחיוב
+    // שזוהה השתנה (חשבון/תאריך/סכום) - אחרת המאזין על accounts היה מסתובב לנצח.
+    let stamped=0;
+    try{
+      const hist=await getHist();
+      for(const a of accounts)for(let i=0;i<a.cards.length;i++){
+        const c=a.cards[i],textRe=issuerTextRe(c);if(!textRe)continue;
+        const probes=chargeProbesFromHistory(hist,c.suffix,new RegExp(textRe,'i'),textRe,nowNorm);
+        const hit=findLastCharge(a,probes.length?{...c,bankChargeProbes:probes}:c);
+        if(!hit)continue;
+        const cur=c.chargeMatch;
+        if(cur&&cur.accountId===a.id&&cur.date===hit.date&&Math.abs(Number(cur.amount)-hit.amount)<.005)continue;
+        a.cards[i]={...c,chargeMatch:{accountId:a.id,date:hit.date,amount:hit.amount,text:hit.text,at:new Date().toISOString()}};stamped++;
+      }
+    }catch(e){}
+    if(!moved&&!stamped&&!Object.keys(patch).length)return 0;
+    if(!moved&&!stamped){await chrome.storage.local.set(patch);return 0}
     patch.accounts=accounts;
     await chrome.storage.local.set(patch);
     return moved;});
