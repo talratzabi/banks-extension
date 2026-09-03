@@ -404,7 +404,7 @@ const mizrahiFrameData=new Map();
 // **הסימן אם זה מתממש: סנכרון שנתקע או מחזיר טבלה ריקה, בלי שרואים דפדוף.**
 // אם יקרה — לחזור ל-windows.create({tabId,focused:false}) שהיה כאן.
 const returnedToDashboard=new Set();
-chrome.tabs.onRemoved.addListener(id=>{returnedToDashboard.delete(id);detachedForSync.delete(id)});
+chrome.tabs.onRemoved.addListener(id=>{returnedToDashboard.delete(id);detachedForSync.delete(id);openedByExtension.delete(id);syncTabsToClose.delete(id)});
 // לשוניות שהוצאו לחלון עבודה נפרד, ויחזרו לחלון הראשי כשהסנכרון ייגמר.
 const detachedForSync=new Set();
 // ⚠ 03.09.2026 - טל: "בסיום הסנכרון שנגמר בהצלחה שייסגר הדף של הבנק או חברת
@@ -412,10 +412,16 @@ const detachedForSync=new Set();
 // אותה, ובנקודת ההצלחה **בלבד** קורא closeSyncTabs. אחרי שגיאה הדף נשאר פתוח
 // כדי שאפשר יהיה לראות מה קרה, ו-restoreSyncTabs (שרץ ב-finally) מנקה את
 // הרישום כדי שהצלחה של מסלול אחר לא תסגור לשונית זרה.
+// ⚠ 03.09.2026 - טל: "תבצע רק כשאני נכנס מהתוסף תהיה סגירה. בשום מצב אחר אין
+// סגירה." לכן נסגרות **רק** לשוניות שהתוסף עצמו פתח - חלון ההתחברות שנפתח
+// מלחיצה בדשבורד (openLoginWindow). לשונית שהמשתמש פתח בעצמו, גם אם הסנכרון
+// רץ עליה והצליח, נשארת.
+const openedByExtension=new Set();
+async function openLoginWindow(opts){const w=await chrome.windows.create(opts);for(const t of w?.tabs||[])if(Number.isInteger(t.id))openedByExtension.add(t.id);return w}
 const syncTabsToClose=new Set();
 function noteSyncTab(id){if(Number.isInteger(id))syncTabsToClose.add(id)}
 async function closeSyncTabs(){
-  const ids=[...syncTabsToClose];syncTabsToClose.clear();
+  const ids=[...syncTabsToClose].filter(id=>openedByExtension.has(id));syncTabsToClose.clear();
   for(const id of ids){detachedForSync.delete(id);returnedToDashboard.delete(id);try{await chrome.tabs.remove(id)}catch{}}
   return ids.length;
 }
@@ -651,7 +657,7 @@ async function openSource(source){
   if(tab)await chrome.tabs.update(tab.id,{url:cfg.login,active:true});
   // אין לשונית — חלונית כניסה, כמו בשאר היעדים. אחרי ההתחברות `returnToDashboard`
   // מגדילה את החלון הזה למידות הדשבורד, ולכן הסנכרון אינו רץ בפריסה צרה (0.73.0).
-  else await chrome.windows.create({url:cfg.login,type:'popup',width:560,height:780,focused:true});
+  else await openLoginWindow({url:cfg.login,type:'popup',width:560,height:780,focused:true});
 }
 // ⚠ שומר לולאה — אל תסיר (§9). discover מסירה את הבנק מ-pendingSources רק בהצלחה;
 // בכישלון הוא נשאר, prepareRoute מנווטת, הניווט משנה pathname, reportAuthenticated
@@ -970,7 +976,7 @@ async function readIsracardCardMonth(tabId,card,month){
 }
 async function loadIsracardMonth(month){
   let tab=await isracardTab();
-  if(!tab){await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});
+  if(!tab){await openLoginWindow({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});
     await chrome.storage.local.set({syncStatus:'ישראכרט: נפתח האתר — התחבר ואז בחר את החודש שוב'});
     return{ok:false,error:'נפתח אתר ישראכרט. התחבר, ואז נסה שוב.'}}
   if(running||autoBusy||isracardHistoryBusy)throw Error('סנכרון אחר כבר רץ — המתן לסיומו ונסה שוב');
@@ -995,7 +1001,7 @@ async function loadIsracardYear(months=12,suffixes=[],onlyMissing=false){
   // ⚠ אם אין לשונית מחוברת — פותחים את האתר במקום לזרוק שגיאה. isracardTab מתעלם
   // מדפי התחברות, ולכן גם כשהמשתמש עומד על מסך הכניסה נראה כאילו "אין לשונית".
   let tab=await isracardTab();
-  if(!tab){await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});
+  if(!tab){await openLoginWindow({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});
     await chrome.storage.local.set({syncStatus:'ישראכרט: נפתח האתר — התחבר ואז לחץ שוב על "טען שנה אחורה"'});
     return{ok:false,error:'נפתח אתר ישראכרט. התחבר, ואז לחץ שוב.'}}
   if(running||autoBusy||isracardHistoryBusy)throw Error('סנכרון אחר כבר רץ — המתן לסיומו ונסה שוב');
@@ -1306,7 +1312,7 @@ async function startFibi(slot){
 // לא נמדדה תקלה בבינלאומי, אבל המבנה זהה והתקדים (`startLeumi`) ברור.
 const __prevF=await chrome.storage.local.get({discoveredAccounts:[]});
 await chrome.storage.local.set({pendingFibiSlot:slot,pendingFibiName:'',
-  discoveredAccounts:(__prevF.discoveredAccounts||[]).filter(a=>a&&a.source!=='fibi'),pendingDiscountBusiness:false,syncStatus:'בודק חיבור פעיל לבינלאומי'});const tabs=await chrome.tabs.query({url:['https://online.fibi.co.il/*']});const connected=tabs.find(tab=>tab.url?.includes('/shell/#/'));if(connected){await returnToDashboard(connected.id,true);syncFibi(connected.id).catch(()=>{});return{ok:true,status:'syncing_connected'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות לבינלאומי'});await chrome.windows.create({url:FIBI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
+  discoveredAccounts:(__prevF.discoveredAccounts||[]).filter(a=>a&&a.source!=='fibi'),pendingDiscountBusiness:false,syncStatus:'בודק חיבור פעיל לבינלאומי'});const tabs=await chrome.tabs.query({url:['https://online.fibi.co.il/*']});const connected=tabs.find(tab=>tab.url?.includes('/shell/#/'));if(connected){await returnToDashboard(connected.id,true);syncFibi(connected.id).catch(()=>{});return{ok:true,status:'syncing_connected'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות לבינלאומי'});await openLoginWindow({url:FIBI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
 async function openFibiSchedule(tabId,args){const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'MAIN',args:[args],func:(values)=>{if(typeof window.luachSilukin!=='function')return false;window.luachSilukin(...values);return true}});if(!results.some(x=>x.result===true))throw Error('פונקציית לוח הסילוקין לא נמצאה במסגרת הבנק');return{ok:true}}
 async function closeFibiSchedule(tabId){await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'MAIN',func:()=>{const close=document.querySelector('[role="dialog"] a[href="#"], .ui-dialog a[href="#"]');if(close){close.click();return true}return false}});return{ok:true}}
 async function enrichFibiInstallments(tabId,loans){for(const loan of loans||[]){if(!loan.scheduleArgs?.length)continue;try{await closeFibiSchedule(tabId);await delay(500);await openFibiSchedule(tabId,loan.scheduleArgs);let current=0;const expected=`${loan.scheduleArgs[2]}-${loan.scheduleArgs[0]}`;for(let n=0;n<50&&!current;n++){await delay(250);const reads=await chrome.scripting.executeScript({target:{tabId,allFrames:true},args:[expected],func:(loanCode)=>{const frame=document.querySelector('#myFrame'),doc=frame?.contentDocument;if(!doc||!doc.body?.innerText?.includes(loanCode))return 0;for(const row of doc.querySelectorAll('[role="row"]')){const first=row.querySelector('[role="gridcell"]')?.textContent?.trim();if(/^\d+$/.test(first||''))return Number(first)}return 0}});current=Number(reads.find(x=>Number(x.result)>0)?.result||0)}const parse=v=>{const m=String(v||'').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);if(!m)return null;let y=Number(m[3]);if(y<100)y+=2000;return{m:Number(m[2]),y}};const from=parse(loan.nextPaymentDate),to=parse(loan.endDate);if(current&&from&&to){const remaining=(to.y-from.y)*12+to.m-from.m+1,total=current-1+remaining;if(remaining>0&&total>=remaining){loan.installments=`${current-1}/${total}`;loan.remainingInstallments=remaining;loan.totalInstallments=total}}await closeFibiSchedule(tabId);await delay(500)}catch(e){try{await closeFibiSchedule(tabId)}catch{}}delete loan.scheduleArgs}return loans}
@@ -1468,7 +1474,7 @@ await chrome.storage.local.set({pendingLeumi:true,leumiAttempts:0,leumiOptionPro
       await chrome.storage.local.set({syncStatus:`הזיהוי נכשל — מסנכרן את ${keys.length} החשבונות שכבר אושרו`});
       await syncSelected(keys);
     }
-  }catch(err){await chrome.storage.local.set({syncStatus:`זיהוי נכשל, וגם הסנכרון החלופי נכשל: ${err.message}`})}});return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות ללאומי'});await chrome.windows.create({url:LEUMI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
+  }catch(err){await chrome.storage.local.set({syncStatus:`זיהוי נכשל, וגם הסנכרון החלופי נכשל: ${err.message}`})}});return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות ללאומי'});await openLoginWindow({url:LEUMI_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
 // ⚠⚠ שלושת השומרים כאן מונעים לולאת ניווט, ואין להסיר אף אחד מהם.
 // prepareLeumiRoute מנווט את הלשונית; הניווט טוען מחדש את הדף; הדף שולח LEUMI_AUTHENTICATED;
 // וזה קורא שוב ל-discoverLeumi. בלי תקרת ניסיונות, נעילה וצינון — זו לולאה אינסופית
@@ -1867,14 +1873,14 @@ async function btbTab(){const tabs=await chrome.tabs.query({url:['https://*.btbi
 async function startBtb(){
   const tab=await btbTab();
   if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל-BTB — הזן תעודת זהות וקוד לנייד במסך שנפתח'});
-    await chrome.windows.create({url:BTB_LOGIN,type:'popup',width:560,height:780,focused:true});
+    await openLoginWindow({url:BTB_LOGIN,type:'popup',width:560,height:780,focused:true});
     return{ok:true,status:'waiting_login'}}
   noteSyncTab(tab.id);await returnToDashboard(tab.id,true);
   const r=await runBtb(tab.id);
   // ⚠ לשונית BTB פתוחה אך מנותקת — בדיוק המצב שנפל. פותחים את אותו חלון
   // התחברות שכבר עבד כשלא הייתה לשונית כלל, במקום להחזיר „נכשל".
   if(r?.status==='waiting_login')
-    await chrome.windows.create({url:BTB_LOGIN,type:'popup',width:560,height:780,focused:true});
+    await openLoginWindow({url:BTB_LOGIN,type:'popup',width:560,height:780,focused:true});
   return r;
 }
 let btbBusy=false;
@@ -2456,7 +2462,7 @@ await chrome.storage.local.set({pendingDiscountPrivate:true,pendingDiscountBusin
 const tab=await discountPrivateTab();
 if(tab){await prepareDiscountContent(tab.id);await discoverDiscountPrivate(tab.id);return{ok:true,status:'discovering'}}
 await chrome.storage.local.set({syncStatus:'ממתין להתחברות לדיסקונט פרטי'});
-await chrome.windows.create({url:DISCOUNT_LOGIN_PRIVATE,type:'popup',width:560,height:780,focused:true});
+await openLoginWindow({url:DISCOUNT_LOGIN_PRIVATE,type:'popup',width:560,height:780,focused:true});
 return{ok:true,status:'waiting_login'}}
 async function handleDiscountAuthenticated(tabId){const state=await chrome.storage.local.get({pendingDiscountBusiness:false,pendingDiscountPrivate:false});
 if(state.pendingDiscountPrivate){await discoverDiscountPrivate(tabId);return}
@@ -2638,7 +2644,7 @@ async function waitIsracardReady(tabId,suffix,month='',previousFingerprint=''){
   }
   throw Error(`כרטיס ${suffix}: חודש ${month||'נוכחי'} סומן אך טבלת העסקאות לא התייצבה`)
 }
-async function startIsracard(){await chrome.storage.local.set({pendingIsracard:true,pendingIsracardAt:Date.now()});const tab=await isracardTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — חיבור 1'});await chrome.windows.create({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);await chrome.tabs.update(tab.id,{url:ISRACARD_HOME});await delay(1800);
+async function startIsracard(){await chrome.storage.local.set({pendingIsracard:true,pendingIsracardAt:Date.now()});const tab=await isracardTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות לישראכרט — חיבור 1'});await openLoginWindow({url:ISRACARD_HOME,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);await chrome.tabs.update(tab.id,{url:ISRACARD_HOME});await delay(1800);
   // ⚠ 18.08.2026 — לשונית על StatusPage **אינה הוכחה שהמשתמש מחובר**: זו בדיוק
   // הכתובת שנפתחת גם להתחברות, ו-isracardTab מסנן רק כתובות עם login/signin.
   // בלי הבדיקה הזו הסנכרון התחיל לפני שהמשתמש הקליד, לא מצא כרטיסים, ונכשל
@@ -2712,7 +2718,7 @@ async function calTab(){const all=await chrome.tabs.query({url:['https://digital
 const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
 return tabs.find(t=>String(t.url||'').includes('digital-web.cal-online.co.il'))||tabs[0]||null}
 async function prepareCal(tabId){await delay(600);try{const p=await chrome.tabs.sendMessage(tabId,{type:'CAL_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['cal-content.js']});await delay(300)}
-async function startCal(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingCal:true,pendingCalSuffix:suffix,syncStatus:suffix?`כאל: מכין טעינת שנה לכרטיס ${suffix}`:'כאל: בודק את החיבור'});const tab=await calTab();if(!tab||!String(tab.url||'').includes('digital-web.cal-online.co.il')){await chrome.storage.local.set({syncStatus:suffix?`ממתין להתחברות לכאל עבור כרטיס ${suffix}`:'ממתין להתחברות לכאל'});if(tab)await chrome.tabs.update(tab.id,{url:'https://www.cal-online.co.il/',active:true});else await chrome.windows.create({url:CAL_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runCal(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingCal:false,pendingCalSuffix:'',syncStatus:`שגיאה בכאל: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
+async function startCal(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingCal:true,pendingCalSuffix:suffix,syncStatus:suffix?`כאל: מכין טעינת שנה לכרטיס ${suffix}`:'כאל: בודק את החיבור'});const tab=await calTab();if(!tab||!String(tab.url||'').includes('digital-web.cal-online.co.il')){await chrome.storage.local.set({syncStatus:suffix?`ממתין להתחברות לכאל עבור כרטיס ${suffix}`:'ממתין להתחברות לכאל'});if(tab)await chrome.tabs.update(tab.id,{url:'https://www.cal-online.co.il/',active:true});else await openLoginWindow({url:CAL_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runCal(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingCal:false,pendingCalSuffix:'',syncStatus:`שגיאה בכאל: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
 async function runCal(tabId,requestedSuffix=''){beginCardRun();noteSyncTab(tabId);
   if(calBusy)return;calBusy=true;
   try{
@@ -2786,7 +2792,7 @@ async function maxTab(){const all=await chrome.tabs.query({url:['https://www.max
 const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
 return tabs.find(t=>String(t.url||'').includes('/transaction-details/personal'))||tabs[0]||null}
 async function prepareMax(tabId){await delay(500);try{const p=await chrome.tabs.sendMessage(tabId,{type:'MAX_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['max-content.js']});await delay(250)}
-async function startMax(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingMax:true,pendingMaxSuffix:suffix,syncStatus:suffix?`MAX: מכין טעינת שנה לכרטיס ${suffix}`:'MAX: בודק את החיבור'});const tab=await maxTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל‑MAX'});await chrome.windows.create({url:MAX_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMax(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingMax:false,pendingMaxSuffix:'',syncStatus:`שגיאה ב‑MAX: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
+async function startMax(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingMax:true,pendingMaxSuffix:suffix,syncStatus:suffix?`MAX: מכין טעינת שנה לכרטיס ${suffix}`:'MAX: בודק את החיבור'});const tab=await maxTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל‑MAX'});await openLoginWindow({url:MAX_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMax(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingMax:false,pendingMaxSuffix:'',syncStatus:`שגיאה ב‑MAX: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
 async function runMax(tabId,requestedSuffix=''){beginCardRun();noteSyncTab(tabId);
  if(maxBusy)return;maxBusy=true;
  try{
@@ -2870,7 +2876,7 @@ async function startDiscountBusiness(){const saved=await chrome.storage.local.ge
 discountLastRun=0;
 // לא מוחקים את הטבלה הקודמת בתחילת הזיהוי. היא מוחלפת רק אחרי שהבנק החזיר
 // רשימת ישויות חדשה, ולכן כשל או עיכוב לא משאירים מסך ריק.
-await chrome.storage.local.set({pendingDiscountBusiness:true,discountAttempts:0,syncStatus:'דיסקונט עסקי: מזהה ישויות וחשבונות — הרשימה הקודמת נשמרת עד לעדכון'});const tab=await discountTab();if(tab){await returnToDashboard(tab.id,true);await prepareDiscountContent(tab.id);await discoverDiscountBusiness(tab.id);return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות לדיסקונט עסקי'});await chrome.windows.create({url:DISCOUNT_LOGIN_BUSINESS,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
+await chrome.storage.local.set({pendingDiscountBusiness:true,discountAttempts:0,syncStatus:'דיסקונט עסקי: מזהה ישויות וחשבונות — הרשימה הקודמת נשמרת עד לעדכון'});const tab=await discountTab();if(tab){await returnToDashboard(tab.id,true);await prepareDiscountContent(tab.id);await discoverDiscountBusiness(tab.id);return{ok:true,status:'discovering'}}await chrome.storage.local.set({syncStatus:'ממתין להתחברות לדיסקונט עסקי'});await openLoginWindow({url:DISCOUNT_LOGIN_BUSINESS,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}
 // שלושת השומרים של לאומי, מועתקים במכוון: נעילה, צינון ותקרת ניסיונות.
 let discountBusy=false,discountLastRun=0;
 const DISCOUNT_MAX_ATTEMPTS=3,DISCOUNT_COOLDOWN_MS=30000;
