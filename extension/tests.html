@@ -1414,6 +1414,9 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    if(/chrome\.windows\.create\(\{url:/.test(bg)||/chrome\.windows\.create\(\{url:/.test(yv))return 'יש פותח חלון התחברות שאינו רושם את הלשונית';
    if(!/filter\(id=>openedByExtension\.has\(id\)\)/.test(bg))return 'closeSyncTabs אינו מסנן ללשוניות שהתוסף פתח';
    if(!/openedByExtension\.delete\(id\)/.test(bg))return 'לשונית שנסגרה לא מוסרת מהרישום';
+   // 2.3.3: לשונית שהאתר פתח מתוך הפופאפ (openerTabId) נחשבת של התוסף, ונסגרת יחד עם הפופאפ שהוליד אותה
+   if(!/tabs\.onCreated\.addListener\(t=>\{if\(Number\.isInteger\(t\?\.id\)&&Number\.isInteger\(t\?\.openerTabId\)&&openedByExtension\.has\(t\.openerTabId\)\)/.test(bg))return 'לשונית-בת של הפופאפ אינה נרשמת';
+   if(!/noted\.map\(id=>openedParent\.get\(id\)\)\.filter\(p=>openedByExtension\.has\(p\)\)/.test(bg))return 'הפופאפ שהוליד את הלשונית אינו נסגר';
    // restoreSyncTabs (finally) מנקה את הרישום, כדי ששגיאה לא תשאיר לשונית לסגירה ע"י מסלול אחר
    const rs=bg.slice(bg.indexOf('async function restoreSyncTabs'),bg.indexOf('async function restoreSyncTabs')+120);
    return /syncTabsToClose\.clear\(\)/.test(rs)||'restoreSyncTabs אינו מנקה'});
