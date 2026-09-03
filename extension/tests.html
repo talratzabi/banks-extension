@@ -1337,6 +1337,7 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    if(txt.slice(i-6,i)==='async ')i-=6;
    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
    throw new Error('לא נסגרה '+name)};
+ const yahavSrc2=await get('yahav.js');
  const engine=()=>new Function(
    "const cardDigits=v=>String(v||'').replace(/\\D/g,'');"+cut(bg,'dayMonthOf')+';'+cut(bg,'previousChargeDayMonth')+';'
    +cut(bg,'accountForCard')+';'+cut(bg,'keepAssignedCards')+';'+cut(bg,'chargeProbesFromHistory')
@@ -1397,6 +1398,21 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    if(!/chargeMatch:\{accountId:a\.id,date:hit\.date,amount:hit\.amount,text:hit\.text,at:/.test(rec))return 'chargeMatch לא נכתב';
    if(!/function chargeMatchLine\(c\)/.test(dash)||!/זוהה חיוב אחרון בחשבון/.test(dash))return 'הדשבורד לא מציג';
    return (dash.match(/\$\{chargeMatchLine\(c\)\}/g)||[]).length===2||'השורה אינה בשני מסלולי התצוגה'});
+ // -- 2.3.0: בסיום סנכרון מוצלח לשונית הבנק/המנפיק נסגרת --
+ t('לשוניות: כל מסלול רושם את הלשונית, וסוגר אותה רק בנקודת ההצלחה',()=>{
+   const yv=yahavSrc2;
+   const runners=['syncSource','syncLeumi','syncDiscountPrivate','syncDiscountBusiness','syncMizrahiSelected','syncFibi','runIsracard','runCal','runMax'];
+   for(const r of runners){const s=bg.indexOf('async function '+r+'(');if(s<0)return 'אין '+r;
+     const body=bg.slice(s,s+(r==='syncDiscountPrivate'?4000:r==='syncLeumi'?1500:600));if(!/noteSyncTab\(/.test(body))return r+' אינו רושם את הלשונית'}
+   if(!/async function runYahav\(tabId\)\{noteSyncTab\(tabId\)/.test(yv))return 'יהב אינו רושם';
+   if(!/noteSyncTab\(tab\.id\);await returnToDashboard\(tab\.id,true\);/.test(bg))return 'BTB אינו רושם';
+   const closes=(bg.match(/await closeSyncTabs\(\)/g)||[]).length+(yv.match(/await closeSyncTabs\(\)/g)||[]).length;
+   if(closes!==8)return 'נקודות סגירה: '+closes+' במקום 8 (syncSelected, בינלאומי, BTB, מזרחי, ישראכרט, כאל, MAX, יהב)';
+   // אף סגירה אינה בתוך catch של שגיאה
+   for(const src of [bg,yv]){let i=-1;while((i=src.indexOf('await closeSyncTabs()',i+1))>=0){const before=src.slice(Math.max(0,i-160),i);if(/catch\(e\)\{[^}]*$/.test(before))return 'סגירה בתוך catch'}}
+   // restoreSyncTabs (finally) מנקה את הרישום, כדי ששגיאה לא תשאיר לשונית לסגירה ע"י מסלול אחר
+   const rs=bg.slice(bg.indexOf('async function restoreSyncTabs'),bg.indexOf('async function restoreSyncTabs')+120);
+   return /syncTabsToClose\.clear\(\)/.test(rs)||'restoreSyncTabs אינו מנקה'});
  t('דשבורד: כרטיס משויך מציג "מחויב מחשבון <בנק> <סניף-חשבון>"',()=>
    /מחויב מחשבון \$\{esc\(a\.sourceLabel\|\|''\)\} \$\{esc\(a\.branch\)\}-\$\{esc\(a\.accountNumber\)\}/.test(dash)||'המחרוזת לא נמצאה');
 }

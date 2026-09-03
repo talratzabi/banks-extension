@@ -407,7 +407,20 @@ const returnedToDashboard=new Set();
 chrome.tabs.onRemoved.addListener(id=>{returnedToDashboard.delete(id);detachedForSync.delete(id)});
 // לשוניות שהוצאו לחלון עבודה נפרד, ויחזרו לחלון הראשי כשהסנכרון ייגמר.
 const detachedForSync=new Set();
+// ⚠ 03.09.2026 - טל: "בסיום הסנכרון שנגמר בהצלחה שייסגר הדף של הבנק או חברת
+// האשראי." כל מסלול רושם את הלשונית שהוא עובד עליה (noteSyncTab) ברגע שקיבל
+// אותה, ובנקודת ההצלחה **בלבד** קורא closeSyncTabs. אחרי שגיאה הדף נשאר פתוח
+// כדי שאפשר יהיה לראות מה קרה, ו-restoreSyncTabs (שרץ ב-finally) מנקה את
+// הרישום כדי שהצלחה של מסלול אחר לא תסגור לשונית זרה.
+const syncTabsToClose=new Set();
+function noteSyncTab(id){if(Number.isInteger(id))syncTabsToClose.add(id)}
+async function closeSyncTabs(){
+  const ids=[...syncTabsToClose];syncTabsToClose.clear();
+  for(const id of ids){detachedForSync.delete(id);returnedToDashboard.delete(id);try{await chrome.tabs.remove(id)}catch{}}
+  return ids.length;
+}
 async function restoreSyncTabs(){
+  syncTabsToClose.clear();
   if(!detachedForSync.size)return;
   let dash=null;try{[dash]=await chrome.tabs.query({url:chrome.runtime.getURL('dashboard.html')+'*'})}catch{}
   for(const id of [...detachedForSync]){
@@ -1191,7 +1204,7 @@ discoveredAccounts:((await chrome.storage.local.get({discoveredAccounts:[]})).di
 selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${newCount?` · ${newCount} תנועות חדשות`:' · אין תנועות חדשות'}`,lastNewTransactionCount:newCount,lastAutoSync:now});
     if(sanityAlerts.length)await chrome.storage.local.set({sanityAlerts:{at:now,alerts:sanityAlerts},
       syncStatus:`${baseStatus} · ⚠ ${sanityAlerts.length} בדיקות שפיות נכשלו — ראה סטטוס החשבונות`});
-    else await chrome.storage.local.remove('sanityAlerts');});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
+    else await chrome.storage.local.remove('sanityAlerts');});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
   }catch(e){await chrome.storage.local.set({syncStatus:e.message===ABORT_MESSAGE?`${ABORT_MESSAGE} — מה שנקרא עד כאן נשמר`:`שגיאה: ${e.message}`});throw e}finally{running=false;await markSyncInFlight(false);await endProgress();await clearAbort();await restoreSyncTabs()}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
@@ -1220,7 +1233,7 @@ function markNewTransactions(previous,next,syncedSources){
   })
 }
 async function syncSource(source,keys){
-  const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);const skippedParts=[];
+  const cfg=SOURCES[source],tabs=await chrome.tabs.query({url:[`https://${cfg.host}${cfg.portal}*`]});if(!tabs.length)throw Error(`החיבור אל ${cfg.label} אינו פעיל`);const tab=tabs[0];noteSyncTab(tab.id);await returnToDashboard(tab.id,true);await beginProgress(source==='private'?5:4);const skippedParts=[];
   let owner='';if(source==='private'){await syncStep(`${cfg.label}: מזהה את בעל החשבון`,'מזהה בעל חשבון');await prepareRoute(tab.id,route(source,'homepage'),'/homepage');const ownerResult=await chrome.tabs.sendMessage(tab.id,{type:'EXTRACT_OWNER'});owner=ownerResult?.owner||'';if(owner)await chrome.storage.local.set({privateOwnerName:owner})}
   await syncStep(`${cfg.label}: מסנכרן תנועות`,'מוריד תנועות');await prepareRoute(tab.id,route(source,'current-account/transactions'),'/current-account/transactions');
   // ⚠⚠ 27.08.2026 — טל: „יש בעיה עם הבורר תנועות" ⇐ „מעט תנועות". נמדד:
@@ -1298,7 +1311,7 @@ async function openFibiSchedule(tabId,args){const results=await chrome.scripting
 async function closeFibiSchedule(tabId){await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'MAIN',func:()=>{const close=document.querySelector('[role="dialog"] a[href="#"], .ui-dialog a[href="#"]');if(close){close.click();return true}return false}});return{ok:true}}
 async function enrichFibiInstallments(tabId,loans){for(const loan of loans||[]){if(!loan.scheduleArgs?.length)continue;try{await closeFibiSchedule(tabId);await delay(500);await openFibiSchedule(tabId,loan.scheduleArgs);let current=0;const expected=`${loan.scheduleArgs[2]}-${loan.scheduleArgs[0]}`;for(let n=0;n<50&&!current;n++){await delay(250);const reads=await chrome.scripting.executeScript({target:{tabId,allFrames:true},args:[expected],func:(loanCode)=>{const frame=document.querySelector('#myFrame'),doc=frame?.contentDocument;if(!doc||!doc.body?.innerText?.includes(loanCode))return 0;for(const row of doc.querySelectorAll('[role="row"]')){const first=row.querySelector('[role="gridcell"]')?.textContent?.trim();if(/^\d+$/.test(first||''))return Number(first)}return 0}});current=Number(reads.find(x=>Number(x.result)>0)?.result||0)}const parse=v=>{const m=String(v||'').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);if(!m)return null;let y=Number(m[3]);if(y<100)y+=2000;return{m:Number(m[2]),y}};const from=parse(loan.nextPaymentDate),to=parse(loan.endDate);if(current&&from&&to){const remaining=(to.y-from.y)*12+to.m-from.m+1,total=current-1+remaining;if(remaining>0&&total>=remaining){loan.installments=`${current-1}/${total}`;loan.remainingInstallments=remaining;loan.totalInstallments=total}}await closeFibiSchedule(tabId);await delay(500)}catch(e){try{await closeFibiSchedule(tabId)}catch{}}delete loan.scheduleArgs}return loans}
 async function fibiRead(tabId,type,label,attempts=24){let last='';const responseTimeout=type==='FIBI_LOANS'?60000:12000;for(let i=0;i<attempts;i++){try{const r=await withTimeout(chrome.tabs.sendMessage(tabId,{type}),responseTimeout,label);if(r?.ok)return r;last=r?.error||'הדף עדיין לא מוכן'}catch(e){last=e.message;try{await chrome.scripting.executeScript({target:{tabId},files:['fibi-content.js']})}catch{}}await delay(750)}throw Error(`${label}: ${last}`)}
-async function syncFibi(tabId){
+async function syncFibi(tabId){noteSyncTab(tabId);
   const state=await chrome.storage.local.get({pendingFibiSlot:'',accounts:[]});if(!state.pendingFibiSlot||running)return;running=true;
   try{
     await delay(1800);const tab=await chrome.tabs.get(tabId);if(!tab.url?.includes('#/accountSummary')){await chrome.tabs.update(tabId,{url:'https://online.fibi.co.il/appsng/Resources/PortalNG/shell/#/accountSummary'});await delay(2200)}
@@ -1417,7 +1430,7 @@ async function syncFibi(tabId){
     const fibiKey=x=>`${x.date}|${x.reference||''}|${x.debit??''}|${x.credit??''}|${x.description||x.action||''}`;
     const savedKeys=new Set(((savedFibi&&savedFibi.transactions)||[]).map(fibiKey));
     const freshFibi=(t.data.transactions||[]).filter(x=>!savedKeys.has(fibiKey(x))).length;
-    await chrome.storage.local.set({accounts,fibiConnectionNames:names,pendingFibiSlot:'',syncStatus:`${label} סונכרן בהצלחה${savedFibi?(freshFibi?` — ${freshFibi} תנועות חדשות`:' — אין נתונים חדשים'):''}${fibiBalSame&&(savedFibi.loans||[]).length?' · ההלוואות מהמסד':''}`,lastAutoSync:now});});if(!autoBusy)await chrome.runtime.openOptionsPage();
+    await chrome.storage.local.set({accounts,fibiConnectionNames:names,pendingFibiSlot:'',syncStatus:`${label} סונכרן בהצלחה${savedFibi?(freshFibi?` — ${freshFibi} תנועות חדשות`:' — אין נתונים חדשים'):''}${fibiBalSame&&(savedFibi.loans||[]).length?' · ההלוואות מהמסד':''}`,lastAutoSync:now});});await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();
   }catch(e){await chrome.storage.local.set({pendingFibiSlot:'',syncStatus:`שגיאה בבינלאומי: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{running=false;await restoreSyncTabs()}
 }
 
@@ -1856,7 +1869,7 @@ async function startBtb(){
   if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל-BTB — הזן תעודת זהות וקוד לנייד במסך שנפתח'});
     await chrome.windows.create({url:BTB_LOGIN,type:'popup',width:560,height:780,focused:true});
     return{ok:true,status:'waiting_login'}}
-  await returnToDashboard(tab.id,true);
+  noteSyncTab(tab.id);await returnToDashboard(tab.id,true);
   const r=await runBtb(tab.id);
   // ⚠ לשונית BTB פתוחה אך מנותקת — בדיוק המצב שנפל. פותחים את אותו חלון
   // התחברות שכבר עבד כשלא הייתה לשונית כלל, במקום להחזיר „נכשל".
@@ -1996,7 +2009,7 @@ async function runBtb(tabId){
       syncStatus:lumpPending
         ?`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${trueBalance} (פירעון ${lump} טרם עודכן באתר)`
         :`BTB: הסנכרון הסתיים — הלוואה ${number}, יתרה ${trueBalance}`});});
-    if(!autoBusy)await chrome.runtime.openOptionsPage();
+    await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();
     return{ok:true,balance:d.balance,number};
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה ב-BTB: ${e.message}`});throw e}
   finally{btbBusy=false;await restoreSyncTabs()}
@@ -2060,7 +2073,7 @@ async function syncLeumi(keys){const tabs=leumiSession(await chrome.tabs.query({
 // לא יפיל את הסנכרון כולו אחרי שלושה ניסיונות של שתי דקות וחצי כל אחד.
 await clearSourceDiags('leumi');
 const disc=(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts;
-const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)balances[`${a.branch}-${a.accountNumber}`]=a.balance;const tabId=leumiTab(tabs).id,txUrl=LEUMI_TX_URL,loanUrl=LEUMI_LOAN_URL;let r,lastError='',lastDebug=null;
+const balances={};for(const a of disc)if(a.source==='leumi'&&a.balance!=null)balances[`${a.branch}-${a.accountNumber}`]=a.balance;const tabId=leumiTab(tabs).id,txUrl=LEUMI_TX_URL,loanUrl=LEUMI_LOAN_URL;noteSyncTab(tabId);let r,lastError='',lastDebug=null;
 // ⚠⚠ 28.08.2026 - טל צפה חי: "כשהדף מוצג זה עובר, כשהדף מוקטן זה לא עובר."
 // מזעור = rAF קפוא = רשת התנועות לא נבנית (הלקח המדוד מ-17-18.08, הפעם
 // נצפה בעיניים על המעבר בין חשבונות). שומר: כל 2 שניות, חלון עבודה ממוזער
@@ -2478,7 +2491,7 @@ if(savedPriv&&Array.isArray(savedPriv.transactions)&&savedPriv.transactions.leng
     continue;
   }
 }}
-const r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_SYNC_SELECTED',keys:[key],private:true}),90000,'קריאת תנועות דיסקונט פרטי');if(!r?.ok||!(r.accounts||[]).length)throw Error(r?.error||`לא נקראו תנועות בחשבון ${key}`);
+noteSyncTab(tab.id);const r=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_SYNC_SELECTED',keys:[key],private:true}),90000,'קריאת תנועות דיסקונט פרטי');if(!r?.ok||!(r.accounts||[]).length)throw Error(r?.error||`לא נקראו תנועות בחשבון ${key}`);
 await chrome.storage.local.set({syncStatus:`דיסקונט פרטי: קורא הלוואות חשבון ${i+1}`});await chrome.tabs.update(tab.id,{url:'https://start.telebank.co.il/apollo/retail3/#/LOANS_WORLD'});await delay(2200);await prepareDiscountContent(tab.id);let regular={loans:[]};try{regular=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_READ_LOANS'}),30000,'קריאת הלוואות')}catch{}
 await chrome.storage.local.set({syncStatus:`דיסקונט פרטי: קורא משכנתאות חשבון ${i+1}`});await chrome.tabs.update(tab.id,{url:'https://start.telebank.co.il/apollo/retail3/#/MORTGAGES_WORLD'});await delay(2500);await prepareDiscountContent(tab.id);let mortgage={loans:[]};try{mortgage=await withTimeout(chrome.tabs.sendMessage(tab.id,{type:'DISCOUNT_READ_MORTGAGES'}),30000,'קריאת משכנתאות')}catch{}
 const allLoans=[...(regular.loans||[]),...(mortgage.loans||[])];for(const a of r.accounts||[])out.push({...a,nickname:names.get(key)||'דיסקונט פרטי',owner:names.get(key)||'',creditLimit:null,availableCredit:null,loans:allLoans,source:'discount-private',sourceLabel:'דיסקונט פרטי',selectionKey:`discount-private|${key}`,id:`discount-private-${key}`,lastSync:now,status:`מסונכרן · ${allLoans.length} הלוואות ומשכנתאות`})}
@@ -2578,8 +2591,8 @@ const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]})
     const k=t=>`${t.date}|${t.reference||''}|${t.debit??''}|${t.credit??''}|${t.action||t.details||''}`;
     const prevSet=new Set(((prevMiz&&prevMiz.transactions)||[]).map(k));
     const mizNew=(result[0].transactions||[]).filter(t=>!prevSet.has(k(t))).length;
-    return`מזרחי־טפחות: סונכרן בהצלחה — ${mizNew?`${mizNew} תנועות חדשות`:'אין נתונים חדשים'} · ${result[0].transactions.length} תנועות · ${result[0].loans.length} הלוואות`})()});});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{mizrahiBusy=false;await restoreSyncTabs()}}
-async function syncMizrahiSelected(keys,knownTabId=null){const tab=knownTabId?await chrome.tabs.get(knownTabId):await mizrahiTab();if(!tab)throw Error('החיבור למזרחי־טפחות אינו פעיל');if(keys.length!==1)throw Error('בחיבור מזרחי הנוכחי ניתן לסנכרן חשבון פעיל אחד בכל פעם');await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: קובע את טווח התאריכים'});if(!tab.url?.includes('root-main-osh-p428New')){await chrome.tabs.update(tab.id,{url:MIZRAHI_TX});await waitTab(tab.id,'root-main-osh-p428New')}await prepareMizrahi(tab.id);await delay(1200);await setMizrahiRange(tab.id);await delay(4200);const account=await readMizrahiSummary(tab.id),transactions=await readMizrahiTransactions(tab.id);if(!account)throw Error('פרטי החשבון הפעיל לא זוהו בעמוד מזרחי');if(`${account.branch}-${account.accountNumber}`!==keys[0])throw Error(`החשבון הפעיל הוא ${account.branch}-${account.accountNumber}, ולא החשבון שנבחר`);if(!transactions.length)throw Error('לא נקראו תנועות ישירות מטבלת שלושת החודשים — הסנכרון נעצר ולא נשמרו נתונים חלקיים');let loans=[];await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: נקראו ${transactions.length} תנועות; קורא הלוואות`});try{await chrome.tabs.update(tab.id,{url:MIZRAHI_LOANS});await waitTab(tab.id,'legacy-Loan-P060');await prepareMizrahi(tab.id);await delay(2200);const lr=await chrome.tabs.sendMessage(tab.id,{type:'MIZRAHI_LOANS'});if(lr?.ok)loans=lr.loans||[]}catch{}const now=new Date().toISOString(),availableCredit=account.balance==null||account.creditLimit==null?null:account.balance+account.creditLimit;return[{...account,availableCredit,transactions,loans,source:'mizrahi',sourceLabel:'מזרחי־טפחות',selectionKey:`mizrahi|${account.branch}-${account.accountNumber}`,id:`mizrahi-${account.branch}-${account.accountNumber}`,lastSync:now,status:loans.length?'מסונכרן':'מסונכרן ללא פירוט הלוואות'}]}
+    return`מזרחי־טפחות: סונכרן בהצלחה — ${mizNew?`${mizNew} תנועות חדשות`:'אין נתונים חדשים'} · ${result[0].transactions.length} תנועות · ${result[0].loans.length} הלוואות`})()});});await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{mizrahiBusy=false;await restoreSyncTabs()}}
+async function syncMizrahiSelected(keys,knownTabId=null){const tab=knownTabId?await chrome.tabs.get(knownTabId):await mizrahiTab();if(tab)noteSyncTab(tab.id);if(!tab)throw Error('החיבור למזרחי־טפחות אינו פעיל');if(keys.length!==1)throw Error('בחיבור מזרחי הנוכחי ניתן לסנכרן חשבון פעיל אחד בכל פעם');await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: קובע את טווח התאריכים'});if(!tab.url?.includes('root-main-osh-p428New')){await chrome.tabs.update(tab.id,{url:MIZRAHI_TX});await waitTab(tab.id,'root-main-osh-p428New')}await prepareMizrahi(tab.id);await delay(1200);await setMizrahiRange(tab.id);await delay(4200);const account=await readMizrahiSummary(tab.id),transactions=await readMizrahiTransactions(tab.id);if(!account)throw Error('פרטי החשבון הפעיל לא זוהו בעמוד מזרחי');if(`${account.branch}-${account.accountNumber}`!==keys[0])throw Error(`החשבון הפעיל הוא ${account.branch}-${account.accountNumber}, ולא החשבון שנבחר`);if(!transactions.length)throw Error('לא נקראו תנועות ישירות מטבלת שלושת החודשים — הסנכרון נעצר ולא נשמרו נתונים חלקיים');let loans=[];await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: נקראו ${transactions.length} תנועות; קורא הלוואות`});try{await chrome.tabs.update(tab.id,{url:MIZRAHI_LOANS});await waitTab(tab.id,'legacy-Loan-P060');await prepareMizrahi(tab.id);await delay(2200);const lr=await chrome.tabs.sendMessage(tab.id,{type:'MIZRAHI_LOANS'});if(lr?.ok)loans=lr.loans||[]}catch{}const now=new Date().toISOString(),availableCredit=account.balance==null||account.creditLimit==null?null:account.balance+account.creditLimit;return[{...account,availableCredit,transactions,loans,source:'mizrahi',sourceLabel:'מזרחי־טפחות',selectionKey:`mizrahi|${account.branch}-${account.accountNumber}`,id:`mizrahi-${account.branch}-${account.accountNumber}`,lastSync:now,status:loans.length?'מסונכרן':'מסונכרן ללא פירוט הלוואות'}]}
 
 const ISRACARD_HOME='https://web.isracard.co.il/StatusPage';
 // מסך הכניסה. נמדד 18.08.2026 מתוך ה-href של „כניסה לחשבון שלי" באתר isracard.co.il.
@@ -2638,7 +2651,7 @@ async function startIsracard(){await chrome.storage.local.set({pendingIsracard:t
     return{ok:true,status:'waiting_login'};
   }
   try{const result=await runIsracard(tab.id);return{ok:true,status:'done',...result}}catch(e){await chrome.storage.local.set({syncStatus:`שגיאה בישראכרט: ${e.message}`});await chrome.runtime.openOptionsPage();throw e}}
-async function runIsracard(tabId,attempts=40){beginCardRun();await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<attempts;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length){await saveIsracardMiss(tabId);throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');}const active=summary.cards.filter(c=>!c.cancelled),details=[];
+async function runIsracard(tabId,attempts=40){beginCardRun();noteSyncTab(tabId);await chrome.storage.local.set({syncStatus:'ישראכרט: קורא את רשימת הכרטיסים'});let summary=null;for(let attempt=0;attempt<attempts;attempt++){await prepareIsracard(tabId);try{summary=await chrome.tabs.sendMessage(tabId,{type:'ISRACARD_SUMMARY'})}catch{}if(summary?.cards?.length)break;await delay(750)}if(!summary?.ok||!summary.cards?.length){await saveIsracardMiss(tabId);throw Error('רשימת הכרטיסים לא נטענה לאחר המתנה');}const active=summary.cards.filter(c=>!c.cancelled),details=[];
   // הגלגל מציג את ארבע הספרות של הכרטיס הנקרא כרגע, לבקשת טל.
 const chargeMonthRaw=mmYYYY(new Date()),chargeMonthLabel=`${chargeMonthRaw.slice(0,2)}/${chargeMonthRaw.slice(2)}`;
 // דלתא (28.08.2026): שורות החודש הקודם שכבר במסד - מפתח לדילוג על דף לכרטיס;
@@ -2690,7 +2703,7 @@ const now=new Date().toISOString();// כל סנכרון רגיל נשמר גם �
 try{await storeCardMonth(mmYYYY(new Date()),details)}catch(e){}
 // "אין נתונים חדשים" נמדד מול תמונת החודש הנוכחי שלפני הכתיבה - לא מנוחש.
 const freshCount=details.reduce((s,c)=>s+Math.max(0,(c.transactions||[]).length-(beforeCurrent.get(String(c.suffix))||0)),0);
-await chrome.storage.local.set({accounts,isracardUnassigned:unassigned,isracardLastCards:details,syncStatus:`ישראכרט: סונכרן בהצלחה — ${details.length} כרטיסים${freshCount?` · ${freshCount} עסקאות חדשות`:' · אין נתונים חדשים'}${prevSkipped?` · ${prevSkipped} חודשי חיוב נלקחו מהמסד בלי לפתוח דף`:''} · ${assigned.length} שויכו לחשבונות${unassigned.length?` · ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,assigned:assigned.length,unassigned:unassigned.length}});}
+await chrome.storage.local.set({accounts,isracardUnassigned:unassigned,isracardLastCards:details,syncStatus:`ישראכרט: סונכרן בהצלחה — ${details.length} כרטיסים${freshCount?` · ${freshCount} עסקאות חדשות`:' · אין נתונים חדשים'}${prevSkipped?` · ${prevSkipped} חודשי חיוב נלקחו מהמסד בלי לפתוח דף`:''} · ${assigned.length} שויכו לחשבונות${unassigned.length?` · ${unassigned.length} ממתינים לשיוך`:''}`,lastAutoSync:now});await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,assigned:assigned.length,unassigned:unassigned.length}});}
 const CAL_HOME='https://digital-web.cal-online.co.il/dashboard',CAL_TX='https://digital-web.cal-online.co.il/transactions-all';
 let calBusy=false;
 // ⚠ כתובת הכניסה של כאל יושבת על digital-web — בדיוק המארח שמועדף כאן כסשן.
@@ -2700,7 +2713,7 @@ const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
 return tabs.find(t=>String(t.url||'').includes('digital-web.cal-online.co.il'))||tabs[0]||null}
 async function prepareCal(tabId){await delay(600);try{const p=await chrome.tabs.sendMessage(tabId,{type:'CAL_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['cal-content.js']});await delay(300)}
 async function startCal(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingCal:true,pendingCalSuffix:suffix,syncStatus:suffix?`כאל: מכין טעינת שנה לכרטיס ${suffix}`:'כאל: בודק את החיבור'});const tab=await calTab();if(!tab||!String(tab.url||'').includes('digital-web.cal-online.co.il')){await chrome.storage.local.set({syncStatus:suffix?`ממתין להתחברות לכאל עבור כרטיס ${suffix}`:'ממתין להתחברות לכאל'});if(tab)await chrome.tabs.update(tab.id,{url:'https://www.cal-online.co.il/',active:true});else await chrome.windows.create({url:CAL_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runCal(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingCal:false,pendingCalSuffix:'',syncStatus:`שגיאה בכאל: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
-async function runCal(tabId,requestedSuffix=''){beginCardRun();
+async function runCal(tabId,requestedSuffix=''){beginCardRun();noteSyncTab(tabId);
   if(calBusy)return;calBusy=true;
   try{
     await chrome.storage.local.set({syncStatus:'כאל: קורא חיוב קרוב וחשבון חיוב'});let current=await chrome.tabs.get(tabId);if(!String(current.url||'').includes('digital-web.cal-online.co.il'))throw Error('החיבור לכאל אינו פעיל — יש להתחבר מחדש');await prepareCal(tabId);if(!String(current.url||'').includes('/dashboard')){const go=await chrome.tabs.sendMessage(tabId,{type:'CAL_GO_HOME'});
@@ -2763,7 +2776,7 @@ async function runCal(tabId,requestedSuffix=''){beginCardRun();
     const state=await chrome.storage.local.get({accounts:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[],digits=v=>String(v||'').replace(/\D/g,'');let assigned=0;
     for(const card of details){let target=accounts.find(a=>(a.cards||[]).some(c=>digits(c.suffix).endsWith(card.suffix)));if(!target&&home.debitAccount){const wanted=digits(home.debitAccount);const matches=accounts.filter(a=>wanted.endsWith(digits(a.accountNumber))||digits(a.accountNumber).endsWith(wanted));if(matches.length===1)target=matches[0]}if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>digits(c.suffix).endsWith(card.suffix));if(index>=0)target.cards[index]={...target.cards[index],...card};else target.cards.push(card);assigned++}
     const now=new Date().toISOString(),savedCal=await chrome.storage.local.get({calLastCards:[],calUnassigned:[]}),merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]},monthCount=monthly.length;autoLoginRuns.set(`cal|${tabId}`,Date.now());await chrome.storage.local.set({accounts,calLastCards:merge(savedCal.calLastCards,details),calUnassigned:merge(savedCal.calUnassigned,unassigned),pendingCal:false,pendingCalSuffix:'',syncStatus:(()=>{const freshCal=details.reduce((s,c)=>s+Math.max(0,(c.transactions||[]).length-(beforeCurrentCal.get(String(c.suffix))||0)),0);
-    return`כאל: סונכרן בהצלחה — ${details.length} כרטיסים${freshCal?` · ${freshCal} עסקאות חדשות`:' · אין נתונים חדשים'} · ${monthCount} דפי חיוב נקראו · ${assigned} שויכו לחשבונות${unassigned.length?` · ${unassigned.length} ממתינים לשיוך`:''}`})(),lastAutoSync:now});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:monthCount,assigned,unassigned:unassigned.length}});
+    return`כאל: סונכרן בהצלחה — ${details.length} כרטיסים${freshCal?` · ${freshCal} עסקאות חדשות`:' · אין נתונים חדשים'} · ${monthCount} דפי חיוב נקראו · ${assigned} שויכו לחשבונות${unassigned.length?` · ${unassigned.length} ממתינים לשיוך`:''}`})(),lastAutoSync:now});await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:monthCount,assigned,unassigned:unassigned.length}});
   }finally{calBusy=false;await restoreSyncTabs()}
 }
 const MAX_TX='https://www.max.co.il/transaction-details/personal';
@@ -2774,7 +2787,7 @@ const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
 return tabs.find(t=>String(t.url||'').includes('/transaction-details/personal'))||tabs[0]||null}
 async function prepareMax(tabId){await delay(500);try{const p=await chrome.tabs.sendMessage(tabId,{type:'MAX_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['max-content.js']});await delay(250)}
 async function startMax(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingMax:true,pendingMaxSuffix:suffix,syncStatus:suffix?`MAX: מכין טעינת שנה לכרטיס ${suffix}`:'MAX: בודק את החיבור'});const tab=await maxTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל‑MAX'});await chrome.windows.create({url:MAX_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMax(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingMax:false,pendingMaxSuffix:'',syncStatus:`שגיאה ב‑MAX: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
-async function runMax(tabId,requestedSuffix=''){beginCardRun();
+async function runMax(tabId,requestedSuffix=''){beginCardRun();noteSyncTab(tabId);
  if(maxBusy)return;maxBusy=true;
  try{
   await chrome.storage.local.set({syncStatus:'MAX: פותח פירוט חיובים'});let tab=await chrome.tabs.get(tabId);if(!String(tab.url||'').includes('/transaction-details/personal')){await chrome.tabs.update(tabId,{url:MAX_TX});for(let i=0;i<40;i++){await delay(300);tab=await chrome.tabs.get(tabId);if(String(tab.url||'').includes('/transaction-details/personal'))break}}
@@ -2848,7 +2861,7 @@ async function runMax(tabId,requestedSuffix=''){beginCardRun();
   const state=await chrome.storage.local.get({accounts:[],maxLastCards:[]}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),unassigned=[];let assigned=0;const digits=v=>String(v||'').replace(/\D/g,'');
   for(const card of details){const target=accounts.find(a=>(a.cards||[]).some(c=>digits(c.suffix).endsWith(card.suffix)));if(!target){unassigned.push(card);continue}const index=target.cards.findIndex(c=>digits(c.suffix).endsWith(card.suffix));if(index>=0)target.cards[index]={...target.cards[index],...card};else target.cards.push(card);assigned++}
   const merge=(oldRows,newRows)=>{const by=new Map((oldRows||[]).map(c=>[String(c.suffix),c]));for(const c of newRows)by.set(String(c.suffix),c);return[...by.values()]};autoLoginRuns.set(`max|${tabId}`,Date.now());await chrome.storage.local.set({accounts,maxLastCards:merge(state.maxLastCards,details),maxUnassigned:unassigned,pendingMax:false,pendingMaxSuffix:'',syncStatus:(()=>{const freshMax=details.reduce((s,c)=>s+Math.max(0,(c.transactions||[]).length-(beforeCurrentMax.get(String(c.suffix))||0)),0);
-    return`MAX: סונכרן בהצלחה — ${details.length} כרטיסים${freshMax?` · ${freshMax} עסקאות חדשות`:' · אין נתונים חדשים'} · ${seen.size} דפי חיוב נקראו${skippedStored?` · ${skippedStored} חודשים שמורים דולגו`:''} · ${assigned} שויכו לחשבונות${unassigned.length?` · ${unassigned.length} ממתינים לשיוך`:''}`})(),lastAutoSync:new Date().toISOString()});if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:seen.size,assigned,unassigned:unassigned.length}});
+    return`MAX: סונכרן בהצלחה — ${details.length} כרטיסים${freshMax?` · ${freshMax} עסקאות חדשות`:' · אין נתונים חדשים'} · ${seen.size} דפי חיוב נקראו${skippedStored?` · ${skippedStored} חודשים שמורים דולגו`:''} · ${assigned} שויכו לחשבונות${unassigned.length?` · ${unassigned.length} ממתינים לשיוך`:''}`})(),lastAutoSync:new Date().toISOString()});await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();return{cards:details.length,months:seen.size,assigned,unassigned:unassigned.length}});
  }finally{maxBusy=false;await restoreSyncTabs()}
 }
 async function startDiscountBusiness(){const saved=await chrome.storage.local.get({discoveredAccounts:[]});
@@ -2982,7 +2995,7 @@ const found=raw.map(asChoice);await chrome.storage.local.set({pendingDiscountBus
   :`דיסקונט עסקי: נמצאו ואומתו ${found.length} חשבונות${seededCount?` (${seededCount} ממספרי חשבון שנשמרו בסנכרון קודם)`:''} — בחר לפי מספר חשבון`})}
 const DISCOUNT_TX_URL='https://start.telebank.co.il/apollo/business2/#/OSH_LENTRIES_ALTAMIRA';
 const DISCOUNT_LOANS_URL='https://start.telebank.co.il/apollo/business2/#/LOANS_WORLD';
-async function syncDiscountBusiness(keys){const tab=await discountTab();if(!tab)throw Error('החיבור לדיסקונט עסקי אינו פעיל');await returnToDashboard(tab.id,true);const all=await chrome.tabs.query({url:['https://start.telebank.co.il/*']});await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: עובד בלשונית ${tab.id}${all.length>1?` (מתוך ${all.length} פתוחות)`:''}`});
+async function syncDiscountBusiness(keys){const tab=await discountTab();if(!tab)throw Error('החיבור לדיסקונט עסקי אינו פעיל');noteSyncTab(tab.id);await returnToDashboard(tab.id,true);const all=await chrome.tabs.query({url:['https://start.telebank.co.il/*']});await chrome.storage.local.set({syncStatus:`דיסקונט עסקי: עובד בלשונית ${tab.id}${all.length>1?` (מתוך ${all.length} פתוחות)`:''}`});
 // ⚠ מעבר בין ישויות טוען מחדש את הדף והורג את ה-content script. לכן ישות אחת בכל
 // קריאה, עם הזרקה מחדש ביניהן — במקום לולאה אחת שנקטעת באמצע ('message channel closed').
 const out=[],now=new Date().toISOString();

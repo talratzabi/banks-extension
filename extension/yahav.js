@@ -58,7 +58,7 @@ await chrome.storage.local.set({pendingYahav:true,
   discoveredAccounts:(__prevY.discoveredAccounts||[]).filter(a=>a&&a.source!=='yahav'),
   syncStatus:'יהב: בודק את החיבור'});const tab=await yahavTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ליהב — הזן קוד משתמש, ת״ז וסיסמה במסך שנפתח'});await chrome.windows.create({url:YAHAV_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await chrome.storage.local.set({pendingYahav:false,syncStatus:'יהב: מרענן את החיבור'});await returnToDashboard(tab.id,true);await chrome.tabs.reload(tab.id);await delay(3000);await chrome.storage.local.set({pendingYahav:true,syncStatus:'יהב: החיבור מוכן, מתחיל סנכרון'});runYahav(tab.id).catch(async e=>{await chrome.storage.local.set({pendingYahav:false,syncStatus:`שגיאה ביהב: ${e.message}`});await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
 async function yahavOpenLoans(tabId){await yahavRoute(tabId,'/main/home');const clicked=await chrome.scripting.executeScript({target:{tabId},func:()=>{const clean=v=>String(v||'').replace(/\s+/g,' ').trim(),a=[...document.querySelectorAll('a[href]')].find(x=>clean(x.textContent)==='הלוואות וערבויות');if(!a)return false;a.click();return true}});if(!clicked.some(x=>x.result))throw Error('הקישור הראשי להלוואות וערבויות לא נמצא בדף הבית');await delay(1800);await prepareYahav(tabId)}
-async function runYahav(tabId){
+async function runYahav(tabId){noteSyncTab(tabId);
   if(yahavBusy)return; yahavBusy=true;
   try{
     await chrome.storage.local.set({syncStatus:'יהב: מחיל את טווח האיסוף וקורא תנועות'});
@@ -160,6 +160,6 @@ let creditLimit=creditFrom(home.text),balance=home.transactions[0].balance;
   // ⚠ גם בסיום — מוחקים רק את יהב, לא את הבורר של בנקים אחרים.
   discoveredAccounts:(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts.filter(a=>a&&a.source!=='yahav'),
   syncStatus:`יהב: סונכרן בהצלחה — ${yahavNew?`${yahavNew} תנועות חדשות`:'אין נתונים חדשים'} · ${mergedTx.length} תנועות שמורות · ${loans.length} הלוואות`,lastAutoSync:now});
-    if(!autoBusy)await chrome.runtime.openOptionsPage();
+    await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();
   }catch(e){await chrome.storage.local.set({syncStatus:`שגיאה ביהב: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()}finally{yahavBusy=false;await restoreSyncTabs()}
 }
