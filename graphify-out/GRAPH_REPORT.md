@@ -1,16 +1,16 @@
 # Graph Report - banks-extension  (2026-09-03)
 
 ## Corpus Check
-- 35 files · ~181,751 words
+- 35 files · ~182,124 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1273 nodes · 2126 edges · 108 communities (91 shown, 17 thin omitted)
+- 1277 nodes · 2147 edges · 107 communities (90 shown, 17 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 13 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `81218fc4`
+- Built from commit: `c9966c99`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -27,8 +27,8 @@
 - withTimeout
 - toast
 - ביקורת עומק — 28.08.2026 (גרסה 1.48.1)
-- delay
-- returnToDashboard
+- runIsracard
+- prepareDiscountContent
 - פרויקט „בנקים” — היסטוריה, כללים והנחיות המשך
 - syncMizrahiSelected
 - cheque-ledger.js
@@ -94,8 +94,7 @@
 - ✅ דיסקונט פרטי עובד - 1.48.1 אומת
 - ✅✅ לאומי סגור - 112 שניות, הכול נשמר, השיקים ירדו
 - 12. מזרחי־טפחות
-- syncSelected
-- reconcileUnassignedCards
+- delay
 - 1.73.0 - פרטי השיק מלאומי, בחלון החשבון ובחיפוש · ⚠ מבנה החלון לא נמדד
 - cheque-ocr.js
 - 1.74.0 - פסיק בשדה החיפוש = חיפוש נוסף
@@ -128,8 +127,8 @@
 6. `פרויקט „בנקים” — היסטוריה, כללים והנחיות המשך` - 25 edges
 7. `money()` - 22 edges
 8. `renderAllCards()` - 19 edges
-9. `load()` - 17 edges
-10. `host_permissions` - 17 edges
+9. `syncFibi()` - 18 edges
+10. `load()` - 17 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `storeCardMonth()` --indirect_call--> `cardTxKey()`  [INFERRED]
@@ -146,7 +145,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (108 total, 17 thin omitted)
+## Communities (107 total, 17 thin omitted)
 
 ### Community 0 - "HANDOFF — מסירה בין סוכנים"
 Cohesion: 0.01
@@ -162,7 +161,7 @@ Nodes (52): accountCard(), accountName(), accountTabs(), applyButtonIn(), applyL
 
 ### Community 3 - "background.js"
 Cohesion: 0.05
-Nodes (43): accountSyncKey(), autoLoginRuns, badgeFor(), calTab(), chainScoreOf(), chequeCtx, chequeInfoQueue, chosenSources() (+35 more)
+Nodes (53): accountForCard(), accountSyncKey(), autoLoginRuns, badgeFor(), calTab(), cardDigits(), chainScoreOf(), chargeProbesFromHistory() (+45 more)
 
 ### Community 4 - "host_permissions"
 Cohesion: 0.05
@@ -174,7 +173,7 @@ Nodes (70): accountKinds, accounts, agoText(), attributeStatus(), balanceLinkSty
 
 ### Community 6 - "HANDOFF.md"
 Cohesion: 0.03
-Nodes (67): 1.33.1 — הריבית האמיתית בטבלה, ואריח BTB שפתח את פועלים, 1.33.2 — התאריך שלא נקרא, וההפלה השקטה של כל השאר, 1.33.3 — „הסנכרון נכשל" שהיה בעצם ניתוק, 1.33.4 — `\b` אחד מנע את תאריך התשלום, 1.34.0 — לשונית „מסלקה": קליטת נתוני הגמל, ההשתלמות והפנסיה, 1.35.0 — לשונית „נדל״ן", 1.36.0 — לשונית „מאזן נכסים": צד הנכסים, 1.37.0 - מאזן נכסים: צד ההתחייבויות וההון העצמי (+59 more)
+Nodes (68): 1.33.1 — הריבית האמיתית בטבלה, ואריח BTB שפתח את פועלים, 1.33.2 — התאריך שלא נקרא, וההפלה השקטה של כל השאר, 1.33.3 — „הסנכרון נכשל" שהיה בעצם ניתוק, 1.33.4 — `\b` אחד מנע את תאריך התשלום, 1.34.0 — לשונית „מסלקה": קליטת נתוני הגמל, ההשתלמות והפנסיה, 1.35.0 — לשונית „נדל״ן", 1.36.0 — לשונית „מאזן נכסים": צד הנכסים, 1.37.0 - מאזן נכסים: צד ההתחייבויות וההון העצמי (+60 more)
 
 ### Community 7 - "renderAllCards"
 Cohesion: 0.18
@@ -186,7 +185,7 @@ Nodes (26): capBySince(), directText(), directTextOnly(), discoverAccounts(), ex
 
 ### Community 9 - "withTimeout"
 Cohesion: 0.16
-Nodes (19): dbgText(), discoverLeumi(), fibiRead(), harvestLeumiCheques(), keepAlive(), leumiSession(), leumiSnapshot(), leumiSyncBudget() (+11 more)
+Nodes (19): clearSourceDiags(), dbgText(), discoverLeumi(), harvestLeumiCheques(), keepAlive(), leumiSession(), leumiSnapshot(), leumiSyncBudget() (+11 more)
 
 ### Community 10 - "toast"
 Cohesion: 0.16
@@ -196,21 +195,21 @@ Nodes (22): assignCard(), bankForSource(), cardHidden(), dispatchBank(), importA
 Cohesion: 0.10
 Nodes (20): 10. עזרים משוכפלים בין קבצים, 11. הנתונים אינם מוצפנים, וה-WAL זוכר הכול, 12. משטח XSS בדשבורד, 13. הרשאות רחבות מהצורך בשוליים, 1. אין שום גיבוי או ייצוא — הכול בפרופיל כרום אחד, 2. מרוץ קריאה-כתיבה על `accounts` — אין מנעול גלובלי, 3. אין גרסת סכימה לנתונים, 4. גידול בלתי מוגבל בכל השכבות (+12 more)
 
-### Community 12 - "delay"
-Cohesion: 0.19
-Nodes (26): abortIfRequested(), accountsMutex, beginCardRun(), cardActiveSince(), clickIsracardMonth(), delay(), deleteCardEverywhere(), isracardSummaryFromHome() (+18 more)
+### Community 12 - "runIsracard"
+Cohesion: 0.17
+Nodes (25): abortIfRequested(), accountsMutex, beginCardRun(), beginProgress(), btbTab(), cardActiveSince(), clearAbort(), closeSyncTabs() (+17 more)
 
-### Community 13 - "returnToDashboard"
-Cohesion: 0.19
-Nodes (15): discountPrivateTab(), discountSend(), discountTab(), discoverDiscountBusiness(), discoverDiscountPrivate(), handleDiscountAuthenticated(), isPrivateDiscountUrl(), prepareDiscountContent() (+7 more)
+### Community 13 - "prepareDiscountContent"
+Cohesion: 0.21
+Nodes (13): discountPrivateTab(), discountSend(), discountTab(), discoverDiscountBusiness(), discoverDiscountPrivate(), handleDiscountAuthenticated(), isPrivateDiscountUrl(), prepareDiscountContent() (+5 more)
 
 ### Community 14 - "פרויקט „בנקים” — היסטוריה, כללים והנחיות המשך"
 Cohesion: 0.12
 Nodes (16): 11. דיסקונט פרטי, 15. כאל, 17. כרטיסי אשראי — כללי תצוגה, 18. הלוואות — מבנה אחיד, 19. נתונים ושמירה מקומית, 1. מטרת הפרויקט, 20. תקלות שחזרו לאורך הפיתוח, 21. בדיקות חובה לפני שחרור גרסה (+8 more)
 
 ### Community 15 - "syncMizrahiSelected"
-Cohesion: 0.21
-Nodes (13): btbTab(), clearSourceDiags(), mizrahiTab(), openMizrahiLogin(), prepareMizrahi(), readMizrahiSummary(), readMizrahiTransactions(), runBtb() (+5 more)
+Cohesion: 0.27
+Nodes (10): collectSinceMs(), mizrahiTab(), openMizrahiLogin(), prepareMizrahi(), readMizrahiSummary(), readMizrahiTransactions(), runMizrahi(), setMizrahiRange() (+2 more)
 
 ### Community 16 - "cheque-ledger.js"
 Cohesion: 0.30
@@ -265,8 +264,8 @@ Cohesion: 0.36
 Nodes (8): acceptAutoLogin(), autoRetryTooSoon(), autoSyncTooSoon(), gapText(), isracardOnAuth(), maybeAutoRun(), maybeAutoSync(), noteAutoSyncOff()
 
 ### Community 29 - "syncFibi"
-Cohesion: 0.18
-Nodes (11): closeFibiSchedule(), collectSinceMs(), enrichFibiInstallments(), fibiNewRange(), fibiOpenNewScreen(), fibiPager(), fibiSetRangeMain(), openFibiSchedule() (+3 more)
+Cohesion: 0.20
+Nodes (10): closeFibiSchedule(), enrichFibiInstallments(), fibiNewRange(), fibiOpenNewScreen(), fibiPager(), fibiRead(), fibiSetRangeMain(), openFibiSchedule() (+2 more)
 
 ### Community 30 - "max-content.js"
 Cohesion: 0.33
@@ -416,13 +415,9 @@ Nodes (3): 13. יהב, מידע, ניווט
 Cohesion: 0.67
 Nodes (3): 16. MAX, ⚠ MAX מחייבת את הבנק כמה פעמים בחודש (טל, 16.08.2026), ⚠ הלשונית של MAX היא חודש החיוב, לא חודש העסקאות
 
-### Community 84 - "syncSelected"
-Cohesion: 0.28
-Nodes (9): beginProgress(), clearAbort(), discover(), endProgress(), markSyncInFlight(), prepareRoute(), route(), syncSelected() (+1 more)
-
-### Community 85 - "reconcileUnassignedCards"
-Cohesion: 0.28
-Nodes (9): accountForCard(), cardDigits(), chargeProbesFromHistory(), dayMonthOf(), findLastCharge(), issuerTextRe(), keepAssignedCards(), previousChargeDayMonth() (+1 more)
+### Community 84 - "delay"
+Cohesion: 0.20
+Nodes (18): clickIsracardMonth(), delay(), discover(), isracardSummaryFromHome(), isracardTab(), loadIsracardMonth(), prepareCal(), prepareIsracard() (+10 more)
 
 ### Community 86 - "1.73.0 - פרטי השיק מלאומי, בחלון החשבון ובחיפוש · ⚠ מבנה החלון לא נמדד"
 Cohesion: 0.40
@@ -493,7 +488,7 @@ Cohesion: 0.67
 Nodes (3): 1.97.0 - מסך ריק לעולם לא כשיש חשבונות · ואבחון לבורר, התנגשות בין שתי דרישות, והכרעה, ואבחון, במקום ניחוש רביעי
 
 ## Knowledge Gaps
-- **599 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+594 more)
+- **601 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+596 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **17 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -502,12 +497,12 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `HANDOFF — מסירה בין סוכנים` connect `HANDOFF — מסירה בין סוכנים` to `HANDOFF.md`, `2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבעלות עוברת אליך.`, `2026-08-22 · Claude · אין לוח שנה — בורר התקופה הוא קבוצת רדיו — 1.1.6`, `2026-08-22 · Claude · לאומי סופר שורות, לא תאריכים — 1.1.5`, `2026-08-22 · Claude · „מאומת" בלאומי היה הבטחה שהקוד לא קיים — 1.1.2`, `2026-08-22 · Claude · לאומי מבקש טווח לפי collectSince — 1.2.0`, `2026-08-18 · Claude · הגלגל גם בטעינת השנה — 0.83.2`, `2026-08-17 · Claude · חלונית כניסה, והחזרה מכל מסלול — 0.74.0`, `2026-08-17 · Claude · לולאת הסנכרון האוטומטי בפועלים פרטי — 0.64.0`, `2026-08-25 · Claude · סיכום יום · יהב מוגבל לחצי שנה · נקודת עצירה`, `2026-08-18 · Claude · ישראכרט חוזר למארח שלו, ומחיקת כרטיס — 0.83.0`, `2026-08-18 · Claude · דף אינו סשן עד שהוא מוכיח זאת — 0.83.1`, `2026-08-17 · Claude · טבעת אחוזים, והלשונית חוזרת לחלון הראשי — 0.62.0`, `2026-08-22 · Claude · loadAllRows הוחזר — התיקון שלי החמיר — 1.2.5`, `2026-08-22 · Claude · הבורר לא נפתח כי שריד תפריט סגור ענה במקומו — 1.1.1`, `2026-08-23 · Claude · הסניף והחשבון נדבקו זה לזה — 1.3.0`, `2026-08-17 10:15 · Claude · לאומי — הרענון ב-startLeumi הרס את הסשן, 0.57.0`, `2026-08-18 · Claude · הגלגל מציג את מספר הכרטיס — 0.82.0`, `2026-08-18 · Claude · כאל, מקס ולאומי — הושלם — 0.79.0`, `2026-08-22 · Claude · הטווח עובד; נקרא עמוד אחד — 1.2.3`, `2026-08-22 · Claude · זיכרון מספרי חשבון ששורד מחיקה — 1.0.25`, `2026-08-23 · Claude · המשטח השלישי: אריח הבנק — 1.2.9`?**
   _High betweenness centrality (0.092) - this node is a cross-community bridge._
-- **Why does `1.87.0 - ⚠⚠⚠ הקובץ של טל הכריע: **גם קריאת הספרות שגויה**` connect `1.87.0 - ⚠⚠⚠ הקובץ של טל הכריע: **גם קריאת הספרות שגויה**` to `HANDOFF.md`?**
-  _High betweenness centrality (0.012) - this node is a cross-community bridge._
-- **Why does `1.69.0 - תג "חדש" לעסקאות כרטיס · פילוח הסיכום · תיקון עיצוב בורר המקורות` connect `1.69.0 - תג "חדש" לעסקאות כרטיס · פילוח הסיכום · תיקון עיצוב בורר המקורות` to `HANDOFF.md`?**
-  _High betweenness centrality (0.005) - this node is a cross-community bridge._
+- **Why does `1.88.0 - הייצוא מהנהלת חשבונות מתקן את הסריקה (`cheque-ledger.js`)` connect `1.88.0 - הייצוא מהנהלת חשבונות מתקן את הסריקה (`cheque-ledger.js`)` to `HANDOFF.md`?**
+  _High betweenness centrality (0.008) - this node is a cross-community bridge._
+- **Why does `1.53.0 - מיון ב-viewer + סוג עסקי/פרטי לכל הלוואה` connect `1.53.0 - מיון ב-viewer + סוג עסקי/פרטי לכל הלוואה` to `HANDOFF.md`?**
+  _High betweenness centrality (0.008) - this node is a cross-community bridge._
 - **What connects `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart` to the rest of the system?**
-  _599 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _601 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `HANDOFF — מסירה בין סוכנים` be split into smaller, more focused modules?**
   _Cohesion score 0.009216589861751152 - nodes in this community are weakly interconnected._
 - **Should `discount-content.js` be split into smaller, more focused modules?**
