@@ -831,7 +831,12 @@ async function isracardOnAuth(tabId,fn){
 // ⚠ ההגנה כבר הייתה קיימת — **אבל רק לשגיאות.** הצלחה לא הוגנה. אסימטריה.
 const TERMINAL_STATUS=/הסתיים|סונכרנו|סונכרן|נשמרו|הושלם|שגיאה|נכשל/;
 async function noteAutoSyncOff(label){
-  const st=await chrome.storage.local.get({syncStatus:'',lastAutoSync:''}),cur=st.syncStatus||'';
+  const st=await chrome.storage.local.get({syncStatus:'',lastAutoSync:'',lastSyncError:null}),cur=st.syncStatus||'';
+  // ⚠ 03.09.2026 - פועלים פרטי: "שגיאה: לא נמצא בורר החשבונות" נדרסה תוך שנייה
+  // ע"י "זוהתה כניסה…" (נמדד ביומן האחסון, שלוש פעמים). lastAutoSync נכתב רק
+  // בהצלחה, והשגיאה לא כללה את שם הבנק - ולכן ההגנה שלמטה לא תפסה אותה.
+  // שגיאת סנכרון מ-10 הדקות האחרונות נשארת על המסך, מכל בנק שהוא.
+  if(/^שגיאה/.test(cur)&&Date.now()-(Date.parse(st.lastSyncError?.at||'')||0)<10*60*1000)return;
   // ⚠ 03.09.2026 - "לא זוהתה התחברות": ההודעה נבלעה כי כל סטטוס סופי (גם של
   // בנק אחר, גם מלפני שעות) דיכא אותה. עכשיו הדיכוי רק כשהסטטוס הסופי הוא של
   // **אותו בנק** ומ-10 הדקות האחרונות - כדי לא לדרוס תוצאה טרייה בגלל
@@ -1242,7 +1247,7 @@ selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${ne
     if(sanityAlerts.length)await chrome.storage.local.set({sanityAlerts:{at:now,alerts:sanityAlerts},
       syncStatus:`${baseStatus} · ⚠ ${sanityAlerts.length} בדיקות שפיות נכשלו — ראה סטטוס החשבונות`});
     else await chrome.storage.local.remove('sanityAlerts');});{const s=await chrome.storage.local.get({autoSyncLast:{}}),t=Date.now();for(const k of selectionKeys)s.autoSyncLast[String(k).split('|')[0]]=t;await chrome.storage.local.set({autoSyncLast:s.autoSyncLast})}await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();return{ok:true,count:marked.length,newCount};
-  }catch(e){await chrome.storage.local.set({syncStatus:e.message===ABORT_MESSAGE?`${ABORT_MESSAGE} — מה שנקרא עד כאן נשמר`:`שגיאה: ${e.message}`});throw e}finally{running=false;await markSyncInFlight(false);await endProgress();await clearAbort();await restoreSyncTabs()}
+  }catch(e){await chrome.storage.local.set({syncStatus:e.message===ABORT_MESSAGE?`${ABORT_MESSAGE} — מה שנקרא עד כאן נשמר`:`שגיאה: ${e.message}`,lastSyncError:{at:new Date().toISOString(),text:String(e.message||'').slice(0,300)}});throw e}finally{running=false;await markSyncInFlight(false);await endProgress();await clearAbort();await restoreSyncTabs()}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
 // ⚠⚠ 03.09.2026 - טל: "הבינלאומי חיבור 1 מצא את כל התנועות כחדשות למרות שהיו

@@ -60,21 +60,60 @@ function extractOwnerName(){
   while(node){const text=node.textContent.replace(/\s+/g,' ').trim();if(text&&!/ביקורך האחרון/.test(text)&&text.length<100)return text;node=node.nextElementSibling}
   const parentText=hello.parentElement?.innerText?.split('\n').map(x=>x.trim()).filter(Boolean)||[];return parentText.find(x=>x!=='שלום'&&!/ביקורך האחרון/.test(x))||'';
 }
+// WHY 03.09.2026 - פועלים פרטי: "לא נמצא בורר החשבונות". נמדד מיומן האחסון
+// (LevelDB): שלושה ניסיונות באותו ערב, ובכולם הגשש שרץ רגע לפני EXTRACT_SELECTED
+// דיווח bodyLen=0, title='' על /current-account/transactions - הדף עדיין ריק
+// אחרי ה-1700ms של prepareRoute, וכל פונקציה כאן דרשה את הבורר **מיד**, בלי
+// שום המתנה. הזיהוי נכשל פעמיים ("ודא שאתה בדף תנועות") והצליח בשלישית - אותה
+// תקלה. ובנוסף: בחיבור עם חשבון יחיד (פרטי) הבורר מושבת - נמדד: הזיהוי החזיר
+// את הכינוי "חשבון 301975", שנוצר רק בענף chooser.disabled. לכן:
+// 1. ממתינים לרינדור הדף עד 20 שניות. 2. הבורר נדרש רק כשנבחרו כמה חשבונות;
+//    חשבון יחיד נקרא מהבורר המושבת או מטקסט "מס' : סניף-חשבון" בדף, ובלעדיהם
+//    (דף בלי מספר חשבון) ממשיכים - אין ממה להתבלבל כשיש חשבון אחד.
+const PAGE_READY_MS=20000;
+function chooserLabel(el){return(el?.innerText||el?.textContent||'').replace(/\s+/g,' ').trim()}
+function parseAccountRef(text){const m=String(text||'').match(/(\d+)\s*-\s*(\d+)/);return m?{branch:m[1],accountNumber:m[2]}:null}
+function chooserEnabled(el){return!!el&&!el.disabled&&el.getAttribute('aria-disabled')!=='true'}
+function pageAccountLabel(){
+  const m=(document.body?.innerText||'').replace(/\s+/g,' ').match(/(?:מס['׳"]?\.?\s*:?\s*|חשבון\s*:?\s*)(\d{2,4}\s*-\s*\d{4,12})/);
+  return m?m[0].trim():'';
+}
+function pageRendered(){return(document.body?.innerText||'').trim().length>200}
+// needMulti: נבחרו כמה חשבונות, ולכן בורר מושבת עדיין אינו "מוכן" - ממתינים לו.
+async function accountContext(needMulti){
+  const start=Date.now();let chooser=null,label='',renderedAt=0;
+  while(Date.now()-start<PAGE_READY_MS){
+    chooser=findAccountChooser();if(chooser&&(!needMulti||chooserEnabled(chooser)))break;
+    if(!chooser){label=pageAccountLabel();if(label&&!needMulti)break}
+    if(pageRendered()){if(!renderedAt)renderedAt=Date.now();else if(Date.now()-renderedAt>3000)break}
+    await wait(250);
+  }
+  const text=chooser?chooserLabel(chooser):label;
+  return{chooser,multi:chooserEnabled(chooser),label:text,current:parseAccountRef(text),ready:!!(chooser||label||renderedAt),waited:Date.now()-start};
+}
+function singleAccount(ref){return{key:`${ref.branch}-${ref.accountNumber}`,branch:ref.branch,accountNumber:ref.accountNumber,nickname:`חשבון ${ref.accountNumber}`}}
 async function discoverAccounts(){
-  const chooser=findAccountChooser();if(!chooser)throw new Error('לא נמצא בורר החשבונות בדף. ודא שאתה בדף תנועות בחשבון.');
-  const currentLabel=chooser.textContent.replace(/\s+/g,' ').trim(),currentMatch=currentLabel.match(/(\d+)\s*-\s*(\d+)/);
-  if(chooser.disabled&&currentMatch)return[{key:`${currentMatch[1]}-${currentMatch[2]}`,branch:currentMatch[1],accountNumber:currentMatch[2],nickname:`חשבון ${currentMatch[2]}`}];
-  chooser.click();await wait(450);
+  const ctx=await accountContext(false);
+  if(!ctx.ready)throw new Error(`דף התנועות לא נטען תוך ${PAGE_READY_MS/1000} שניות. ודא שאתה בדף תנועות בחשבון.`);
+  if(!ctx.multi){
+    if(ctx.current)return[singleAccount(ctx.current)];
+    throw new Error('לא נמצא בורר חשבונות ולא מספר חשבון בדף. ודא שאתה בדף תנועות בחשבון.');
+  }
+  const chooser=ctx.chooser;chooser.click();await wait(450);
   const labels=[...document.querySelectorAll('[role="option"], [role="listbox"] li')].map(el=>el.textContent.replace(/\s+/g,' ').trim()).filter(label=>/\d+\s*-\s*\d+/.test(label));
-  document.body.click();if(!labels.length)throw new Error('לא נמצאו חשבונות זמינים למשתמש.');return[...new Set(labels)].map(label=>{const m=label.match(/(\d+)\s*-\s*(\d+)/);return m?{key:`${m[1]}-${m[2]}`,branch:m[1],accountNumber:m[2],nickname:label.replace(m[0],'').replace(/^[\s,]+/,'')||`חשבון ${m[2]}`} : null}).filter(Boolean);
+  document.body.click();
+  if(!labels.length){if(ctx.current)return[singleAccount(ctx.current)];throw new Error('לא נמצאו חשבונות זמינים למשתמש.')}
+  return[...new Set(labels)].map(label=>{const m=label.match(/(\d+)\s*-\s*(\d+)/);return m?{key:`${m[1]}-${m[2]}`,branch:m[1],accountNumber:m[2],nickname:label.replace(m[0],'').replace(/^[\s,]+/,'')||`חשבון ${m[2]}`} : null}).filter(Boolean);
 }
 async function extractSelected(keys,sinceMs){
-  if(!findAccountChooser())throw new Error('לא נמצא בורר החשבונות');const accounts=[];
+  const ctx=await accountContext(keys.length>1);
+  if(!ctx.ready)throw new Error(`דף התנועות לא נטען תוך ${PAGE_READY_MS/1000} שניות`);
+  if(keys.length>1&&!ctx.multi)throw new Error(`נבחרו ${keys.length} חשבונות אך בדף אין בורר חשבונות פעיל (מוצג: ${ctx.label||'ללא מספר חשבון'})`);
+  const accounts=[];
   for(const key of keys){
     const match=String(key).match(/(\d+)\s*-\s*(\d+)/);if(!match)continue;const branch=match[1],accountNumber=match[2],expected=normalize(`${branch}-${accountNumber}`);
-    let chooser=findAccountChooser();if(!chooser)throw new Error('בורר החשבונות נעלם מהדף');
-    if(!normalize(chooser.textContent).includes(expected)){chooser.click();await wait(350);const option=[...document.querySelectorAll('[role="option"], [role="listbox"] li')].find(el=>normalize(el.textContent).includes(expected));if(!option)throw new Error(`החשבון ${branch}-${accountNumber} נעלם מהבורר.`);option.click();await waitFor(()=>{const fresh=findAccountChooser();return fresh&&normalize(fresh.textContent).includes(expected)},12000,`לא ניתן לבחור חשבון ${branch}-${accountNumber}.`);await wait(1100)}
-    chooser=findAccountChooser();if(!chooser||!normalize(chooser.textContent).includes(expected))throw new Error(`אימות חשבון ${branch}-${accountNumber} נכשל.`);// יתרה חסרה אינה מפילה את הסנכרון. קודם המתנה לרינדור, ואם עדיין אין —
+    const label=await selectAccount(expected,`${branch}-${accountNumber}`,ctx);
+    // יתרה חסרה אינה מפילה את הסנכרון. קודם המתנה לרינדור, ואם עדיין אין —
 // החשבון נשמר עם balance:null ומסומן; דף ריכוז היתרות ממלא אותה בהמשך ב-syncSource.
     let balance=extractBalance();
     if(balance===null){try{await waitFor(()=>extractBalance()!==null,3000,'')}catch{}balance=extractBalance()}
@@ -82,38 +121,49 @@ async function extractSelected(keys,sinceMs){
     // אם התקופה נשמרת בין חשבונות. קביעה לכל חשבון נכונה בשני המקרים.
     const period=await setPeriod(sinceMs);
     const rows=extractTransactions(sinceMs);
-    const label=chooser.textContent.replace(/\s+/g,' ').trim();accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,balanceMissing:balance===null,transactions:rows,txProbe:rows.length?'':txFingerprint(),periodProbe:period});
+    accounts.push({branch,accountNumber,nickname:label.replace(new RegExp(`${branch}\\s*-\\s*${accountNumber}`),'').replace(/^[\s,]+/,'')||`חשבון ${accountNumber}`,verifiedLabel:label,balance,balanceMissing:balance===null,transactions:rows,txProbe:rows.length?'':txFingerprint(),periodProbe:period});
   }
   return accounts;
 }
 
 async function extractBalanceSummaries(keys){
-  if(!findAccountChooser())throw new Error('לא נמצא בורר החשבונות בריכוז היתרות');
+  const ctx=await accountContext(keys.length>1);
+  if(!ctx.ready)throw new Error(`דף ריכוז היתרות לא נטען תוך ${PAGE_READY_MS/1000} שניות`);
   const accounts=[];
   for(const key of keys){
     const match=String(key).match(/(\d+)\s*-\s*(\d+)/);if(!match)continue;
     const branch=match[1],accountNumber=match[2],expected=normalize(`${branch}-${accountNumber}`);
-    await selectAccount(expected,`${branch}-${accountNumber}`);
-    const chooser=findAccountChooser();
-    const verifiedLabel=chooser?.textContent?.replace(/\s+/g,' ').trim()||'';
+    const verifiedLabel=await selectAccount(expected,`${branch}-${accountNumber}`,ctx);
     const summary=extractBalanceSummary();
     accounts.push({key:`${branch}-${accountNumber}`,verifiedLabel,...summary});
   }
   return accounts;
 }
 
-async function selectAccount(expected,display){
-  let chooser=findAccountChooser();if(!chooser)throw new Error('בורר החשבונות נעלם מהדף');
-  if(!normalize(chooser.textContent).includes(expected)){
+// מחזירה את התווית שאומתה. ctx - הקשר שנמדד פעם אחת לדף; בלעדיו נמדד כאן.
+// ⚠ הבורר נקרא מחדש בכל קריאה ולא נשמר מה-ctx: מעבר חשבון מרנדר את הדף מחדש,
+// ואלמנט ישן שנותק מה-DOM "נלחץ" בלי שום תוצאה.
+async function selectAccount(expected,display,ctx){
+  ctx=ctx||await accountContext(false);
+  if(!ctx.ready)throw new Error(`הדף לא נטען תוך ${PAGE_READY_MS/1000} שניות (${display}).`);
+  if(!ctx.multi){
+    // חשבון יחיד - אין בורר לבחור בו. מאמתים רק כשהדף מציג מספר חשבון.
+    const shown=ctx.current?normalize(`${ctx.current.branch}-${ctx.current.accountNumber}`):'';
+    if(shown&&shown!==expected)throw new Error(`הדף מציג את חשבון ${ctx.label} ולא ${display}, ואין בורר חשבונות לעבור בו.`);
+    return ctx.label||display;
+  }
+  let chooser=findAccountChooser()||ctx.chooser;
+  if(!normalize(chooserLabel(chooser)).includes(expected)){
     chooser.click();await wait(350);
     const option=[...document.querySelectorAll('[role="option"], [role="listbox"] li')].find(el=>normalize(el.textContent).includes(expected));
-    if(!option)throw new Error(`החשבון ${display} אינו מופיע בריכוז היתרות.`);
+    if(!option)throw new Error(`החשבון ${display} אינו מופיע בבורר החשבונות.`);
     option.click();
-    await waitFor(()=>{const fresh=findAccountChooser();return fresh&&normalize(fresh.textContent).includes(expected)},12000,`לא ניתן לבחור חשבון ${display} בריכוז היתרות.`);
+    await waitFor(()=>{const fresh=findAccountChooser();return fresh&&normalize(chooserLabel(fresh)).includes(expected)},12000,`לא ניתן לבחור חשבון ${display}.`);
     await wait(1300);
   }
   chooser=findAccountChooser();
-  if(!chooser||!normalize(chooser.textContent).includes(expected))throw new Error(`אימות חשבון ${display} נכשל בריכוז היתרות.`);
+  if(!chooser||!normalize(chooserLabel(chooser)).includes(expected))throw new Error(`אימות חשבון ${display} נכשל.`);
+  return chooserLabel(chooser);
 }
 
 function extractBalanceSummary(){
@@ -146,11 +196,13 @@ function extractBalanceSummary(){
 }
 
 async function extractProductDetails(keys,kind){
+  const ctx=await accountContext(keys.length>1);
+  if(!ctx.ready)throw new Error(`הדף לא נטען תוך ${PAGE_READY_MS/1000} שניות (${kind})`);
   const accounts=[];
   for(const key of keys){
     const match=String(key).match(/(\d+)\s*-\s*(\d+)/);if(!match)continue;
     const display=`${match[1]}-${match[2]}`,expected=normalize(display);
-    await selectAccount(expected,display);
+    await selectAccount(expected,display,ctx);
     accounts.push({key:display,[kind]:kind==='cards'?extractCardDetails():await extractLoanDetails()});
   }
   return accounts;
