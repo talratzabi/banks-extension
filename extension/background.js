@@ -629,7 +629,7 @@ await chrome.storage.local.set({pendingLeumi:transient,syncStatus:`שגיאה ב
 try{return await runIsracard(id,8)}catch{}
 await chrome.tabs.update(id,{url:ISRACARD_HOME});await delay(1800);return runIsracard(id,40)}).catch(()=>{});reply({ok:true});return}
   if(m?.type==='CAL_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingCal:false,pendingCalSuffix:''}).then(x=>{if(x.pendingCal)runCal(t,x.pendingCalSuffix).catch(()=>{});else maybeAutoRun('cal','כאל',runCal,t).catch(()=>{})});reply({ok:true});return}
-  if(m?.type==='MAX_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingMax:false,pendingMaxSuffix:''}).then(x=>{if(x.pendingMax)runMax(t,x.pendingMaxSuffix).catch(()=>{});else maybeAutoRun('max','MAX',runMax,t).catch(()=>{})});reply({ok:true});return}
+  if(m?.type==='MAX_AUTHENTICATED'&&sender.tab?.id){const t=sender.tab.id;chrome.storage.local.get({pendingMax:false,pendingMaxSuffix:''}).then(x=>{if(x.pendingMax)runMax(t,x.pendingMaxSuffix).catch(e=>noteMaxError(e));else maybeAutoRun('max','MAX',runMax,t).catch(()=>{})});reply({ok:true});return}
   if(m?.type==='LOAD_CARD_MONTH'){loadIsracardMonth(String(m.month||'')).then(reply).catch(e=>reply({ok:false,error:e.message}));return true}
   if(m?.type==='LOAD_CARD_YEAR'){const suffixes=Array.isArray(m.suffixes)?m.suffixes:[];loadIsracardYear(Number(m.months)||12,suffixes,!!m.onlyMissing).then(reply).catch(async e=>{const card=suffixes.length?` לכרטיס ${suffixes.join(', ')}`:'';await chrome.storage.local.set({syncStatus:`ישראכרט${card}: הסנכרון לא התחיל — ${e.message}`});reply({ok:false,error:e.message})});return true}
   if(m?.type==='CARD_MONTHS'){cardHistMonths().then(months=>reply({ok:true,months})).catch(e=>reply({ok:false,error:e.message}));return true}
@@ -2899,11 +2899,32 @@ async function maxTab(){const all=await chrome.tabs.query({url:['https://www.max
 const tabs=all.filter(t=>!/\/login\b/i.test(String(t.url||'')));
 return tabs.find(t=>String(t.url||'').includes('/transaction-details/personal'))||tabs[0]||null}
 async function prepareMax(tabId){await delay(500);try{const p=await chrome.tabs.sendMessage(tabId,{type:'MAX_PING'});if(p?.ok)return}catch{}await chrome.scripting.executeScript({target:{tabId},files:['max-content.js']});await delay(250)}
+// ⚠⚠ 03.09.2026 - טל: "מנסה לסנכרן מקס, פתח [חלונית] והתחברתי ולא עושה כלום."
+// נמדד ביומן האחסון: "ממתין להתחברות ל‑MAX" + חלונית נפתחה, ואחר כך **שום
+// כתיבה** - MAX_AUTHENTICATED לא הגיע מהחלונית. הסנכרון התחיל רק כשלשונית
+// אחרת הגיעה ל-/transaction-details (ואז maxUiProbe נכתב, כלומר הסקריפט חי).
+// נמדד בדף המחובר: הברכה היא "היי (:" **בלי שם** - הביטוי /היי\s+[^\n(]+\(:/
+// דורש שם ולכן עיוור; .combo.dates איננו; והחלונית לא ישבה על transaction-details.
+// לכן שער שאינו תלוי ב-DOM: לשונית **שהתוסף פתח** להתחברות, שיצאה מ-/login
+// ונשארה על max.co.il - הסנכרון מתחיל, ו-runMax בודק בעצמו אם הסשן אמיתי
+// (ניווט ל-transaction-details; לא-מחובר מועף ל-/login - המבחן שנמדד 28.08).
+async function noteMaxError(e){await chrome.storage.local.set({pendingMax:false,pendingMaxSuffix:'',syncStatus:`שגיאה ב‑MAX: ${e.message}`,lastSyncError:{at:new Date().toISOString(),text:`שגיאה ב‑MAX: ${e.message}`.slice(0,300)}});if(!autoBusy)try{await chrome.runtime.openOptionsPage()}catch{}}
+chrome.tabs.onUpdated.addListener((tabId,info,tab)=>{(async()=>{
+  const url=String(info.url||(info.status==='complete'?tab?.url:'')||'');
+  if(!/^https:\/\/(www|online)\.max\.co\.il\//.test(url)||/\/login\b/i.test(url))return;
+  if(maxBusy||running)return;
+  const st=await chrome.storage.local.get({pendingMax:false,pendingMaxSuffix:''});if(!st.pendingMax)return;
+  await loadOpened();if(!openedByExtension.has(tabId))return;
+  await chrome.storage.local.set({syncStatus:'MAX: זוהתה יציאה מדף ההתחברות — בודק את הסשן'});
+  await runMax(tabId,st.pendingMaxSuffix).catch(e=>noteMaxError(e));
+})().catch(()=>{})});
 async function startMax(suffix=''){suffix=String(suffix||'').replace(/\D/g,'').slice(-4);await chrome.storage.local.set({pendingMax:true,pendingMaxSuffix:suffix,syncStatus:suffix?`MAX: מכין טעינת שנה לכרטיס ${suffix}`:'MAX: בודק את החיבור'});const tab=await maxTab();if(!tab){await chrome.storage.local.set({syncStatus:'ממתין להתחברות ל‑MAX'});await openLoginWindow({url:MAX_LOGIN,type:'popup',width:560,height:780,focused:true});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMax(tab.id,suffix).catch(async e=>{await chrome.storage.local.set({pendingMax:false,pendingMaxSuffix:'',syncStatus:`שגיאה ב‑MAX: ${e.message}`});if(!autoBusy)await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
 async function runMax(tabId,requestedSuffix=''){beginCardRun();noteSyncTab(tabId);
  if(maxBusy)return;maxBusy=true;
  try{
   await chrome.storage.local.set({syncStatus:'MAX: פותח פירוט חיובים'});let tab=await chrome.tabs.get(tabId);if(!String(tab.url||'').includes('/transaction-details/personal')){await chrome.tabs.update(tabId,{url:MAX_TX});for(let i=0;i<40;i++){await delay(300);tab=await chrome.tabs.get(tabId);if(String(tab.url||'').includes('/transaction-details/personal'))break}}
+  // ⚠ 03.09.2026 - המבחן שנמדד 28.08: לא-מחובר מועף מ-transaction-details ל-/login. אם הגענו לשם - אין סשן, ואומרים זאת במקום ליפול בהמשך על "רשימת הכרטיסים".
+  if(/\/login\b/i.test(String(tab.url||'')))throw Error('ההתחברות ל‑MAX לא הושלמה — האתר החזיר לדף ההתחברות. התחבר בחלונית ונסה שוב');
   await delay(1700);await prepareMax(tabId);const he=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'],wanted=String(requestedSuffix||'').replace(/\D/g,'').slice(-4),monthly=[],seen=new Set();
   const months=Array.from({length:13},(x,i)=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()+1-i);return{label:`${he[d.getMonth()]} ${d.getFullYear()}`,key:`${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`,optional:i===0}});let firstRead=null;
   // ⚠ 28.08.2026 - טל: "רצינו להוריד רק את חודש החיוב הקרוב והקודם". סנכרון
