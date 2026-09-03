@@ -149,7 +149,7 @@ let creditLimit=creditFrom(home.text),balance=home.transactions[0].balance;
     const mergedTx=[...home.transactions,...(((prevYahav&&prevYahav.transactions)||[]).filter(t=>!freshSet.has(yKey(t))))];
     const yahavNew=home.transactions.filter(t=>!prevKeys.has(yKey(t))).length;
     const row={...account,nickname:home.owner||'טל',owner:home.owner||'טל',balance,creditLimit,availableCredit,transactions:mergedTx,loans,source:'yahav',sourceLabel:'יהב',selectionKey,id:`yahav-${account.branch}-${account.accountNumber}`,lastSync:now,status:'מסונכרן'};
-    const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],accountKinds:{}}),accounts=[...state.accounts.filter(a=>a.source!=='yahav'),row],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('yahav|')),selectionKey])],accountKinds={...state.accountKinds,[selectionKey]:'private'};
+    const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[],accountKinds:{}}),accounts=[...state.accounts.filter(a=>a.source!=='yahav'),...markNewTransactions(state.accounts,[keepAssignedCards(state.accounts,row)],['yahav'])],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('yahav|')),selectionKey])],accountKinds={...state.accountKinds,[selectionKey]:'private'};
     await chrome.storage.local.set({accounts,selectedAccountKeys,accountKinds,accountFilter:'both',pendingYahav:false,
   /* ⚠ פרוב שאומר **באיזה מסך היינו**, לא רק מה לא נמצא. */
   yahavTextProbe:{at:now,len:String(home.text||'').length,

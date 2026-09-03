@@ -213,10 +213,13 @@ function accountForCard(accounts,card,savedId){
     // ב-X+1 (נמדד ב-1.57.1: chargeDate '10.9' על כרטיסי 08). ההתאמה המקורית
     // חיפשה רק ב-X והחמיצה תמיד. כמו ב-viewer: בודקים את X וגם את X+1,
     // והחד-ערכיות נמדדת על שני החלונות יחד.
+    // ⚠ 03.09.2026 - היום אינו מדויק: כשה-10 נופל בשבת הבנק רושם את החיוב
+    // ב-11 (נמדד: 11/01/26 בדיסקונט ובבינלאומי, 11.01.2026). לכן חלון של
+    // עד שלושה ימים אחרי יום החיוב, באותו חודש.
     const nextM=when[1]===12?1:when[1]+1;
     const m=accounts.filter(a=>(a.transactions||[]).some(t=>{
       const dm=dayMonthOf(t.date||t.valueDate||t.transactionDate);
-      if(!dm||dm[0]!==when[0]||(dm[1]!==when[1]&&dm[1]!==nextM))return false;
+      if(!dm||dm[0]<when[0]||dm[0]>when[0]+3||(dm[1]!==when[1]&&dm[1]!==nextM))return false;
       const amount=Number(t.amount??t.debit??t.credit??0);
       return Math.abs(Math.abs(amount)-card.previousCharge)<.02;
     }));
@@ -227,18 +230,50 @@ function accountForCard(accounts,card,savedId){
   // חסרי חומר עבורו. במקומם runMax מצרף bankChargeProbe: סכום חיוב החודש
   // שכבר ירד בבנק + חודש הנחיתה + שם המנפיק. בלי יום מדויק - ולכן הדרישה
   // המפצה: שם המנפיק חייב להופיע בתנועת הבנק, וההתאמה חד-ערכית בלבד.
-  if(!target&&card.bankChargeProbe&&Number(card.bankChargeProbe.amount)>0){
-    const p=card.bankChargeProbe,re=new RegExp(p.textRe||'.','i');
+  // ⚠ 03.09.2026 - נמדד אצל טל: הגשש היחיד הצביע על חיוב שטרם נחת בבנק
+  // (חודש-כרטיס 08 -> נחיתה 10/09, והיום 03/09). לכן bankChargeProbes -
+  // כמה חודשים אחורה, מהחדש לישן; הראשון שמתאים חד-ערכית מנצח.
+  const probes=[...(card.bankChargeProbes||[]),card.bankChargeProbe].filter(p=>p&&Number(p.amount)>0);
+  if(!target&&probes.length){
     const monthKeyOf=v=>{const m2=String(v||'').match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);if(!m2)return null;const y=m2[3].length===2?2000+Number(m2[3]):Number(m2[3]);return`${String(Number(m2[2])).padStart(2,'0')}.${y}`};
-    const m=accounts.filter(a=>(a.transactions||[]).some(t=>{
-      if(monthKeyOf(t.date||t.valueDate||t.transactionDate)!==p.monthKey)return false;
-      if(!re.test(`${t.action||''} ${t.details||''}`))return false;
-      const amount=Number(t.amount??t.debit??t.credit??0);
-      return Math.abs(Math.abs(amount)-Number(p.amount))<=1;                  // ±1 ש"ח - הלקח מהתאמת ה-viewer
-    }));
-    if(m.length===1)target=m[0];                                              // ⚠ חד-ערכי בלבד
+    for(const p of probes){
+      const re=new RegExp(p.textRe||'.','i');
+      const m=accounts.filter(a=>(a.transactions||[]).some(t=>{
+        if(monthKeyOf(t.date||t.valueDate||t.transactionDate)!==p.monthKey)return false;
+        if(!re.test(`${t.action||''} ${t.details||''}`))return false;
+        const amount=Number(t.amount??t.debit??t.credit??0);
+        return Math.abs(Math.abs(amount)-Number(p.amount))<=1;                // ±1 ש"ח - הלקח מהתאמת ה-viewer
+      }));
+      if(m.length===1){target=m[0];break}                                     // ⚠ חד-ערכי בלבד
+    }
   }
   return target||null;
+}
+// ⚠⚠ 03.09.2026 - טל: "כשאני מעדכן כרטיסי אשראי הם לא מזהים מאיזה חשבון בנק."
+// **נמדד מהאחסון:** דיסקונט/לאומי/מזרחי/יהב/הבינלאומי מחזירים רשומת חשבון
+// **בלי** `cards`, ו-syncSelected מחליף את הרשומה כולה. כלומר כל סנכרון בנק
+// מחק את הכרטיסים שהמנפיק שייך לחשבון (9238/9012 שויכו ב-28.08 ונעלמו
+// ב-31.08; MAX 2910 יצא מהחשבון ולא חזר לשום רשימה). הפונקציה מחזירה את
+// הכרטיסים שהיו על הרשומה הקודמת ושהבנק לא דיווח עליהם עכשיו.
+function keepAssignedCards(prevList,fresh){
+  const prev=(prevList||[]).find(a=>a&&fresh&&a.id===fresh.id);
+  if(!prev||!(prev.cards||[]).length)return fresh;
+  const have=new Set((fresh.cards||[]).map(c=>cardDigits(c.suffix)).filter(Boolean));
+  const kept=prev.cards.filter(c=>cardDigits(c.suffix)&&!have.has(cardDigits(c.suffix)));
+  return kept.length?{...fresh,cards:[...(fresh.cards||[]),...kept]}:fresh;
+}
+// גששי חיוב מן ההיסטוריה השמורה: עד ארבעה חודשי-כרטיס שהושלמו, מהחדש לישן,
+// כל אחד עם חודש הנחיתה בבנק (החודש שאחריו) ורגקס שם המנפיק.
+function chargeProbesFromHistory(hist,suffix,issuerRe,textRe,nowNorm){
+  const out=[];
+  for(const r of hist||[]){
+    const norm=String(r.month||'').replace(/\D/g,'');
+    if(String(r.suffix)!==String(suffix)||!issuerRe.test(String(r.issuer||''))||norm===nowNorm||norm.length!==6||!(Number(r.amount)>0))continue;
+    out.push({key:norm.slice(2)+norm.slice(0,2),norm,amount:Number(r.amount)});
+  }
+  out.sort((a,b)=>b.key.localeCompare(a.key));
+  return out.slice(0,4).map(x=>{const m1=Number(x.norm.slice(0,2)),y1=Number(x.norm.slice(2));
+    return{amount:x.amount,monthKey:m1===12?`01.${y1+1}`:`${String(m1+1).padStart(2,'0')}.${y1}`,textRe}});
 }
 let reconcileBusy=false;
 async function reconcileUnassignedCards(){
@@ -247,38 +282,48 @@ async function reconcileUnassignedCards(){
   try{
     // ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
     return await accountsMutex(async()=>{
-    const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{}});
+    const st=await chrome.storage.local.get({accounts:[],isracardUnassigned:[],calUnassigned:[],maxUnassigned:[],isracardAssignments:{},isracardLastCards:[],calLastCards:[],maxLastCards:[],hiddenCards:[]});
     const accounts=(st.accounts||[]).map(a=>({...a,cards:[...(a.cards||[])]}));
     const patch={};let moved=0;
-    // ⚠ 28.08.2026 - העשרה למסלול 5 לכל המנפיקים: כרטיסים שממתינים לשיוך
-    // מקבלים bankChargeProbe מן ההיסטוריה השמורה - סכום חודש-הכרטיס האחרון
-    // שהושלם, שחיובו נחת בבנק **בחודש שאחריו** (הלקח המדוד מ-1.57.1), ורגקס
-    // שם-המנפיק כפי שהוא מופיע בתנועת הבנק. ההתאמה עצמה במסלול 5 - חד-ערכית.
+    const PROBE_RE={isracardUnassigned:'ישראכרט',calUnassigned:'כאל|ויזה|cal',maxUnassigned:'מקס|max'};
+    const LAST={isracardUnassigned:'isracardLastCards',calUnassigned:'calLastCards',maxUnassigned:'maxLastCards'};
+    const lists=Object.keys(PROBE_RE);
+    // ⚠ 03.09.2026 - "יתומים": כרטיס שהמנפיק דיווח עליו (xxxLastCards), שאינו
+    // בשום חשבון ואינו ברשימת הממתינים - זה מה שנשאר אחרי שסנכרון בנק מחק
+    // את השיוך (נמדד: MAX 2910). בלי זה הוא מוצג "ממתין לשיוך" לנצח, ואיש
+    // לא מנסה לשייך אותו שוב. כרטיס שהוסר בידי המשתמש (hiddenCards) לא חוזר.
     {
-      const PROBE_RE={isracardUnassigned:'ישראכרט',calUnassigned:'כאל|ויזה|cal',maxUnassigned:'מקס|max'};
-      const lists=Object.keys(PROBE_RE);
-      if(lists.some(k=>(st[k]||[]).some(c=>!c.bankChargeProbe))){
-        try{
-          const d0=new Date(),nowNorm=String(d0.getMonth()+1).padStart(2,'0')+d0.getFullYear();
-          const hist=await cardHistAll();
-          for(const k of lists)for(const c of st[k]||[]){
-            if(c.bankChargeProbe)continue;
-            const issuerRe=new RegExp(PROBE_RE[k],'i');
-            let best=null;
-            for(const r of hist){
-              const norm=String(r.month||'').replace(/\D/g,'');
-              if(String(r.suffix)!==String(c.suffix)||!issuerRe.test(String(r.issuer||''))||norm===nowNorm||!(Number(r.amount)>0))continue;
-              const key=norm.slice(2)+norm.slice(0,2); // YYYYMM להשוואת "חדש יותר"
-              if(!best||key>best.key)best={key,norm,amount:Number(r.amount)};
-            }
-            if(!best)continue;
-            const m1=Number(best.norm.slice(0,2)),y1=Number(best.norm.slice(2));
-            c.bankChargeProbe={amount:best.amount,monthKey:m1===12?`01.${y1+1}`:`${String(m1+1).padStart(2,'0')}.${y1}`,textRe:PROBE_RE[k]};
-          }
-        }catch(e){}
+      const hidden=(st.hiddenCards||[]).map(x=>String(x).replace(/\D/g,'')).filter(Boolean);
+      const isHidden=s=>hidden.some(h=>s.endsWith(h)||h.endsWith(s));
+      const inAccount=s=>accounts.some(a=>(a.cards||[]).some(c=>cardDigits(c.suffix).endsWith(s)));
+      for(const k of lists){
+        const list=[...(st[k]||[])],known=new Set(list.map(c=>cardDigits(c.suffix)));let added=false;
+        for(const c of st[LAST[k]]||[]){
+          const s=cardDigits(c?.suffix);
+          if(!s||known.has(s)||isHidden(s)||inAccount(s))continue;
+          list.push(c);known.add(s);added=true;
+        }
+        if(added){st[k]=list;patch[k]=list}
       }
     }
-    for(const key of ['isracardUnassigned','calUnassigned','maxUnassigned']){
+    // ⚠ 28.08.2026 - העשרה למסלול 5 לכל המנפיקים: כרטיסים שממתינים לשיוך
+    // מקבלים גששי חיוב מן ההיסטוריה השמורה - סכומי חודשי-הכרטיס שהושלמו,
+    // שחיובם נחת בבנק **בחודש שאחריו** (הלקח המדוד מ-1.57.1), ורגקס
+    // שם-המנפיק כפי שהוא מופיע בתנועת הבנק. ההתאמה עצמה במסלול 5 - חד-ערכית.
+    // ⚠ 03.09.2026 - הגששים מחושבים מחדש בכל סבב (ולא רק כשחסרים): ההיסטוריה
+    // גדלה בכל סנכרון מנפיק, וגשש יחיד שנשמר פעם אחת הצביע לנצח על חיוב
+    // שטרם נחת. ארבעה חודשים אחורה, כדי שלפחות אחד כבר יהיה בבנק.
+    if(lists.some(k=>(st[k]||[]).length)){
+      try{
+        const d0=new Date(),nowNorm=String(d0.getMonth()+1).padStart(2,'0')+d0.getFullYear();
+        const hist=await cardHistAll();
+        for(const k of lists)for(const c of st[k]||[]){
+          const probes=chargeProbesFromHistory(hist,c.suffix,new RegExp(PROBE_RE[k],'i'),PROBE_RE[k],nowNorm);
+          if(probes.length)c.bankChargeProbes=probes;
+        }
+      }catch(e){}
+    }
+    for(const key of lists){
       const list=st[key]||[],left=[];
       for(const card of list){
         const savedId=key==='isracardUnassigned'?(st.isracardAssignments||{})[card.suffix]:null;
@@ -288,9 +333,10 @@ async function reconcileUnassignedCards(){
         if(i>=0)target.cards[i]={...target.cards[i],...card};else target.cards.push(card);
         moved++;
       }
-      if(left.length!==list.length)patch[key]=left;
+      if(left.length!==list.length||patch[key])patch[key]=left;
     }
-    if(!moved)return 0;
+    if(!moved&&!Object.keys(patch).length)return 0;
+    if(!moved){await chrome.storage.local.set(patch);return 0}
     patch.accounts=accounts;
     await chrome.storage.local.set(patch);
     return moved;});
@@ -753,12 +799,12 @@ const mmYYYY=d=>`${String(d.getMonth()+1).padStart(2,'0')}${d.getFullYear()}`;
 // נחשב "הסנכרון האחרון". לכן החותם נקבע פעם אחת ב-beginCardRun.
 // ⚠ נמדד בבדיקה: שתי ריצות באותה מילישנייה קיבלו חותם זהה, והשנייה ירשה
 // את הסימונים של הראשונה במקום להחליף אותם. לכן מונה ולא זמן בלבד.
-let cardRunStamp='',cardRunKnown=null,cardRunSeq=0;
-function beginCardRun(){cardRunStamp=`${new Date().toISOString()}#${++cardRunSeq}`;cardRunKnown=null;return cardRunStamp}
+let cardRunStamp='',cardRunKnown=null,cardRunSeen=null,cardRunSeq=0;
+function beginCardRun(){cardRunStamp=`${new Date().toISOString()}#${++cardRunSeq}`;cardRunKnown=null;cardRunSeen=null;return cardRunStamp}
 async function storeCardMonth(month,cards){
   const rawMonth=String(month||''),normalizedMonth=rawMonth.replace(/\D/g,'');
   if(!cardRunStamp)beginCardRun();
-  const stamp=cardRunStamp;
+  const stamp=cardRunStamp,stampMs=Date.parse(stamp.split('#')[0])||Date.now();
   // הקודם נקרא לפי אינדקס החודש בלבד - לא getAll על כל המסד, שרץ עד 12 פעמים.
   const prevBySuffix=new Map((await cardHistGetMonth(normalizedMonth)).map(r=>[String(r.suffix),r]));
   const store=await chrome.storage.local.get({cardNewMarks:{}}),marks=store.cardNewMarks||{};
@@ -766,16 +812,33 @@ async function storeCardMonth(month,cards){
   // הראשון בריצה היה הופך את הכרטיס ל"מוכר" ו-11 החודשים שאחריו היו נצבעים
   // חדשים במלואם בסנכרון הראשון בחיי הכרטיס.
   if(!cardRunKnown)cardRunKnown=new Set(Object.keys(marks));
+  // ⚠⚠ 03.09.2026 - טל: "רק התנועות החדשות ... של 72 השעות האחרונות מהסנכרון
+  // האחרון, וגם תנועה שמופיעה בפעם הראשונה." נמדד באחסון: ב-03/09 כל 35
+  // העסקאות של 4719 סומנו "חדש" - כי ההשוואה הייתה מול רשומת **אותו חודש**
+  // בלבד, וחודש חדש = רשומה ריקה = הכול חדש, גם עסקאות מאוגוסט שכבר נראו
+  // בדף 08. לכן "מוכר" נמדד מול **כל** חודשי הכרטיס (getAll פעם אחת לריצה),
+  // ובתוך אותו חודש נשמר מונה המופעים (כפילות זהה נשארת חדשה).
+  if(!cardRunSeen){cardRunSeen=new Map();try{for(const r of await cardHistAll()){const s=String(r.suffix||''),m=String(r.month||'');if(!s)continue;const bym=cardRunSeen.get(s)||new Map(),set=bym.get(m)||new Set();for(const t of r.transactions||[])set.add(cardTxKey(t));bym.set(m,set);cardRunSeen.set(s,bym)}}catch(e){}}
   for(const c of cards||[]){
     if(!c?.suffix)continue;
     const suffix=String(c.suffix),known=cardRunKnown.has(suffix),remaining=cardTxCounts(prevBySuffix.get(suffix)?.transactions),fresh=[];
+    // "נראה בחודש אחר": דף 09 של ישראכרט חוזר על עסקאות אוגוסט שכבר נשמרו ב-08.
+    const seenElsewhere=k=>{const bym=cardRunSeen.get(suffix);if(!bym)return false;for(const [m,set] of bym)if(m!==normalizedMonth&&set.has(k))return true;return false};
     for(const t of c.transactions||[]){const k=cardTxKey(t),left=remaining.get(k)||0;
       if(left>0){remaining.set(k,left-1);continue}
+      if(seenElsewhere(k))continue;
       if(known)fresh.push(k)}
     // סנכרון ראשון של כרטיס הוא **קו הבסיס** ולא "הכול חדש": הרשומה נוצרת
     // ריקה, ומהסנכרון הבא ואילך ההפרש אמיתי.
-    const prevMark=marks[suffix],carry=prevMark&&prevMark.at===stamp?prevMark.keys||[]:[];
-    marks[suffix]={at:stamp,keys:[...new Set([...carry,...fresh])].slice(0,800)};
+    // "חדש" = נראה לראשונה ב-72 השעות שלפני הסנכרון הזה, **או** שתאריך העסקה
+    // בתוך 72 השעות האלה. firstSeen נשמר לכל מפתח (30 יום), כדי שסנכרון
+    // חוזר מחר לא יכבה את מה שנצבע היום.
+    const prevMark=marks[suffix]||{},carry=prevMark.at===stamp?prevMark.keys||[]:[],firstSeen={};
+    for(const [k,at] of Object.entries(prevMark.firstSeen||{}))if(stampMs-(Date.parse(at)||0)<=30*86400000)firstSeen[k]=at;
+    for(const k of fresh)if(!firstSeen[k])firstSeen[k]=new Date(stampMs).toISOString();
+    const since=stampMs-NEW_WINDOW_MS,recent=Object.keys(firstSeen).filter(k=>(Date.parse(firstSeen[k])||0)>=since),
+      byDate=(c.transactions||[]).filter(t=>{const d=txDayMs(t.date);return Number.isFinite(d)&&d+86400000>since}).map(cardTxKey);
+    marks[suffix]={at:stamp,keys:[...new Set([...carry,...recent,...byDate])].slice(0,800),firstSeen};
     if(rawMonth!==normalizedMonth)await cardHistDeleteMonths([rawMonth],[c.suffix]);
     await cardHistPut({id:cardHistId(c.suffix,normalizedMonth),suffix:c.suffix,month:normalizedMonth,
       name:c.name||'',issuer:c.issuer||'',amount:c.amount??null,chargeDate:c.chargeDate||'',
@@ -1058,6 +1121,8 @@ async function syncSelected(selectionKeys){
     // בתוך המנעול, והסינון wasRequested רץ עליה.
     let marked,sanityAlerts=[];const savedResult=await accountsMutex(async()=>{
     const accountsNow=((await chrome.storage.local.get({accounts:[]})).accounts)||[];
+    // ⚠ 03.09.2026 - הכרטיסים שהמנפיק שייך לחשבון שורדים את החלפת הרשומה (ראה keepAssignedCards).
+    for(let i=0;i<markedFresh.length;i++)markedFresh[i]=keepAssignedCards(accountsNow,markedFresh[i]);
     marked=[...accountsNow.filter(a=>!wasRequested(a)),...markedFresh];
     // AUDIT סעיף 8: שער שפיות. כשבנק משנה עיצוב, שדות חוזרים ריקים ונשמרים
     // כאמת — "200 שורות, 200 עתידיות" של 27.08 היה בדיוק זה. ההשוואה מול
@@ -1091,14 +1156,27 @@ selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${ne
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
 function transactionSyncKey(t){return JSON.stringify([t?.date||'',t?.action||'',t?.details||'',t?.reference||'',Number(t?.debit)||0,Number(t?.credit)||0,t?.balance==null?'':Number(t.balance)])}
+// ⚠⚠ 03.09.2026 - טל: "שיוצגו רק התנועות החדשות עם המילה חדש ... רק של ה-72
+// שעות האחרונות מהסנכרון האחרון. גם תנועה שמופיעה בפעם הראשונה."
+// עד כאן הדגל חושב מחדש בכל סנכרון: מה שלא היה שמור = חדש, וכל השאר כבוי.
+// כלומר סנכרון חוזר כיבה הכול, ו-newAt נשמר אך איש לא קרא אותו.
+// הכלל עכשיו: תנועה היא "חדש" אם נראתה לראשונה ב-72 השעות שלפני הסנכרון
+// (newAt נגרר משורה לשורה), **או** שתאריך התנועה בתוך 72 השעות האלה.
+// תאריך בנק הוא יום בלי שעה, ולכן יום שמסתיים אחרי תחילת החלון נחשב בפנים.
+const NEW_WINDOW_MS=72*3600*1000;
+function txDayMs(v){const m=String(v||'').match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);if(!m)return NaN;let y=Number(m[3]);if(y<100)y+=2000;return new Date(y,Number(m[2])-1,Number(m[1])).getTime()}
+function isRecentNew(row,atMs){const since=atMs-NEW_WINDOW_MS,seen=Date.parse(row?.newAt||'');if(Number.isFinite(seen)&&seen>=since)return true;const day=txDayMs(row?.date);return Number.isFinite(day)&&day+86400000>since}
 function markNewTransactions(previous,next,syncedSources){
-  const oldByAccount=new Map((previous||[]).map(a=>[accountSyncKey(a),a])),allowed=new Set(syncedSources||[]),markedAt=new Date().toISOString();
+  const oldByAccount=new Map((previous||[]).map(a=>[accountSyncKey(a),a])),allowed=new Set(syncedSources||[]),markedAt=new Date().toISOString(),atMs=Date.parse(markedAt);
   return(next||[]).map(account=>{
     if(!allowed.has(account.source||'business'))return account;
     const old=oldByAccount.get(accountSyncKey(account)),oldRows=old?.transactions||[];
-    if(!old||!oldRows.length)return{...account,transactions:(account.transactions||[]).map(t=>({...t,isNew:false}))};
-    const counts=new Map();for(const row of oldRows){const key=transactionSyncKey(row);counts.set(key,(counts.get(key)||0)+1)}
-    return{...account,transactions:(account.transactions||[]).map(row=>{const key=transactionSyncKey(row),left=counts.get(key)||0;if(left){counts.set(key,left-1);return{...row,isNew:false}}return{...row,isNew:true,newAt:markedAt}})};
+    // סנכרון ראשון של חשבון הוא קו בסיס: אין "נראה לראשונה", רק כלל התאריך.
+    if(!old||!oldRows.length)return{...account,transactions:(account.transactions||[]).map(t=>{const{newAt,...rest}=t;return{...rest,isNew:isRecentNew(rest,atMs)}})};
+    const queue=new Map();for(const row of oldRows){const key=transactionSyncKey(row);if(!queue.has(key))queue.set(key,[]);queue.get(key).push(row)}
+    return{...account,transactions:(account.transactions||[]).map(row=>{const key=transactionSyncKey(row),q=queue.get(key);
+      if(q&&q.length){const prev=q.shift(),{newAt,...rest}=row,kept=prev.newAt?{...rest,newAt:prev.newAt}:rest;return{...kept,isNew:isRecentNew(kept,atMs)}}
+      return{...row,isNew:true,newAt:markedAt}})};
   })
 }
 async function syncSource(source,keys){
@@ -1294,7 +1372,7 @@ async function syncFibi(tabId){
     const loanAccountKey=`${t.data.branch}-${t.data.accountNumber}`,account={...s.data,...loanResult.data,...t.data,loans:(loanResult.data.loans||[]).map(l=>({...l,accountKey:loanAccountKey})),nickname:owner.firstName||`חשבון ${t.data.accountNumber}`,owner:owner.fullName||'',source,sourceLabel:label,selectionKey:`${source}|${loanAccountKey}`,id:`${source}-${loanAccountKey}`,lastSync:now,status:'מסונכרן'};
     // WHY (AUDIT סעיף 2): state נקרא בתחילת הסנכרון, לפני דקות. קוראים מחדש.
     await accountsMutex(async()=>{
-    const accounts=(((await chrome.storage.local.get({accounts:[]})).accounts)||[]).filter(a=>a.source!==source);accounts.push(account);const names=(await chrome.storage.local.get({fibiConnectionNames:{}})).fibiConnectionNames;names[source]=owner.firstName||t.data.accountNumber;
+    const allNow=((await chrome.storage.local.get({accounts:[]})).accounts)||[],accounts=allNow.filter(a=>a.source!==source);accounts.push(markNewTransactions(allNow,[keepAssignedCards(allNow,account)],[account.source||source])[0]);const names=(await chrome.storage.local.get({fibiConnectionNames:{}})).fibiConnectionNames;names[source]=owner.firstName||t.data.accountNumber;
     // "אין נתונים חדשים" - השוואת מפתחות מול השמור, אותו מפתח כמו דדופ הדפדוף.
     const fibiKey=x=>`${x.date}|${x.reference||''}|${x.debit??''}|${x.credit??''}|${x.description||x.action||''}`;
     const savedKeys=new Set(((savedFibi&&savedFibi.transactions)||[]).map(fibiKey));
@@ -2004,7 +2082,7 @@ const syncedLeumiKeys=r.accounts.map(a=>a.key);
 const stashLeumi=async list=>{try{await accountsMutex(async()=>{
   const st=await chrome.storage.local.get({accounts:[]});
   const ids=new Set(list.map(a=>a.id));
-  await chrome.storage.local.set({accounts:[...st.accounts.filter(a=>!ids.has(a.id)),...list]});});
+  await chrome.storage.local.set({accounts:[...st.accounts.filter(a=>!ids.has(a.id)),...list.map(a=>keepAssignedCards(st.accounts,a))]});});
 }catch(e){}};
 {const now0=new Date().toISOString();
  const partial=r.accounts.map(a=>({...a,owner:a.nickname,source:'leumi',sourceLabel:'לאומי',
@@ -2451,7 +2529,7 @@ async function readMizrahiSummary(tabId){const results=await chrome.scripting.ex
 async function startMizrahi(){if(mizrahiBusy)return{ok:false,error:'סנכרון מזרחי־טפחות כבר מתבצע'};await chrome.storage.local.set({pendingMizrahi:true,syncStatus:'מזרחי־טפחות: בודק את החיבור ומזהה חשבונות'});const tab=await mizrahiTab();if(!tab){await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: פותח את חלון ההתחברות'});const opened=await chrome.tabs.create({url:MIZRAHI_HOME,active:true});try{await waitTab(opened.id,'mizrahi-tefahot.co.il')}catch{}const shown=await openMizrahiLogin(opened.id);await chrome.storage.local.set({syncStatus:shown?'ממתין להתחברות למזרחי־טפחות — הזן משתמש וסיסמה בחלונית שנפתחה':'ממתין להתחברות למזרחי־טפחות — נפתח דף ההתחברות'});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMizrahi(tab.id).catch(async e=>{await chrome.storage.local.set({pendingMizrahi:false,syncStatus:`שגיאה במזרחי־טפחות: ${e.message}`});await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
 async function runMizrahi(tabId){if(mizrahiBusy)return;mizrahiBusy=true;try{await prepareMizrahi(tabId);const detected=await readMizrahiSummary(tabId);if(!detected)throw Error('לא זוהה חשבון פעיל בעמוד מזרחי');const found=[{...detected,key:`mizrahi|${detected.branch}-${detected.accountNumber}`,source:'mizrahi',sourceLabel:'מזרחי־טפחות',balance:null}];const result=await syncMizrahiSelected([`${detected.branch}-${detected.accountNumber}`],tabId);// ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
 await accountsMutex(async()=>{
-const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});const accounts=[...state.accounts.filter(a=>a.source!=='mizrahi'),...result],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('mizrahi|')),result[0].selectionKey])];await chrome.storage.local.set({accounts,
+const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});const accounts=[...state.accounts.filter(a=>a.source!=='mizrahi'),...markNewTransactions(state.accounts,result.map(a=>keepAssignedCards(state.accounts,a)),['mizrahi'])],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('mizrahi|')),result[0].selectionKey])];await chrome.storage.local.set({accounts,
   // ⚠ מוחק רק את מזרחי. הוחל לפי דפוס; לא נמדדה תקלה כאן.
   discoveredAccounts:(await chrome.storage.local.get({discoveredAccounts:[]})).discoveredAccounts.filter(a=>a&&a.source!=='mizrahi'),
   selectedAccountKeys,pendingMizrahi:false,syncStatus:(()=>{
@@ -2525,10 +2603,6 @@ async function runIsracard(tabId,attempts=40){beginCardRun();await chrome.storag
 const chargeMonthRaw=mmYYYY(new Date()),chargeMonthLabel=`${chargeMonthRaw.slice(0,2)}/${chargeMonthRaw.slice(2)}`;
 // דלתא (28.08.2026): שורות החודש הקודם שכבר במסד - מפתח לדילוג על דף לכרטיס;
 // ותמונת החודש הנוכחי שלפני הכתיבה - הבסיס ל"אין נתונים חדשים" בסיום.
-const prevProbe=new Date();prevProbe.setDate(1);prevProbe.setMonth(prevProbe.getMonth()-1);
-const prevNorm=`${String(prevProbe.getMonth()+1).padStart(2,'0')}${prevProbe.getFullYear()}`;
-const prevStoredRows=new Map();
-try{for(const r of await cardHistGetMonth(prevNorm))if(Number(r.amount)>0)prevStoredRows.set(String(r.suffix),r)}catch(e){}
 const beforeCurrent=new Map();
 try{for(const r of await cardHistGetMonth(chargeMonthRaw))beforeCurrent.set(String(r.suffix),(r.transactions||[]).length)}catch(e){}
 let prevSkipped=0;const freshPrev=[];
@@ -2543,11 +2617,17 @@ for(let i=0;i<active.length;i++){const card=active[i];await syncStep(`ישראכ
 // מחפשים את 07 במסד. שני לוחות שנה שונים - אסור לערבב את המפתחות.
 // דלתא: חיוב קודם שכבר נחת אינו משתנה - אם עסקאות החודש הקודם שמורות עם
 // סכום, הדף לא נפתח והסכום נלקח מהמסד. הדף הנוכחי (חיוב קרוב) נקרא תמיד.
-const chargePageDate=new Date();chargePageDate.setDate(1);
-const chargePageKey=`${String(chargePageDate.getMonth()+1).padStart(2,'0')}.${chargePageDate.getFullYear()}`;
-const prevTxDate=new Date();prevTxDate.setDate(1);prevTxDate.setMonth(prevTxDate.getMonth()-1);
+// ⚠⚠ 03.09.2026 - נמדד באחסון של טל: ב-03/09 הקוד קרא את דף 09 (חיוב 10/09)
+// כ"חיוב קודם" - חיוב **שעוד לא נחת בבנק**, ולכן מסלול 4 לא מצא כלום ושום
+// כרטיס לא שויך (9238: 3,150.30 של 10/09 מול 2,585.28 של 10/08 בדיסקונט).
+// החיוב שכבר נחת הוא של החודש הקודם כל עוד היום בחודש קטן מיום החיוב של
+// הכרטיס ('10.9' -> 10). מיום החיוב ואילך - החודש הנוכחי, כמו קודם.
+const chargeDay=Number((String(card.chargeDate||'').match(/^\s*(\d{1,2})/)||[])[1]||10);
+const landed=new Date();landed.setDate(1);if(new Date().getDate()<chargeDay)landed.setMonth(landed.getMonth()-1);
+const chargePageKey=`${String(landed.getMonth()+1).padStart(2,'0')}.${landed.getFullYear()}`;
+const prevTxDate=new Date(landed);prevTxDate.setMonth(prevTxDate.getMonth()-1);
 const prevTxKey=`${String(prevTxDate.getMonth()+1).padStart(2,'0')}.${prevTxDate.getFullYear()}`;
-const storedPrev=prevStoredRows.get(String(card.suffix));
+let storedPrev=null;try{storedPrev=(await cardHistGetMonth(prevTxKey.replace(/\D/g,''))).find(r=>String(r.suffix)===String(card.suffix)&&Number(r.amount)>0)||null}catch(e){}
 let previousCharge=0;
 if(storedPrev){previousCharge=Number(storedPrev.amount)||0;prevSkipped++}
 else{
@@ -2559,7 +2639,7 @@ else{
 details.push({...card,transactions:read?.transactions||[],previousCharge,previousChargeMonth:chargePageKey})}
 await endProgress();
 // חודשים קודמים שנקראו טרי נשמרים להיסטוריה - הם שיזינו את הדילוג בפעם הבאה.
-if(freshPrev.length)try{await storeCardMonth(freshPrev[0].month,freshPrev)}catch(e){}
+if(freshPrev.length)try{for(const m of new Set(freshPrev.map(c=>c.month)))await storeCardMonth(m,freshPrev.filter(c=>c.month===m))}catch(e){}
 // ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
 return await accountsMutex(async()=>{
 const state=await chrome.storage.local.get({accounts:[],isracardAssignments:{}}),accounts=state.accounts.map(a=>({...a,cards:[...(a.cards||[])]})),assigned=[],unassigned=[];

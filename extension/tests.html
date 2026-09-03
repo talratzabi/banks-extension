@@ -22,7 +22,7 @@ const dash=await get('dashboard.js'), dashHtml=await get('dashboard.html'), ch=a
 // ── פרסינג: כל הקבצים נטענים ──
 for(const [f,txt] of [['background.js',bg],['leumi-content.js',lc],['btb-content.js',btb],
     ['dashboard.js',await get('dashboard.js')],['discount-content.js',await get('discount-content.js')],
-    ['fibi-content.js',await get('fibi-content.js')],['cheque-store.js',await get('cheque-store.js')],['cheque-ocr.js',ocr],['cheque-ledger.js',led]])
+    ['fibi-content.js',await get('fibi-content.js')],['cheque-store.js',await get('cheque-store.js')],['cheque-ocr.js',ocr],['cheque-ledger.js',led],['yahav.js',await get('yahav.js')],['card-history.js',ch]])
   t('פרסינג: '+f,()=>{new Function(txt);return true});
 
 // ── 1.33.4: תאריך דבוק לסכום (btb) ──
@@ -170,21 +170,29 @@ t('חיפוש: הבורר מחובר למסנן ולניקוי',()=>{
    const chromeStub={storage:{local:{
      get:async d=>({cardNewMarks:JSON.parse(JSON.stringify(store.cardNewMarks||d.cardNewMarks))}),
      set:async o=>{store=JSON.parse(JSON.stringify({...store,...o}))}}}};
-   const api=new Function('chrome','cardHistGetMonth','cardHistPut','cardHistDeleteMonths','cardHistPrune','cardHistId','cardTxKey','cardTxCounts',
-     "let cardRunStamp='',cardRunKnown=null,cardRunSeq=0;"+cut(bg,'beginCardRun')+';'+cut(bg,'storeCardMonth')+
+   // 2.1.0: storeCardMonth קורא גם cardHistAll (מוכר בכל חודש), txDayMs ו-NEW_WINDOW_MS (כלל 72 השעות).
+   const api=new Function('chrome','cardHistGetMonth','cardHistPut','cardHistDeleteMonths','cardHistPrune','cardHistId','cardTxKey','cardTxCounts','cardHistAll','txDayMs','NEW_WINDOW_MS',
+     "let cardRunStamp='',cardRunKnown=null,cardRunSeen=null,cardRunSeq=0;"+cut(bg,'beginCardRun')+';'+cut(bg,'storeCardMonth')+
      ';return{beginCardRun,storeCardMonth}')(
      chromeStub,
      async m=>db.filter(r=>String(r.month)===String(m)),
      async r=>{db=db.filter(x=>x.id!==r.id);db.push(JSON.parse(JSON.stringify(r)))},
      async()=>{},async()=>{},(x,m)=>x+'|'+m,
      new Function(cut(ch,'cardTxKey')+';return cardTxKey')(),
-     new Function(cut(ch,'cardTxKey')+';'+cut(ch,'cardTxCounts')+';return cardTxCounts')());
-   return {api,keys:x=>store.cardNewMarks[x]?.keys||[],stamp:x=>store.cardNewMarks[x]?.at||''};
+     new Function(cut(ch,'cardTxKey')+';'+cut(ch,'cardTxCounts')+';return cardTxCounts')(),
+     async()=>db,
+     new Function(cut(bg,'txDayMs')+';return txDayMs')(),
+     eval(bg.match(/const NEW_WINDOW_MS=([^;]+);/)[1]));
+   return {api,keys:x=>store.cardNewMarks[x]?.keys||[],stamp:x=>store.cardNewMarks[x]?.at||'',
+     age:(x,k,ms)=>{store.cardNewMarks[x].firstSeen[k]=new Date(Date.now()-ms).toISOString()}};
  };
  const A={date:'01.08.2026',merchant:'רמי לוי',amount:120,payments:''},
        B={date:'02.08.2026',merchant:'דלק',amount:300,payments:''},
        C={date:'03.08.2026',merchant:'סופר פארם',amount:55,payments:''},
-       D={date:'04.08.2026',merchant:'קפה',amount:18,payments:''};
+       D={date:'04.08.2026',merchant:'קפה',amount:18,payments:''},
+       E={date:'05.08.2026',merchant:'פיצה',amount:60,payments:''},
+       F={date:'06.08.2026',merchant:'ספרים',amount:90,payments:''},
+       today=(()=>{const d=new Date();return{date:`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getFullYear()%100).padStart(2,'0')}`,merchant:'היום',amount:7,payments:''}})();
  let bad=[];
  try{
   const h=build();
@@ -198,12 +206,25 @@ t('חיפוש: הבורר מחובר למסנן ולניקוי',()=>{
 
   h.api.beginCardRun();
   await h.api.storeCardMonth('082026',[{suffix:'1234',transactions:[A,A,B,C]}]);
-  if(!(h.keys('1234').length===1&&h.keys('1234')[0].includes('רמי לוי')))bad.push('כפילות זהה נבלעה: '+JSON.stringify(h.keys('1234')));
+  if(!(h.keys('1234').length===2&&h.keys('1234').some(k=>k.includes('רמי לוי'))))bad.push('כפילות זהה נבלעה: '+JSON.stringify(h.keys('1234')));
 
+  // 2.1.0: סנכרון חוזר בלי חדש **לא** מכבה - "חדש" נשאר 72 שעות מהרגע שנראה לראשונה.
   const before=h.stamp('1234');
   h.api.beginCardRun();
   await h.api.storeCardMonth('082026',[{suffix:'1234',transactions:[A,A,B,C]}]);
-  if(h.keys('1234').length||h.stamp('1234')===before)bad.push('הסימון לא התאפס בסנכרון שאין בו חדש');
+  if(h.keys('1234').length!==2||h.stamp('1234')===before)bad.push('סנכרון חוזר כיבה "חדש" בתוך 72 שעות: '+h.keys('1234').length);
+
+  // ואחרי 72 שעות - נופל.
+  h.age('1234',[...h.keys('1234')].find(k=>k.includes('סופר פארם')),80*3600*1000);
+  h.api.beginCardRun();
+  await h.api.storeCardMonth('082026',[{suffix:'1234',transactions:[A,A,B,C]}]);
+  if(h.keys('1234').some(k=>k.includes('סופר פארם')))bad.push('"חדש" לא פג אחרי 72 שעות');
+
+  // כלל התאריך: עסקה מהיום נצבעת גם בסנכרון ראשון (קו בסיס).
+  const j=build();
+  j.api.beginCardRun();
+  await j.api.storeCardMonth('092026',[{suffix:'5555',transactions:[A,today]}]);
+  if(!(j.keys('5555').length===1&&j.keys('5555')[0].includes('היום')))bad.push('עסקה מהיום לא נצבעה לפי תאריך: '+JSON.stringify(j.keys('5555')));
 
   const g=build();
   g.api.beginCardRun();
@@ -211,12 +232,14 @@ t('חיפוש: הבורר מחובר למסנן ולניקוי',()=>{
   await g.api.storeCardMonth('082026',[{suffix:'9999',transactions:[C,D]}]);
   if(g.keys('9999').length)bad.push('ריצה ראשונה על כמה חודשים צבעה '+g.keys('9999').length);
 
+  // 2.1.0: עסקה שכבר נראתה בחודש אחר (דף 09 חוזר על אוגוסט) אינה "חדש"; חדשה באמת - כן, ובשני חודשים באותה ריצה נצבר.
   g.api.beginCardRun();
-  await g.api.storeCardMonth('072026',[{suffix:'9999',transactions:[A,B,C]}]);
-  await g.api.storeCardMonth('082026',[{suffix:'9999',transactions:[C,D,A]}]);
-  if(g.keys('9999').length!==2)bad.push('שני חודשים באותה ריצה לא נצברו: '+g.keys('9999').length);
+  await g.api.storeCardMonth('072026',[{suffix:'9999',transactions:[A,B,C,E]}]);
+  await g.api.storeCardMonth('082026',[{suffix:'9999',transactions:[C,D,A,F]}]);
+  const gk=g.keys('9999');
+  if(!(gk.length===2&&gk.some(k=>k.includes('פיצה'))&&gk.some(k=>k.includes('ספרים'))))bad.push('חודש חדש צבע עסקאות שכבר נראו: '+JSON.stringify(gk));
  }catch(e){bad.push('חריגה: '+e.message)}
- t('כרטיסים: סימון "חדש" — storeCardMonth האמיתי, שישה תרחישים',()=>!bad.length||bad.join(' · '));
+ t('כרטיסים: סימון "חדש" — storeCardMonth האמיתי, 72 שעות ומוכר בכל חודש',()=>!bad.length||bad.join(' · '));
 }
 
 t('כרטיסים: המפתח מוגדר פעם אחת, והתג מחובר בשני הצדדים',()=>{
@@ -1265,6 +1288,100 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
   // הפרטי ממשיך לחפש רק את שלו
   const pt=bg.slice(bg.indexOf('async function discountPrivateTab'),bg.indexOf('async function discountPrivateTab')+300);
   return /apollo\/retail3/.test(pt)||'הבורר הפרטי כבר אינו מוגבל ל-retail3'});
+
+// -- 2.1.0: "חדש" בבנקים - 72 שעות מהסנכרון האחרון, וגם מה שנראה לראשונה --
+{
+ const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+   if(txt.slice(i-6,i)==='async ')i-=6;
+   let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+   throw new Error('לא נסגרה '+name)};
+ const mk=()=>new Function('const NEW_WINDOW_MS='+bg.match(/const NEW_WINDOW_MS=([^;]+);/)[1]+';'
+   +cut(bg,'accountSyncKey')+';'+cut(bg,'transactionSyncKey')+';'+cut(bg,'txDayMs')+';'+cut(bg,'isRecentNew')+';'+cut(bg,'markNewTransactions')
+   +';return{markNewTransactions,txDayMs}')();
+ t('בנקים: "חדש" נגרר 72 שעות, פג אחרי, ותאריך טרי נצבע גם בקו הבסיס',()=>{
+   const {markNewTransactions}=mk(),d=new Date(),todayStr=`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()%100).padStart(2,'0')}`;
+   const acct=rows=>({source:'discount-private',branch:'011',accountNumber:'1',transactions:rows});
+   const X={date:'02/01/26',action:'עמלה',details:'',reference:'',debit:9,credit:null,balance:100},
+         Y={date:'20/07/26',action:'העברה',details:'',reference:'',debit:50,credit:null,balance:50},
+         Z={date:'15/06/26',action:'הו"ק',details:'',reference:'',debit:200,credit:null,balance:-150},
+         T={date:todayStr,action:'קנייה',details:'',reference:'',debit:30,credit:null,balance:-180};
+   // קו בסיס: אין "נראה לראשונה", רק כלל התאריך.
+   const base=markNewTransactions([],[acct([X,T])],['discount-private'])[0].transactions;
+   if(base[0].isNew||!base[1].isNew)return 'קו בסיס: '+JSON.stringify(base.map(r=>r.isNew));
+   // Y נראתה לפני שעה - נשארת "חדש"; Z חדשה עכשיו; X ישנה.
+   const prev=acct([X,{...Y,isNew:true,newAt:new Date(Date.now()-3600e3).toISOString()}]);
+   const out=markNewTransactions([prev],[acct([X,Y,Z])],['discount-private'])[0].transactions;
+   if(out[0].isNew)return 'X ישנה סומנה';
+   if(!out[1].isNew||out[1].newAt!==prev.transactions[1].newAt)return 'Y איבדה את newAt: '+JSON.stringify(out[1]);
+   if(!out[2].isNew||!out[2].newAt)return 'Z לא סומנה';
+   // Y שנראתה לפני 4 ימים - כבר לא "חדש".
+   const old=acct([X,{...Y,isNew:true,newAt:new Date(Date.now()-4*86400e3).toISOString()}]);
+   const out2=markNewTransactions([old],[acct([X,Y])],['discount-private'])[0].transactions;
+   if(out2[1].isNew)return 'Y מלפני 4 ימים עדיין "חדש"';
+   // מקור שלא סונכרן - לא נוגעים.
+   const skip=markNewTransactions([prev],[acct([X,Y,Z])],['leumi'])[0].transactions;
+   return skip[2].isNew===undefined||'מקור שלא סונכרן סומן'});
+ const yahavSrc=await get('yahav.js');
+ t('בנקים: הסימון ושימור הכרטיסים חלים גם על הבינלאומי, מזרחי, יהב ו-stash של לאומי',()=>{
+   const okFibi=/markNewTransactions\(allNow,\[keepAssignedCards\(allNow,account\)\]/.test(bg);
+   const okMiz=/filter\(a=>a\.source!=='mizrahi'\),\.\.\.markNewTransactions\(state\.accounts,result\.map\(a=>keepAssignedCards/.test(bg);
+   const okYahav=/markNewTransactions\(state\.accounts,\[keepAssignedCards\(state\.accounts,row\)\],\['yahav'\]\)/.test(yahavSrc);
+   const okStash=/\.\.\.list\.map\(a=>keepAssignedCards\(st\.accounts,a\)\)/.test(bg);
+   const okMain=/markedFresh\[i\]=keepAssignedCards\(accountsNow,markedFresh\[i\]\)/.test(bg);
+   return okFibi&&okMiz&&okYahav&&okStash&&okMain||`בינלאומי ${okFibi} · מזרחי ${okMiz} · יהב ${okYahav} · לאומי-stash ${okStash} · syncSelected ${okMain}`});
+}
+
+// -- 2.1.0: כרטיסים לא מזהים חשבון בנק - שני שורשים שנמדדו באחסון --
+{
+ const cut=(txt,name)=>{let i=txt.indexOf('function '+name+'(');if(i<0)throw new Error('לא נמצאה '+name);
+   if(txt.slice(i-6,i)==='async ')i-=6;
+   let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
+   throw new Error('לא נסגרה '+name)};
+ const engine=()=>new Function(
+   "const cardDigits=v=>String(v||'').replace(/\\D/g,'');"+cut(bg,'dayMonthOf')+';'+cut(bg,'previousChargeDayMonth')+';'
+   +cut(bg,'accountForCard')+';'+cut(bg,'keepAssignedCards')+';'+cut(bg,'chargeProbesFromHistory')
+   +';return{accountForCard,keepAssignedCards,chargeProbesFromHistory}')();
+ t('שיוך: סנכרון בנק אינו מוחק כרטיסים שהמנפיק שייך (keepAssignedCards)',()=>{
+   const {keepAssignedCards}=engine();
+   const prev=[{id:'discount-private-011-1',cards:[{suffix:'9238',issuer:'ישראכרט'},{suffix:'9012',issuer:'ישראכרט'}]}];
+   const fresh={id:'discount-private-011-1',transactions:[]};              // דיסקונט מחזיר בלי cards
+   const kept=keepAssignedCards(prev,fresh);
+   if((kept.cards||[]).map(c=>c.suffix).join()!=='9238,9012')return 'נמחקו: '+JSON.stringify(kept.cards);
+   const bank={id:'discount-private-011-1',cards:[{suffix:'9238',issuer:'ישראכרט',amount:1}]}; // הבנק מדווח על אחד - הוא גובר
+   const merged=keepAssignedCards(prev,bank).cards;
+   if(merged.length!==2||merged[0].amount!==1||merged[1].suffix!=='9012')return 'מיזוג שגוי: '+JSON.stringify(merged);
+   const other=keepAssignedCards(prev,{id:'leumi-921-1'});
+   return !other.cards||'חשבון אחר קיבל כרטיסים זרים'});
+ t('שיוך: מסלול 4 סובל את השבת (11 במקום 10), ומסלול 5 עובר על כמה גששים',()=>{
+   const {accountForCard,chargeProbesFromHistory}=engine();
+   const disc={id:'d',accountNumber:'3392534',transactions:[{date:'11/01/26',action:'ישראכרט חיוב',details:'',debit:1900.77},{date:'10/08/26',action:'ישראכרט חיוב',details:'',debit:2585.28}]};
+   const leumi={id:'l',accountNumber:'348300',transactions:[{date:'10.08.2026',action:'ל.מאסטרקרד',details:'',debit:19.9}]};
+   const jan=accountForCard([disc,leumi],{suffix:'4719',chargeDate:'10.2',previousChargeMonth:'01.2026',previousCharge:1900.77});
+   if(jan?.id!=='d')return 'חיוב שנחת ב-11 (שבת) לא זוהה';
+   // הגששים: החדש (09) עוד לא בבנק, הישן (08) כן.
+   const hist=[{suffix:'9238',issuer:'ישראכרט',month:'092026',amount:5},{suffix:'9238',issuer:'ישראכרט',month:'082026',amount:3150.3},{suffix:'9238',issuer:'ישראכרט',month:'072026',amount:2585.28},{suffix:'1111',issuer:'ישראכרט',month:'072026',amount:2585.28}];
+   const probes=chargeProbesFromHistory(hist,'9238',/ישראכרט/i,'ישראכרט','092026');
+   if(probes.map(p=>p.monthKey).join()!=='09.2026,08.2026')return 'סדר/סינון גששים: '+JSON.stringify(probes);
+   const card={suffix:'9238',chargeDate:'10.9',previousChargeMonth:'09.2026',previousCharge:3150.3,bankChargeProbes:probes};
+   const hit=accountForCard([disc,leumi],card);
+   if(hit?.id!=='d')return 'הגשש השני לא ניסה: '+JSON.stringify(hit);
+   // שני חשבונות עם אותו חיוב - לא יודעים.
+   const twin={...disc,id:'d2'};
+   return accountForCard([disc,twin],card)===null||'שיוך לא חד-ערכי התקבל'});
+ t('ישראכרט: "החיוב הקודם" הוא זה שכבר נחת - חודש קודם לפני יום החיוב',()=>{
+   const run=bg.slice(bg.indexOf('async function runIsracard'),bg.indexOf('const CAL_HOME='));
+   if(/prevStoredRows/.test(run))return 'עדיין קורא את החודש הקודם ללא קשר ליום החיוב';
+   if(!/if\(new Date\(\)\.getDate\(\)<chargeDay\)landed\.setMonth\(landed\.getMonth\(\)-1\)/.test(run))return 'אין הכרעה לפי יום החיוב';
+   if(!/previousChargeMonth:chargePageKey/.test(run))return 'previousChargeMonth אינו חודש הנחיתה';
+   return /for\(const m of new Set\(freshPrev\.map\(c=>c\.month\)\)\)/.test(run)||'freshPrev נשמר לחודש אחד בלבד'});
+ t('שיוך: כרטיס יתום (דווח ע"י המנפיק, לא בשום חשבון) חוזר לתור השיוך; מוסתר לא חוזר',()=>{
+   const start=bg.indexOf('async function reconcileUnassignedCards'),rec=bg.slice(start,bg.indexOf('chrome.storage.onChanged.addListener',start));
+   return /LAST=\{isracardUnassigned:'isracardLastCards',calUnassigned:'calLastCards',maxUnassigned:'maxLastCards'\}/.test(rec)
+     &&/hiddenCards/.test(rec)&&/isHidden\(s\)\|\|inAccount\(s\)/.test(rec)&&/bankChargeProbes=probes/.test(rec)
+     ||'הטיפול ביתומים או בגששים המרובים חסר'});
+ t('דשבורד: כרטיס משויך מציג "מחויב מחשבון <בנק> <סניף-חשבון>"',()=>
+   /מחויב מחשבון \$\{esc\(a\.sourceLabel\|\|''\)\} \$\{esc\(a\.branch\)\}-\$\{esc\(a\.accountNumber\)\}/.test(dash)||'המחרוזת לא נמצאה');
+}
 
 // ── סיכום ──
 const ul=document.getElementById('out');
