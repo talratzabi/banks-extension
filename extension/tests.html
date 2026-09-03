@@ -1442,6 +1442,17 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    if(!/pendingFibiSlot==='auto'/.test(fn)||!/a\.accountNumber===s\.data\.accountNumber\)/.test(fn))return 'syncFibi אינו פותר את auto לפי מספר החשבון';
    // הפתרון חייב לקרות לפני בדיקת "אותו חשבון בחיבור האחר"
    return fn.indexOf("pendingFibiSlot==='auto'")<fn.indexOf('זהו אותו חשבון שכבר נשמר')||'הפתרון מאוחר מדי'});
+ // -- 2.3.5: "נמצא חיבור פעיל למרות שאין" - הלשונית נבדקת חי ולא לפי כתובת --
+ t('בינלאומי: לשונית על /shell/#/ נחשבת מחוברת רק אם FIBI_SUMMARY מחזיר מספר חשבון',()=>{
+   const s=bg.indexOf('async function startFibi'),fn=bg.slice(s,bg.indexOf('async function openFibiSchedule',s));
+   if(!/fibiRead\(connected\.id,'FIBI_SUMMARY'/.test(fn))return 'אין אימות חי';
+   if(!/alive=!!r\?\.data\?\.accountNumber/.test(fn))return 'האימות אינו דורש מספר חשבון';
+   if(!/if\(alive\)\{await returnToDashboard\(connected\.id,true\);syncFibi\(connected\.id\)/.test(fn))return 'הסנכרון רץ גם על לשונית שלא אומתה';
+   if(!/fibiConnectedProbe:\{\.\.\.probe,alive,why\}/.test(fn))return 'אין גשש למדידה';
+   // כשהאימות נכשל - נפתח חלון התחברות (הקוד ממשיך ל-openLoginWindow), ולא נעצר
+   const after=fn.slice(fn.indexOf('if(!connected)await chrome.storage.local.set'));
+   if(!/openLoginWindow\(\{url:FIBI_LOGIN/.test(after))return 'אחרי אימות שנכשל לא נפתח חלון התחברות';
+   return /syncing_connected',tab:\{title:probe\.title,windowId:probe\.windowId\}/.test(fn)&&/אומת: הדף מציג מספר חשבון/.test(dash)||'ההודעה לא אומרת מה אומת'});
  t('דשבורד: כרטיס משויך מציג "מחויב מחשבון <בנק> <סניף-חשבון>"',()=>
    /מחויב מחשבון \$\{esc\(a\.sourceLabel\|\|''\)\} \$\{esc\(a\.branch\)\}-\$\{esc\(a\.accountNumber\)\}/.test(dash)||'המחרוזת לא נמצאה');
 }
