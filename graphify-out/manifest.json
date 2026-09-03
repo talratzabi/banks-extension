@@ -1,8 +1,8 @@
 {
   "extension/background.js": {
-    "mtime": 1788450228.5144384,
-    "seen": 1788450441.4998806,
-    "ast_hash": "4a427b5c953f2f498c98eecb19f63ffc",
+    "mtime": 1788450684.6660008,
+    "seen": 1788450768.5722806,
+    "ast_hash": "b93e4eadbc947d6a0b6c155d2aa574b2",
     "semantic_hash": ""
   },
   "extension/btb-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1788450228.5144384,
-    "seen": 1788450441.4998806,
-    "ast_hash": "04b1ab687fb62c1006fe0c7d0e3aae3e",
+    "mtime": 1788450684.6670077,
+    "seen": 1788450768.5722806,
+    "ast_hash": "e91af3975c94e6237407b0f752223d7c",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -72,9 +72,9 @@
     "semantic_hash": ""
   },
   "extension/mizrahi-content.js": {
-    "mtime": 1787890856.653423,
-    "seen": 1787902538.2787333,
-    "ast_hash": "a1d5abe6068fbca9d4d6a50de39126d1",
+    "mtime": 1788450684.6670077,
+    "seen": 1788450768.5722806,
+    "ast_hash": "a9ca0b6a2e22643d16437aac5df380dd",
     "semantic_hash": ""
   },
   "extension/poalim-content.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1788450434.66391,
-    "seen": 1788450441.4998806,
-    "ast_hash": "133b13a471374eb8030be7981d669d31",
+    "mtime": 1788450759.8019562,
+    "seen": 1788450768.5722806,
+    "ast_hash": "8521a9789b218a6f62cd869fec20e983",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
