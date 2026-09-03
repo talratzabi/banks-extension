@@ -1337,7 +1337,7 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    if(txt.slice(i-6,i)==='async ')i-=6;
    let d=0;for(let k=txt.indexOf('{',i);k<txt.length;k++){if(txt[k]==='{')d++;else if(txt[k]==='}'&&!--d)return txt.slice(i,k+1)}
    throw new Error('לא נסגרה '+name)};
- const yahavSrc2=await get('yahav.js');
+ const yahavSrc2=await get('yahav.js'),fibiSrc=await get('fibi-content.js');
  const engine=()=>new Function(
    "const cardDigits=v=>String(v||'').replace(/\\D/g,'');"+cut(bg,'dayMonthOf')+';'+cut(bg,'previousChargeDayMonth')+';'
    +cut(bg,'accountForCard')+';'+cut(bg,'keepAssignedCards')+';'+cut(bg,'chargeProbesFromHistory')
@@ -1453,6 +1453,22 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    const after=fn.slice(fn.indexOf('if(!connected)await chrome.storage.local.set'));
    if(!/openLoginWindow\(\{url:FIBI_LOGIN/.test(after))return 'אחרי אימות שנכשל לא נפתח חלון התחברות';
    return /syncing_connected',tab:\{title:probe\.title,windowId:probe\.windowId\}/.test(fn)&&/אומת: הדף מציג מספר חשבון/.test(dash)||'ההודעה לא אומרת מה אומת'});
+ // -- 2.3.6: "הבינלאומי מצא את כל התנועות כחדשות" - מפתח תנועה סובלני לפורמט --
+ t('בנקים: אותה תנועה בשני פורמטים של המסך החדש מקבלת מפתח זהה; בלי אסמכתא - הפעולה מכריעה',()=>{
+   const K=new Function(cut(bg,'transactionSyncKey')+';return transactionSyncKey')();
+   const a={date:'21.06.2026',action:'ריבית על הלוואה 28/05 00650',details:'',reference:'65000',debit:263.6,credit:null,balance:10143.74};
+   const b={date:'21/06/2026',action:'00650 28/05 ריבית על הלוואה',details:'',reference:'65000',debit:263.6,credit:null,balance:null};
+   if(K(a)!==K(b))return 'שני הפורמטים של אותה שורה קיבלו מפתח שונה';
+   if(K(a)===K({...a,debit:263.7}))return 'סכום שונה קיבל אותו מפתח';
+   if(K(a)===K({...a,reference:'65001'}))return 'אסמכתא שונה קיבלה אותו מפתח';
+   const c={date:'01.09.26',action:'הוראת-קבע',details:'',reference:'',debit:200,credit:null,balance:1},d2={...c,action:'הוראת  קבע'};
+   if(K(c)===K(d2))return 'בלי אסמכתא - פעולה שונה קיבלה אותו מפתח';
+   if(K(c)!==K({...c,balance:2}))return 'היתרה עדיין חלק מהמפתח';
+   return /const fibiKey=x=>transactionSyncKey\(/.test(bg)||'מונה החדשות של הבינלאומי עדיין במפתח משלו'});
+ t('בינלאומי: תאריך המסך החדש מנורמל לנקודות, וקריאה של פחות ממחצית מהשמור נדחית',()=>{
+   const fc=fibiSrc;
+   if(!/date:\(\(dateCell\.match\(DATE\)\|\|\[dateCell\]\)\[0\]\)\.replace\(\/\[\\\/@-\]\/g,'\.'\)/.test(fc))return 'התאריך במסך החדש אינו מנורמל';
+   return /savedN>=20&&rows\.length<savedN\*0\.5\)newReport\.rejected=/.test(bg)&&/else if\(rows\.length\)\{newTx=/.test(bg)||'אין שומר נגד קריאה חלקית'});
  t('דשבורד: כרטיס משויך מציג "מחויב מחשבון <בנק> <סניף-חשבון>"',()=>
    /מחויב מחשבון \$\{esc\(a\.sourceLabel\|\|''\)\} \$\{esc\(a\.branch\)\}-\$\{esc\(a\.accountNumber\)\}/.test(dash)||'המחרוזת לא נמצאה');
 }

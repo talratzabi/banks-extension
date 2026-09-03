@@ -309,7 +309,10 @@ function newTransactions(){
       balance=moneyCells.length?money(moneyCells[moneyCells.length-1]):null;
       if(moneyCells.length>1)debit=money(moneyCells[moneyCells.length-2]);
     }
-    out.push({date:(dateCell.match(DATE)||[dateCell])[0],action,details:'',reference,debit,credit,balance,isNew:false});
+    // ⚠ 03.09.2026 - נמדד ביומן האחסון: קריאה אחת מהמסך החדש החזירה "21/06/2026"
+    // וקריאה אחרת "21.06.2026" לאותה שורה - וכל 89 התנועות נצבעו "חדש". התאריך
+    // מנורמל לצורת המסך הישן (נקודות), כדי שמפתח התנועה יהיה זהה בכל קריאה.
+    out.push({date:((dateCell.match(DATE)||[dateCell])[0]).replace(/[\/@-]/g,'.'),action,details:'',reference,debit,credit,balance,isNew:false});
   }
   // ⚠⚠ נמדד: המסך החדש מחזיר סניף **`062`** בעוד המסלול הישן החזיר **`62`**.
   // ה-`id` וה-`selectionKey` נגזרים מן הסניף (`fibi-1-62-206601`), ולכן שינוי

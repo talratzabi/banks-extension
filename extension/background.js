@@ -1245,7 +1245,21 @@ selectedAccountKeys:finalKeys,accountFilter:'both',syncStatus:`${baseStatus}${ne
   }catch(e){await chrome.storage.local.set({syncStatus:e.message===ABORT_MESSAGE?`${ABORT_MESSAGE} — מה שנקרא עד כאן נשמר`:`שגיאה: ${e.message}`});throw e}finally{running=false;await markSyncInFlight(false);await endProgress();await clearAbort();await restoreSyncTabs()}
 }
 function accountSyncKey(a){return`${a?.source||'business'}|${a?.branch||''}-${a?.accountNumber||''}`}
-function transactionSyncKey(t){return JSON.stringify([t?.date||'',t?.action||'',t?.details||'',t?.reference||'',Number(t?.debit)||0,Number(t?.credit)||0,t?.balance==null?'':Number(t.balance)])}
+// ⚠⚠ 03.09.2026 - טל: "הבינלאומי חיבור 1 מצא את כל התנועות כחדשות למרות שהיו
+// תנועות עבר שמורות." נמדד ביומן האחסון (שלוש גרסאות עוקבות של accounts):
+//   14:16  89 שורות  "21.06.2026" · "ריבית על הלוואה 28/05 00650" · balance 10143.74
+//   14:26  30 שורות  "21/06/2026" · "00650 28/05 ריבית על הלוואה" · balance null
+//   14:29  89 שורות  "21.06.2026" · …                                       -> 89 "חדש"
+// אותה תנועה, שני ענפי קריאה של המסך החדש: תאריך בלוכסנים, מילות התיאור
+// בסדר הפוך, יתרה חסרה. המפתח הישן כלל את שלושתם ולכן נשבר. עכשיו: כשיש
+// אסמכתא - המפתח הוא תאריך (מנורמל) + אסמכתא + חובה + זכות; בלי אסמכתא -
+// תאריך + פעולה + פרטים + סכומים. היתרה אינה חלק מהמפתח בשום מקרה.
+function transactionSyncKey(t){
+  const date=String(t?.date||'').trim().replace(/[\/@-]/g,'.'),ref=String(t?.reference||'').replace(/\D/g,''),debit=Number(t?.debit)||0,credit=Number(t?.credit)||0;
+  if(ref)return JSON.stringify([date,ref,debit,credit]);
+  const norm=v=>String(v||'').replace(/\s+/g,' ').trim();
+  return JSON.stringify([date,norm(t?.action),norm(t?.details),debit,credit]);
+}
 // ⚠⚠ 03.09.2026 - טל: "שיוצגו רק התנועות החדשות עם המילה חדש ... רק של ה-72
 // שעות האחרונות מהסנכרון האחרון. גם תנועה שמופיעה בפעם הראשונה."
 // עד כאן הדגל חושב מחדש בכל סנכרון: מה שלא היה שמור = חדש, וכל השאר כבוי.
@@ -1410,7 +1424,12 @@ async function syncFibi(tabId){noteSyncTab(tabId);
         newReport={opened,rng,rows:rows.length,headers:dg.headers||[],aligned:dg.aligned,rawSample:dg.rawSample||[]};
         // ⚠ האבחון נשאר בדוח ואינו נכנס לחשבון; קודם נשמרו בו
         // `headers`/`rawSample`/`rowCount` כשדות זרים.
-        if(rows.length){newTx={...read.data};delete newTx.__diag;}
+        // ⚠ 03.09.2026 - נמדד: קריאה מהמסך החדש החזירה 30 שורות במקום 89 (הטווח
+        // לא הוחל - "תנועות אחרונות") והחליפה את כל השמור. קריאה שמחזירה פחות
+        // ממחצית מהשמור נדחית, והמסלול הישן (עם הדפדוף) רץ במקומה.
+        const savedN=(savedFibi?.transactions||[]).length;
+        if(rows.length&&savedN>=20&&rows.length<savedN*0.5)newReport.rejected=`${rows.length} שורות מול ${savedN} שמורות — נופלים למסך הישן`;
+        else if(rows.length){newTx={...read.data};delete newTx.__diag;}
       }else newReport={opened};
       await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),...newReport}});
     }catch(e){try{await chrome.storage.local.set({fibiNewScreen:{at:new Date().toISOString(),error:String(e?.message||e).slice(0,120)}})}catch(e2){}}
@@ -1484,7 +1503,7 @@ async function syncFibi(tabId){noteSyncTab(tabId);
     await accountsMutex(async()=>{
     const allNow=((await chrome.storage.local.get({accounts:[]})).accounts)||[],accounts=allNow.filter(a=>a.source!==source);accounts.push(markNewTransactions(allNow,[keepAssignedCards(allNow,account)],[account.source||source])[0]);const names=(await chrome.storage.local.get({fibiConnectionNames:{}})).fibiConnectionNames;names[source]=owner.firstName||t.data.accountNumber;
     // "אין נתונים חדשים" - השוואת מפתחות מול השמור, אותו מפתח כמו דדופ הדפדוף.
-    const fibiKey=x=>`${x.date}|${x.reference||''}|${x.debit??''}|${x.credit??''}|${x.description||x.action||''}`;
+    const fibiKey=x=>transactionSyncKey({...x,action:x.description||x.action||''});   // 2.3.6: אותו מפתח סובלני כמו בסימון "חדש"
     const savedKeys=new Set(((savedFibi&&savedFibi.transactions)||[]).map(fibiKey));
     const freshFibi=(t.data.transactions||[]).filter(x=>!savedKeys.has(fibiKey(x))).length;
     await chrome.storage.local.set({accounts,fibiConnectionNames:names,pendingFibiSlot:'',syncStatus:`${label} סונכרן בהצלחה${savedFibi?(freshFibi?` — ${freshFibi} תנועות חדשות`:' — אין נתונים חדשים'):''}${fibiBalSame&&(savedFibi.loans||[]).length?' · ההלוואות מהמסד':''}`,lastAutoSync:now});});await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage();
