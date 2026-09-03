@@ -1413,9 +1413,14 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    // 2.3.1: נסגרות רק לשוניות שהתוסף פתח - כל פותחי חלון ההתחברות עוברים דרך openLoginWindow
    if(/chrome\.windows\.create\(\{url:/.test(bg)||/chrome\.windows\.create\(\{url:/.test(yv))return 'יש פותח חלון התחברות שאינו רושם את הלשונית';
    if(!/filter\(id=>openedByExtension\.has\(id\)\)/.test(bg))return 'closeSyncTabs אינו מסנן ללשוניות שהתוסף פתח';
-   if(!/openedByExtension\.delete\(id\)/.test(bg))return 'לשונית שנסגרה לא מוסרת מהרישום';
+   if(!/unmarkOpened\(id\)/.test(bg.slice(bg.indexOf('chrome.tabs.onRemoved.addListener'),bg.indexOf('chrome.tabs.onRemoved.addListener')+300)))return 'לשונית שנסגרה לא מוסרת מהרישום';
    // 2.3.3: לשונית שהאתר פתח מתוך הפופאפ (openerTabId) נחשבת של התוסף, ונסגרת יחד עם הפופאפ שהוליד אותה
-   if(!/tabs\.onCreated\.addListener\(t=>\{if\(Number\.isInteger\(t\?\.id\)&&Number\.isInteger\(t\?\.openerTabId\)&&openedByExtension\.has\(t\.openerTabId\)\)/.test(bg))return 'לשונית-בת של הפופאפ אינה נרשמת';
+   if(!/tabs\.onCreated\.addListener\(async t=>\{[^}]*await loadOpened\(\);if\(openedByExtension\.has\(t\.openerTabId\)\)await markOpened\(t\.id,t\.openerTabId\)/.test(bg))return 'לשונית-בת של הפופאפ אינה נרשמת';
+   // 2.3.4: הרישום שורד הירדמות של ה-service worker - נשמר ב-chrome.storage.session, ונטען לפני כל סגירה
+   if(!/chrome\.storage\.session\.set\(\{openedTabs:o\}\)/.test(bg)||!/chrome\.storage\.session\.get\(\{openedTabs:\{\}\}\)/.test(bg))return 'הרישום אינו נשמר ב-storage.session';
+   const cs=bg.slice(bg.indexOf('async function closeSyncTabs'),bg.indexOf('async function closeSyncTabs')+200);
+   if(!/await loadOpened\(\);/.test(cs))return 'closeSyncTabs אינו טוען את הרישום מהאחסון לפני הסגירה';
+   if(!/await markOpened\(t\.id\)/.test(bg.slice(bg.indexOf('async function openLoginWindow'),bg.indexOf('async function openLoginWindow')+250)))return 'openLoginWindow אינו שומר לאחסון';
    if(!/noted\.map\(id=>openedParent\.get\(id\)\)\.filter\(p=>openedByExtension\.has\(p\)\)/.test(bg))return 'הפופאפ שהוליד את הלשונית אינו נסגר';
    // restoreSyncTabs (finally) מנקה את הרישום, כדי ששגיאה לא תשאיר לשונית לסגירה ע"י מסלול אחר
    const rs=bg.slice(bg.indexOf('async function restoreSyncTabs'),bg.indexOf('async function restoreSyncTabs')+120);

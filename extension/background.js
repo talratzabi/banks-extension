@@ -404,7 +404,7 @@ const mizrahiFrameData=new Map();
 // **הסימן אם זה מתממש: סנכרון שנתקע או מחזיר טבלה ריקה, בלי שרואים דפדוף.**
 // אם יקרה — לחזור ל-windows.create({tabId,focused:false}) שהיה כאן.
 const returnedToDashboard=new Set();
-chrome.tabs.onRemoved.addListener(id=>{returnedToDashboard.delete(id);detachedForSync.delete(id);openedByExtension.delete(id);syncTabsToClose.delete(id);openedParent.delete(id)});
+chrome.tabs.onRemoved.addListener(id=>{returnedToDashboard.delete(id);detachedForSync.delete(id);syncTabsToClose.delete(id);unmarkOpened(id).catch(()=>{})});
 // לשוניות שהוצאו לחלון עבודה נפרד, ויחזרו לחלון הראשי כשהסנכרון ייגמר.
 const detachedForSync=new Set();
 // ⚠ 03.09.2026 - טל: "בסיום הסנכרון שנגמר בהצלחה שייסגר הדף של הבנק או חברת
@@ -417,7 +417,18 @@ const detachedForSync=new Set();
 // מלחיצה בדשבורד (openLoginWindow). לשונית שהמשתמש פתח בעצמו, גם אם הסנכרון
 // רץ עליה והצליח, נשארת.
 const openedByExtension=new Set();
-async function openLoginWindow(opts){const w=await chrome.windows.create(opts);for(const t of w?.tabs||[])if(Number.isInteger(t.id))openedByExtension.add(t.id);return w}
+// ⚠⚠ 03.09.2026 - טל: "לוחץ על חיבור 1 והוא רושם שנמצא חיבור פעיל למרות שאין
+// אחד כזה." נמדד באחסון: הסנכרון של חיבור 1 **הצליח** ב-14:11 (6 תנועות
+// חדשות) - כלומר לשונית מחוברת כן הייתה, בחלון שטל לא רואה: שריד מסנכרון
+// קודם שלא נסגר. ולמה לא נסגר? service worker של MV3 נרדם אחרי ~30 שניות
+// חוסר פעילות, וההתחברות באתר לוקחת דקות. ה-Set בזיכרון נמחק לפני שהסנכרון
+// הסתיים, ו-closeSyncTabs לא הכיר את הלשונית. לכן הרישום נשמר גם ב-
+// chrome.storage.session: שורד הירדמות, נמחק בסגירת הדפדפן (כמו הלשוניות).
+async function loadOpened(){try{const s=await chrome.storage.session.get({openedTabs:{}});for(const [id,p] of Object.entries(s.openedTabs||{})){openedByExtension.add(Number(id));if(Number.isInteger(p))openedParent.set(Number(id),p)}}catch(e){}}
+async function saveOpened(){try{const o={};for(const id of openedByExtension)o[id]=openedParent.get(id)??null;await chrome.storage.session.set({openedTabs:o})}catch(e){}}
+async function markOpened(id,parent){await loadOpened();openedByExtension.add(id);if(Number.isInteger(parent))openedParent.set(id,parent);await saveOpened()}
+async function unmarkOpened(id){await loadOpened();openedByExtension.delete(id);openedParent.delete(id);await saveOpened()}
+async function openLoginWindow(opts){const w=await chrome.windows.create(opts);for(const t of w?.tabs||[])if(Number.isInteger(t.id))await markOpened(t.id);return w}
 // ⚠ 03.09.2026 - טל: "בבינלאומי לא נפתח פופאפ, נפתחת לשונית לצד התוסף."
 // נמדד בקוד: startFibi כן פותח פופאפ (openLoginWindow) - אבל **האתר** פותח את
 // הפורטל בלשונית חדשה (window.open מדף ההתחברות), ו-Chrome מציב אותה בחלון
@@ -425,13 +436,14 @@ async function openLoginWindow(opts){const w=await chrome.windows.create(opts);f
 // (openerTabId), ולכן היא נחשבת "נפתחה ע"י התוסף" ונסגרת בהצלחה יחד עם
 // הפופאפ שהוליד אותה. לשונית בלי opener מוכר - נשארת.
 const openedParent=new Map();
-chrome.tabs.onCreated.addListener(t=>{if(Number.isInteger(t?.id)&&Number.isInteger(t?.openerTabId)&&openedByExtension.has(t.openerTabId)){openedByExtension.add(t.id);openedParent.set(t.id,t.openerTabId)}});
+chrome.tabs.onCreated.addListener(async t=>{if(!Number.isInteger(t?.id)||!Number.isInteger(t?.openerTabId))return;await loadOpened();if(openedByExtension.has(t.openerTabId))await markOpened(t.id,t.openerTabId)});
 const syncTabsToClose=new Set();
 function noteSyncTab(id){if(Number.isInteger(id))syncTabsToClose.add(id)}
 async function closeSyncTabs(){
+  await loadOpened();
   const noted=[...syncTabsToClose].filter(id=>openedByExtension.has(id));syncTabsToClose.clear();
   const ids=[...new Set([...noted,...noted.map(id=>openedParent.get(id)).filter(p=>openedByExtension.has(p))])];
-  for(const id of ids){detachedForSync.delete(id);returnedToDashboard.delete(id);try{await chrome.tabs.remove(id)}catch{}}
+  for(const id of ids){detachedForSync.delete(id);returnedToDashboard.delete(id);try{await chrome.tabs.remove(id)}catch{}await unmarkOpened(id)}
   return ids.length;
 }
 async function restoreSyncTabs(){
