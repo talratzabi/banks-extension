@@ -1,8 +1,8 @@
 {
   "extension/background.js": {
-    "mtime": 1788435409.9835184,
-    "seen": 1788435527.5278661,
-    "ast_hash": "3c03d76255d0e4c9123ca451833e2556",
+    "mtime": 1788449411.6564505,
+    "seen": 1788449553.378924,
+    "ast_hash": "3f70569436473c22aec3d671598f191f",
     "semantic_hash": ""
   },
   "extension/btb-content.js": {
@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "extension/manifest.json": {
-    "mtime": 1788435413.0606933,
-    "seen": 1788435527.5278661,
-    "ast_hash": "37ee804c45bd23b2d0ef71e275d567ef",
+    "mtime": 1788449411.6564505,
+    "seen": 1788449553.378924,
+    "ast_hash": "b7e3aa6ca27c396f2b4813e7ef64db78",
     "semantic_hash": ""
   },
   "extension/max-content.js": {
@@ -78,9 +78,9 @@
     "semantic_hash": ""
   },
   "extension/poalim-content.js": {
-    "mtime": 1787890856.653423,
-    "seen": 1787902538.2787333,
-    "ast_hash": "aa18babab0ff43a8d1c3049ae0543843",
+    "mtime": 1788449383.254049,
+    "seen": 1788449553.378924,
+    "ast_hash": "be03d4da740e19a102bc355308c4da2d",
     "semantic_hash": ""
   },
   "extension/popup.js": {
@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "HANDOFF.md": {
-    "mtime": 1788435457.2924378,
-    "seen": 1788435527.5278661,
-    "ast_hash": "ab5ef08fa8e91ab4b13e26dba6443d10",
+    "mtime": 1788449535.5770893,
+    "seen": 1788449553.378924,
+    "ast_hash": "2f960b624fa141289e80172b6a692696",
     "semantic_hash": ""
   },
   "PROJECT-HISTORY-AND-RULES.md": {
