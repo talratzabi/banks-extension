@@ -2591,8 +2591,19 @@ const MIZRAHI_LOGIN='https://www.mizrahi-tefahot.co.il/login/index.html#/login-h
 // פותח את חלונית ההתחברות של הבנק. המשתמש מקליד — התוסף רק פותח את הדלת.
 // נמדד 17.08.2026: a#logInBtn[href="#logInModal"] · click() רגיל מספיק · החלונית div#logInModal
 // עוברת display:none→block ומטעינה iframe#iframeLogIn עם login/index.html.
+// ⚠⚠ 03.09.2026 - טל: "אין סנכרון במזרחי" (ניסיון 18:48). נמדד ביומן האחסון,
+// לפי סדר הכתיבה: "פותח את חלון ההתחברות" -> "קובע את טווח התאריכים" (הסנכרון
+// כבר רץ! הלשונית שנפתחה על עמוד הבית עברה לבד ל-/OnlineApp/ כי הסשן היה
+// חי, ו-MIZRAHI_AUTHENTICATED הפעיל את runMizrahi) -> בורר הטווח נלחץ בהצלחה ->
+// "ממתין להתחברות — נפתח דף ההתחברות" (**הנפילה לאחור כאן ניווטה את אותה
+// לשונית לדף ההתחברות באמצע הסנכרון**) -> "פרטי החשבון הפעיל לא זוהו (הלשונית
+// עמדה על …/login/…)". הניסיון השני, דקה אחר כך, הצליח (49 תנועות).
+// לכן: לשונית שכבר הגיעה ל-mto.mizrahi-tefahot.co.il אינה נוגעים בה - לא
+// לוחצים בה ולא מנווטים אותה. הסנכרון כבר בדרך.
+async function mizrahiPortalTab(tabId){try{return /mto\.mizrahi-tefahot\.co\.il/.test((await chrome.tabs.get(tabId)).url||'')}catch{return false}}
 async function openMizrahiLogin(tabId){
   for(let attempt=0;attempt<6;attempt++){
+    if(await mizrahiPortalTab(tabId))return true;
     let state='';
     try{const [r]=await chrome.scripting.executeScript({target:{tabId},func:()=>{
       const modal=document.querySelector('#logInModal');
@@ -2606,11 +2617,17 @@ async function openMizrahiLogin(tabId){
     await delay(1200);
   }
   // נפילה לאחור: דף ההתחברות עומד בפני עצמו, בלי תלות ב-DOM של עמוד הבית.
+  // ⚠ אבל לא על לשונית שכבר מחוברת או שסנכרון רץ עליה - זה מה שהפיל את 18:48.
+  if(mizrahiBusy||await mizrahiPortalTab(tabId))return true;
   await chrome.tabs.update(tabId,{url:MIZRAHI_LOGIN});
   return false;
 }
 let mizrahiBusy=false;
-async function mizrahiTab(){const tabs=await chrome.tabs.query({url:['https://mto.mizrahi-tefahot.co.il/OnlineApp/*']});return tabs.find(t=>t.url?.includes('/OnlineApp/'))||null}
+// ⚠ 03.09.2026 - נמדד ב-mizrahiRangeProbe: דף התנועות יושב היום על
+// mto.mizrahi-tefahot.co.il/ngOnline/index.html#/main/uis/osh/p428New/ (הכתובת
+// הישנה /OnlineApp/osh/legacy/… מפנה לשם). לשונית מחוברת שעומדת על /ngOnline/
+// לא נמצאה, ו-startMizrahi פתח לשונית חדשה במקום להשתמש בה.
+async function mizrahiTab(){const tabs=await chrome.tabs.query({url:['https://mto.mizrahi-tefahot.co.il/OnlineApp/*','https://mto.mizrahi-tefahot.co.il/ngOnline/*']});return tabs.find(t=>/\/(OnlineApp|ngOnline)\//.test(t.url||''))||null}
 async function prepareMizrahi(tabId){await delay(900);try{await chrome.scripting.executeScript({target:{tabId,allFrames:true},files:['mizrahi-content.js']})}catch{try{await chrome.scripting.executeScript({target:{tabId},files:['mizrahi-content.js']})}catch{}}await delay(500)}
 /* ⚠⚠ 25.08.2026 — טל: „יש חשבון אחד וצריך לוודא שבורר התאריך עובד."
    **הכשל שנמדד:** הפונקציה לחצה תמיד „3 חודשים אחרונים" ולא קראה
