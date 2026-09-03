@@ -1416,8 +1416,12 @@ t('דיסקונט: בורר הלשונית העסקי אינו תופס את ה�
    if(!/unmarkOpened\(id\)/.test(bg.slice(bg.indexOf('chrome.tabs.onRemoved.addListener'),bg.indexOf('chrome.tabs.onRemoved.addListener')+300)))return 'לשונית שנסגרה לא מוסרת מהרישום';
    // 2.3.3: לשונית שהאתר פתח מתוך הפופאפ (openerTabId) נחשבת של התוסף, ונסגרת יחד עם הפופאפ שהוליד אותה
    if(!/tabs\.onCreated\.addListener\(async t=>\{[^}]*await loadOpened\(\);if\(openedByExtension\.has\(t\.openerTabId\)\)await markOpened\(t\.id,t\.openerTabId\)/.test(bg))return 'לשונית-בת של הפופאפ אינה נרשמת';
-   // 2.3.4: הרישום שורד הירדמות של ה-service worker - נשמר ב-chrome.storage.session, ונטען לפני כל סגירה
-   if(!/chrome\.storage\.session\.set\(\{openedTabs:o\}\)/.test(bg)||!/chrome\.storage\.session\.get\(\{openedTabs:\{\}\}\)/.test(bg))return 'הרישום אינו נשמר ב-storage.session';
+   // 2.3.4: הרישום שורד הירדמות של ה-service worker - נשמר באחסון, ונטען לפני כל סגירה.
+   // 2.3.8: ב-storage.local ולא session - טעינה מחדש של התוסף מחקה את הרישום (פועלים פרטי לא נסגר).
+   //        ונמחק ב-onStartup, כי מזהי לשוניות מתחילים מחדש עם הדפדפן.
+   if(!/chrome\.storage\.local\.set\(\{openedTabs:o\}\)/.test(bg)||!/chrome\.storage\.local\.get\(\{openedTabs:\{\}\}\)/.test(bg))return 'הרישום אינו נשמר ב-storage.local';
+   if(/chrome\.storage\.session\.(set|get)\(/.test(bg))return 'הרישום עדיין נוגע ב-storage.session';
+   if(!/onStartup\.addListener\([^\r\n]*openedTabs:\{\}/.test(bg))return 'onStartup אינו מוחק את רישום הלשוניות';
    const cs=bg.slice(bg.indexOf('async function closeSyncTabs'),bg.indexOf('async function closeSyncTabs')+200);
    if(!/await loadOpened\(\);/.test(cs))return 'closeSyncTabs אינו טוען את הרישום מהאחסון לפני הסגירה';
    if(!/await markOpened\(t\.id\)/.test(bg.slice(bg.indexOf('async function openLoginWindow'),bg.indexOf('async function openLoginWindow')+250)))return 'openLoginWindow אינו שומר לאחסון';
