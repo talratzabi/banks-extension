@@ -1,16 +1,16 @@
 # Graph Report - banks-extension  (2026-09-04)
 
 ## Corpus Check
-- 35 files · ~188,561 words
+- 35 files · ~189,010 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1306 nodes · 2210 edges · 109 communities (92 shown, 17 thin omitted)
+- 1307 nodes · 2211 edges · 109 communities (92 shown, 17 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 13 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `de223bed`
+- Built from commit: `10846a23`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -175,7 +175,7 @@ Nodes (70): accountKinds, accounts, agoText(), attributeStatus(), balanceLinkSty
 
 ### Community 6 - "HANDOFF.md"
 Cohesion: 0.02
-Nodes (81): 1.33.1 — הריבית האמיתית בטבלה, ואריח BTB שפתח את פועלים, 1.33.2 — התאריך שלא נקרא, וההפלה השקטה של כל השאר, 1.33.3 — „הסנכרון נכשל" שהיה בעצם ניתוק, 1.33.4 — `\b` אחד מנע את תאריך התשלום, 1.34.0 — לשונית „מסלקה": קליטת נתוני הגמל, ההשתלמות והפנסיה, 1.35.0 — לשונית „נדל״ן", 1.36.0 — לשונית „מאזן נכסים": צד הנכסים, 1.37.0 - מאזן נכסים: צד ההתחייבויות וההון העצמי (+73 more)
+Nodes (82): 1.33.1 — הריבית האמיתית בטבלה, ואריח BTB שפתח את פועלים, 1.33.2 — התאריך שלא נקרא, וההפלה השקטה של כל השאר, 1.33.3 — „הסנכרון נכשל" שהיה בעצם ניתוק, 1.33.4 — `\b` אחד מנע את תאריך התשלום, 1.34.0 — לשונית „מסלקה": קליטת נתוני הגמל, ההשתלמות והפנסיה, 1.35.0 — לשונית „נדל״ן", 1.36.0 — לשונית „מאזן נכסים": צד הנכסים, 1.37.0 - מאזן נכסים: צד ההתחייבויות וההון העצמי (+74 more)
 
 ### Community 7 - "renderAllCards"
 Cohesion: 0.18
@@ -498,7 +498,7 @@ Cohesion: 0.67
 Nodes (4): loadOpened(), markOpened(), saveOpened(), unmarkOpened()
 
 ## Knowledge Gaps
-- **616 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+611 more)
+- **617 isolated node(s):** `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart`, `SOURCES`, `discoveryChain` (+612 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **17 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -509,10 +509,10 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.090) - this node is a cross-community bridge._
 - **Why does `2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבעלות עוברת אליך.` connect `2026-08-17 11:15 · Claude → Codex · מסירת לאומי. הבעלות עוברת אליך.` to `HANDOFF — מסירה בין סוכנים`?**
   _High betweenness centrality (0.005) - this node is a cross-community bridge._
-- **Why does `סיכום 28.08.2026 (המשך) - גיבוי, viewer וניתוח חודשי (1.49.0 -> 1.58.0)` connect `סיכום 28.08.2026 (המשך) - גיבוי, viewer וניתוח חודשי (1.49.0 -> 1.58.0)` to `HANDOFF.md`?**
+- **Why does `2026-08-22 · Claude · לאומי סופר שורות, לא תאריכים — 1.1.5` connect `2026-08-22 · Claude · לאומי סופר שורות, לא תאריכים — 1.1.5` to `HANDOFF — מסירה בין סוכנים`?**
   _High betweenness centrality (0.005) - this node is a cross-community bridge._
 - **What connects `SOURCE_DIAG_KEYS`, `freshFlags`, `freshStart` to the rest of the system?**
-  _616 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _617 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `HANDOFF — מסירה בין סוכנים` be split into smaller, more focused modules?**
   _Cohesion score 0.009216589861751152 - nodes in this community are weakly interconnected._
 - **Should `discount-content.js` be split into smaller, more focused modules?**
