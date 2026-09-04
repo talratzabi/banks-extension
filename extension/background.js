@@ -2733,22 +2733,27 @@ async function readMizrahiTransactions(tabId){let rows=[],probe=null;const known
   // רשימת סלקטורים מחזיר את הראשון בסדר המסמך, וה-td קודם לילד שלו. Kendo מאזין על האייקון.
   const iconOf=row=>{const h=row.querySelector('.k-hierarchy-cell');return h?(h.querySelector('a,button,span,i,svg,[class*="icon"],[class*="expand"]')||h):null};
   // ⚠⚠ נמדד 04.09 (07:50, 2.3.14): 4 לחיצות = 43 שניות גם בלי innerText של body - כל פתיחה
-  // היא קריאת שרת של ~10 שניות. ⚠⚠ ואז 2.3.15 פתח את כל 22 בבת אחת - והלשונית קפאה:
-  // "קובע את טווח התאריכים" ב-07:57 ושום כתיבה 4 דקות אחר כך (טל: "לא עושה כלום, גם לא
-  // מסנכרן"). לכן **מנות של 4**: לוחצים, ממתינים ליציבות (עד 15 שניות), קוראים, סוגרים,
-  // ומדווחים התקדמות. פירוט שכבר ידוע מסנכרון קודם (known) לא נפתח שוב. תקרה כוללת 90 שניות.
-  const key=r=>`${r.date}|${r.action}|${r.debit??''}|${r.credit??''}`,pendingIdx=[];probe.reused=0;
+  // היא קריאת שרת + רינדור מחדש של הרשת. 2.3.15 פתח 22 בבת אחת - הלשונית קפאה. 2.3.16
+  // מנות של 4 - "4 מתוך 20" ב-08:08:52, "8 מתוך 20" ב-08:09:33 (41 שניות למנה!), ואז
+  // קיפאון עד ה-timeout של 150 שניות. **המסקנה: הדף לא סובל יותר מפירוט פתוח אחד.**
+  // לכן: אחת-אחת, סוגרים וממתינים שהפירוט ייעלם לפני הבאה, ותקרה של 6 פתיחות לסנכרון
+  // (~60 שניות). פירוט שכבר נשמר (known) לא נפתח שוב, ולכן בסנכרונים הבאים מושלמות
+  // 6 העברות נוספות בכל פעם, עד שכולן מלאות - ואז רק החדשות.
+  const MAX_PER_SYNC=6,key=r=>`${r.date}|${r.action}|${r.debit??''}|${r.credit??''}`,pendingIdx=[];probe.reused=0;probe.left=0;
   for(let i=0;i<rows.length;i++){if(!/העב/.test(rows[i].action))continue;probe.transfers++;const k=known&&known[key(rows[i])];if(k){rows[i].details=k;probe.reused++;continue}pendingIdx.push(i)}
-  for(let b=0;b<pendingIdx.length&&Date.now()-started<90000&&!probe.navigated;b+=4){
-    const batch=pendingIdx.slice(b,b+4);
-    try{chrome.storage.local.set({syncStatus:`מזרחי־טפחות: קורא פירוט העברות ${Math.min(b+4,pendingIdx.length)} מתוך ${pendingIdx.length}`})}catch{}
-    for(const i of batch){const el=iconOf(els[i]);if(!el)continue;if(!detailOf(els[i])){try{press(el);probe.clicked++}catch{}await wait(150)}}
-    const seen=new Map();
-    for(let k=0;k<30;k++){await wait(500);if(location.href!==href0){probe.navigated=true;break}let pending=0;for(const i of batch){const d=detailOf(els[i]),t=d?String(d.innerText||''):'';if(!d||!t||t!==seen.get(i))pending++;seen.set(i,t)}if(!pending)break}
-    for(const i of batch){const d=detailOf(els[i]),text=d?String(d.innerText||''):'',name=payee(text)||bankOf(text);if(name){rows[i].details=name;probe.enriched++}
-      if(probe.samples.length<3)probe.samples.push({action:rows[i].action,detailRow:!!d,lines:text.split('\n').map(clean).filter(Boolean).slice(0,20).map(l=>l.replace(/\d/g,'#').slice(0,140))});
-      const el=iconOf(els[i]);if(d&&el)try{press(el)}catch{}}
-    await wait(300);
+  const todo=pendingIdx.slice(0,MAX_PER_SYNC);probe.left=pendingIdx.length-todo.length;
+  for(let n=0;n<todo.length&&Date.now()-started<75000&&!probe.navigated;n++){
+    const i=todo[n],el=iconOf(els[i]);if(!el)continue;
+    try{chrome.storage.local.set({syncStatus:`מזרחי־טפחות: קורא פירוט העברות ${n+1} מתוך ${todo.length}${probe.left?` (עוד ${probe.left} בסנכרון הבא)`:''}`})}catch{}
+    if(!detailOf(els[i])){try{press(el);probe.clicked++}catch{continue}}
+    let last='',d=null;
+    for(let k=0;k<30;k++){await wait(500);if(location.href!==href0){probe.navigated=true;break}d=detailOf(els[i]);const t=d?String(d.innerText||''):'';if(d&&t&&t===last)break;last=t}
+    if(probe.navigated)break;
+    const text=d?String(d.innerText||''):'',name=payee(text)||bankOf(text);if(name){rows[i].details=name;probe.enriched++}
+    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,detailRow:!!d,lines:text.split('\n').map(clean).filter(Boolean).slice(0,20).map(l=>l.replace(/\d/g,'#').slice(0,140))});
+    // סגירה, והמתנה עד שהפירוט נעלם - לא פותחים את הבא על דף שעדיין מעכל את הקודם.
+    const el2=iconOf(els[i]);if(d&&el2){try{press(el2)}catch{}for(let k=0;k<10&&detailOf(els[i]);k++)await wait(500)}
+    await wait(400);
   }
   probe.ms=Date.now()-started;return{rows,probe}}});
 rows=results.flatMap(x=>Array.isArray(x.result?.rows)?x.result.rows:[]);const probes=results.map(x=>x.result?.probe).filter(Boolean);probe=probes.find(p=>p.transfers)||probes[0]||null}catch(e){probe={error:String(e&&e.message)}}
