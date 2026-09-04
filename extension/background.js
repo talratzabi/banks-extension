@@ -2707,7 +2707,12 @@ async function setMizrahiRange(tabId){
 // (צילום של טל). טל: "מכל הפרטים צריך להופיע רק המוטב" - ולכן details = שם
 // המוטב בלבד. וגם "העב.מידית באינטרנט" היא העברה - הזיהוי לפי /העב/.
 // פירוט שכבר נשמר בסנכרון קודם לא נפתח שוב - רק העברות חדשות עולות לשרת.
-async function mizrahiKnownDetails(){try{const st=await chrome.storage.local.get({accounts:[]});const out={};for(const a of st.accounts||[]){if(a.source!=='mizrahi')continue;for(const t of a.transactions||[])if(/^(למוטב|לבנק):/.test(String(t.details||''))&&!/רצבי/.test(String(t.details||''))||/רצבי.*\(/.test(String(t.details||'')))out[`${t.date}|${t.action}|${t.debit??''}|${t.credit??''}`]=t.details}return out}catch{return{}}}
+// ⚠ 04.09.2026 (09:40): שתי העברות זהות (06/07, 41,000) - אחת נקראה מהדף והשנייה **הועתקה**
+// ממנה דרך known (אותו מפתח), בלי שנפתחה. אם המוטבים שונים - זו טעות שקטה. לכן:
+// known נבנה רק משורות שהפירוט שלהן באמת נקרא מהדף (`detailsRead`), **רשימה** לכל מפתח,
+// ונצרכת בסדר הדף - שורה זהה נוספת בלי רשומה משלה נפתחת בעצמה. רשומות ישנות בלי
+// הדגל (מלפני 2.3.21) ייקראו שוב פעם אחת.
+async function mizrahiKnownDetails(){try{const st=await chrome.storage.local.get({accounts:[]});const out={};for(const a of st.accounts||[]){if(a.source!=='mizrahi')continue;for(const t of a.transactions||[]){const d=String(t.details||'');if(!t.detailsRead||!/^(למוטב|לבנק):/.test(d)||(/רצבי/.test(d)&&!/\(/.test(d)))continue;const k=`${t.date}|${t.action}|${t.debit??''}|${t.credit??''}`;(out[k]=out[k]||[]).push(d)}}return out}catch{return{}}}
 // ⚠⚠ 04.09.2026 (08:15, 2.3.17): גם פתיחה **אחת** הקפיאה - "1 מתוך 6" ואז שקט עד ה-timeout.
 // שתי הריצות האחרונות רצו על אותה לשונית שכבר קפאה קודם (אין "פותח את חלון ההתחברות"
 // ביומן - הלשונית נמצאה ושומשה). לכן מפסק ביטחון: אחרי timeout - (א) הלשונית נטענת
@@ -2731,9 +2736,13 @@ const MIZRAHI_LABELS='בנק מזוכה|סניף מזוכה|חשבון מזוכ�
 const mizClean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();
 const mizCut=v=>mizClean(String(v||'').replace(new RegExp(`\\s+(?:${MIZRAHI_LABELS})\\s*:.*$`),''));
 // "בנק: ##-<שם>" (בלי קוד הבנק). טל: מוטב "רצבי" (חשבון עצמי) מקבל את שם הבנק בסוגריים.
-const mizBankName=t=>{const m=String(t||'').match(/(?:^|\n|\s)בנק\s*(?:מזוכה)?\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);return m?mizCut(m[1]).slice(0,60):''};
-function mizrahiPayee(t){const m=String(t||'').match(/(?:שם\s*ה?מוטב|ה?מוטב|לזכות|שם\s*ה?מקבל|ה?מקבל|לטובת)\s*:\s*([^\n]+)/);if(!m)return '';const v=mizCut(m[1]).slice(0,80);if(!v)return '';const bank=/רצבי/.test(v)?mizBankName(t):'';return `למוטב: ${v}${bank?` (${bank})`:''}`}
-function mizrahiBankOf(t){const m=String(t||'').match(/בנק\s*מזוכה\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);if(!m)return '';const v=mizCut(m[1]).slice(0,60);return v?`לבנק: ${v}`:''}
+// ⚠ 04.09.2026 (09:40) נמדד באחסון: "לבנק: 31-בנק הבינ"ל הראשון סניף מזוכה : 062-קרית גת…" - קוד הבנק לא
+// הוסר והתווית הבאה לא נחתכה. innerText של הפירוט מכיל סימני כיווניות (LRM/RLM) בין
+// הנקודתיים למספר ולפני התוויות; הניקוי רץ רק *אחרי* ההתאמה. עכשיו מנקים לפני.
+const mizStrip=t=>String(t||'').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,'');
+const mizBankName=t=>{t=mizStrip(t);const m=String(t||'').match(/(?:^|\n|\s)בנק\s*(?:מזוכה)?\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);return m?mizCut(m[1]).slice(0,60):''};
+function mizrahiPayee(t){t=mizStrip(t);const m=String(t||'').match(/(?:שם\s*ה?מוטב|ה?מוטב|לזכות|שם\s*ה?מקבל|ה?מקבל|לטובת)\s*:\s*([^\n]+)/);if(!m)return '';const v=mizCut(m[1]).slice(0,80);if(!v)return '';const bank=/רצבי/.test(v)?mizBankName(t):'';return `למוטב: ${v}${bank?` (${bank})`:''}`}
+function mizrahiBankOf(t){t=mizStrip(t);const m=String(t||'').match(/בנק\s*מזוכה\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);if(!m)return '';const v=mizCut(m[1]).slice(0,60);return v?`לבנק: ${v}`:''}
 async function readMizrahiTransactions(tabId){let rows=[];const probe={samples:[],transfers:0,clicked:0,enriched:0,reused:0,left:0,navigated:false,skipped:false,ms:0};const known=await mizrahiKnownDetails(),ctl=await mizrahiDetailCtl(),started=Date.now();
 if(!ctl.enable)try{await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: קורא תנועות — פירוט ההעברות דולג הפעם אחרי הקיפאון הקודם'})}catch{}
 try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const rows=[];for(const row of document.querySelectorAll('[role="row"],tr')){const cells=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>({text:clean(x.innerText),label:clean(x.getAttribute('aria-label'))})),dateCell=cells.find(c=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.text));if(!dateCell)continue;const actionCell=cells.find(c=>/סוג תנועה/.test(c.label)),amountCell=cells.find(c=>/זכות\s*\/\s*חובה/.test(c.label)),balanceCell=cells.find(c=>/יתרה/.test(c.label));const amount=money(amountCell?.text),balance=money(balanceCell?.text);rows.push({date:dateCell.text,action:actionCell?.text||'',details:'',debit:amount!=null&&amount<0?Math.abs(amount):null,credit:amount!=null&&amount>=0?amount:null,balance});try{row.setAttribute('data-bx-row',String(rows.length-1))}catch{}}return{rows,href:String(location.href).slice(0,100)}}});
@@ -2742,7 +2751,7 @@ try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:
   const marked=frames.flatMap(f=>f.rows.map((r,ri)=>({r,f:f.frameId,i:ri})));
   rows=marked.map(m=>m.r);
   const key=r=>`${r.date}|${r.action}|${r.debit??''}|${r.credit??''}`,pending=[];
-  for(const m of marked){if(!/העב/.test(m.r.action))continue;probe.transfers++;const k=known&&known[key(m.r)];if(k){m.r.details=k;probe.reused++;continue}pending.push(m)}
+  for(const m of marked){if(!/העב/.test(m.r.action))continue;probe.transfers++;const list=known&&known[key(m.r)];if(list&&list.length){m.r.details=list.shift();m.r.detailsRead=true;probe.reused++;continue}pending.push(m)}
   const todo=ctl.enable?pending.slice(0,ctl.cap):[];probe.left=pending.length-todo.length;probe.cap=ctl.cap;probe.skipped=!ctl.enable;
   const run=(frameId,func,args)=>chrome.scripting.executeScript({target:{tabId,frameIds:[frameId]},func,args}).then(r=>r?.[0]?.result);
   const pressFn=i=>{const row=document.querySelector(`[data-bx-row="${i}"]`);if(!row)return{ok:false,why:'row'};const h=row.querySelector('.k-hierarchy-cell'),el=h?(h.querySelector('a,button,span,i,svg,[class*="icon"],[class*="expand"]')||h):null;if(!el)return{ok:false,why:'icon'};for(const type of['mousedown','mouseup','click'])el.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window}));return{ok:true,cls:String(el.className||'').slice(0,60)}};
@@ -2755,7 +2764,7 @@ try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:
     let last='',text='';
     for(let k=0;k<24;k++){await delay(500);st=await run(m.f,readFn,[m.i]);if(!st)break;if(st.open&&st.text&&st.text===last&&!st.busy){text=st.text;break}last=st.open?st.text:''}
     if(!text)text=last;
-    const name=mizrahiPayee(text)||mizrahiBankOf(text);if(name){m.r.details=name;probe.enriched++}
+    const name=mizrahiPayee(text)||mizrahiBankOf(text);if(name){m.r.details=name;m.r.detailsRead=true;probe.enriched++}
     if(probe.samples.length<3)probe.samples.push({action:m.r.action,open:!!(st&&st.open),lines:text.split('\n').map(mizClean).filter(Boolean).slice(0,20).map(l=>l.replace(/\d/g,'#').slice(0,140))});
     if(st&&st.open){await run(m.f,pressFn,[m.i]).catch(()=>{});for(let k=0;k<8;k++){await delay(400);const s2=await run(m.f,readFn,[m.i]);if(!s2||!s2.open)break}}
   }
