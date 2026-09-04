@@ -2715,61 +2715,51 @@ async function mizrahiKnownDetails(){try{const st=await chrome.storage.local.get
 // (ג) התקרה יורדת בחצי (6 -> 3 -> 1). הצלחה עם פירוט משאירה את התקרה.
 async function mizrahiDetailCtl(){try{const st=(await chrome.storage.local.get({mizrahiDetailState:{}})).mizrahiDetailState||{},cap=Math.max(1,Number(st.cap)||6);if(st.skipOnce){await chrome.storage.local.set({mizrahiDetailState:{...st,skipOnce:false}});return{enable:false,cap}}return{enable:true,cap}}catch{return{enable:true,cap:6}}}
 async function noteMizrahiDetailTimeout(tabId){try{const st=(await chrome.storage.local.get({mizrahiDetailState:{}})).mizrahiDetailState||{},cap=Math.max(1,Math.floor((Number(st.cap)||6)/2));await chrome.storage.local.set({mizrahiDetailState:{...st,skipOnce:true,cap,lastTimeoutAt:new Date().toISOString()}})}catch{}try{await chrome.tabs.reload(tabId)}catch{}}
-async function readMizrahiTransactions(tabId){let rows=[],probe=null;const known=await mizrahiKnownDetails(),ctl=await mizrahiDetailCtl();
+// ⚠⚠⚠ 04.09.2026 (08:23, 2.3.18) - ההוכחה שהפכה את האבחון: גם על לשונית **טרייה** (חלון
+// התחברות חדש) "1 מתוך 6" ואז שקט 150 שניות - ובדיוק כשה-timeout טען מחדש את הלשונית,
+// executeScript חזר מיד. הדף לא קפוא: **הטיימרים של הדף מואטים.** Chrome מאיט setTimeout
+// בלשונית מוסתרת/מוסתרת-חלקית לפעם בשנייה, ואחרי דקות - לפעם בדקה (intensive throttling,
+// שרשרת טיימרים מקוננת). זה מסביר את *כל* המדידות: "10 שניות ללחיצה" (8 דגימות של 300ms
+// שהפכו לשניות), "41 שניות למנה", ו"קיפאון" (דגימה אחת לדקה). הלשונית של הסנכרון יושבת
+// בחלון נפרד שאינו במוקד - ומאחורי הדשבורד היא מוסתרת.
+// לכן: **אפס טיימרים בדף.** כל המתנה ב-service worker (לא מואט), וכל צעד בדף הוא
+// executeScript סינכרוני קצר: לחץ / קרא / סגור. השורות מסומנות data-bx-row בקריאה
+// הראשונה, כי הכנסת שורת פירוט מזיזה אינדקסים.
+const MIZRAHI_LABELS='בנק מזוכה|סניף מזוכה|חשבון מזוכה|אופן העברה|סניף מבצע|מספר חשבון|בנק|חשבון|תאריך ביצוע|תאריך|שעת ביצוע|סניף|מהות העברה|מהות|סכום|אסמכתא|הערות?|פרטים';
+const mizClean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();
+const mizCut=v=>mizClean(String(v||'').replace(new RegExp(`\\s+(?:${MIZRAHI_LABELS})\\s*:.*$`),''));
+// "בנק: ##-<שם>" (בלי קוד הבנק). טל: מוטב "רצבי" (חשבון עצמי) מקבל את שם הבנק בסוגריים.
+const mizBankName=t=>{const m=String(t||'').match(/(?:^|\n|\s)בנק\s*(?:מזוכה)?\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);return m?mizCut(m[1]).slice(0,60):''};
+function mizrahiPayee(t){const m=String(t||'').match(/(?:שם\s*ה?מוטב|ה?מוטב|לזכות|שם\s*ה?מקבל|ה?מקבל|לטובת)\s*:\s*([^\n]+)/);if(!m)return '';const v=mizCut(m[1]).slice(0,80);if(!v)return '';const bank=/רצבי/.test(v)?mizBankName(t):'';return `למוטב: ${v}${bank?` (${bank})`:''}`}
+function mizrahiBankOf(t){const m=String(t||'').match(/בנק\s*מזוכה\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);if(!m)return '';const v=mizCut(m[1]).slice(0,60);return v?`לבנק: ${v}`:''}
+async function readMizrahiTransactions(tabId){let rows=[];const probe={samples:[],transfers:0,clicked:0,enriched:0,reused:0,left:0,navigated:false,skipped:false,ms:0};const known=await mizrahiKnownDetails(),ctl=await mizrahiDetailCtl(),started=Date.now();
 if(!ctl.enable)try{await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: קורא תנועות — פירוט ההעברות דולג הפעם אחרי הקיפאון הקודם'})}catch{}
-try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},args:[known,ctl],func:async(known,ctl)=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const rows=[],els=[];for(const row of document.querySelectorAll('[role="row"],tr')){const cells=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>({text:clean(x.innerText),label:clean(x.getAttribute('aria-label'))})),dateCell=cells.find(c=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.text));if(!dateCell)continue;const actionCell=cells.find(c=>/סוג תנועה/.test(c.label)),amountCell=cells.find(c=>/זכות\s*\/\s*חובה/.test(c.label)),balanceCell=cells.find(c=>/יתרה/.test(c.label));const amount=money(amountCell?.text),balance=money(balanceCell?.text);rows.push({date:dateCell.text,action:actionCell?.text||'',details:'',debit:amount!=null&&amount<0?Math.abs(amount):null,credit:amount!=null&&amount>=0?amount:null,balance});els.push(row)}
-  const probe={samples:[],transfers:0,clicked:0,enriched:0,navigated:false,dialogs:0,href:String(location.href).slice(0,100),ms:0};
-  const started=Date.now(),wait=ms=>new Promise(r=>setTimeout(r,ms));
-  const lines=()=>new Set(String(document.body?.innerText||'').split('\n').map(clean).filter(Boolean));
-  const visible=el=>!!el&&el.offsetParent!==null;
-  const closeBtn=()=>[...document.querySelectorAll('button,[role="button"],a')].find(b=>visible(b)&&(/^(סגור|סגירה|×|x|✕)$/i.test(clean(b.innerText))||/סגור|close/i.test(b.getAttribute('aria-label')||'')));
-  const dialogSel='[role="dialog"],.modal.show,.modal.in,[class*="dialog"],[class*="popup"]';
-  const href0=location.href;
-  const detailOf=row=>{const n=row.nextElementSibling;return n&&/k-detail-row/.test(String(n.className||''))?n:null};
-  // ⚠ 04.09.2026 - נמדד בגשש: "העברה באינטרנט" נפתחת ל"בנק / סניף / חשבון / מהות העברה /
-  // תאריך ביצוע / שעת ביצוע / שם מוטב" (כל שדה בשורה), ו"העברת יומן לבנק זר" נפתחת
-  // לשורה אחת: "בנק מזוכה : ##-<בנק> סניף מזוכה : … חשבון מזוכה : … אופן העברה : … שעת
-  // ביצוע : … סניף מבצע : …" - **בלי שם מוטב**. שם: "לבנק: <בנק>". טל: הנוסח "למוטב: <שם>".
-  const LABELS='בנק מזוכה|סניף מזוכה|חשבון מזוכה|אופן העברה|סניף מבצע|מספר חשבון|בנק|חשבון|תאריך ביצוע|תאריך|שעת ביצוע|סניף|מהות העברה|מהות|סכום|אסמכתא|הערות?|פרטים';
-  const cut=v=>clean(String(v||'').replace(new RegExp(`\\s+(?:${LABELS})\\s*:.*$`),''));
-  // טל (04.09): "איפה שמופיע טל רצבי או סופי רצבי תציין את שם הבנק" - העברה לחשבון עצמי:
-  // "למוטב: טל רצבי (בנק יהב לעובדי המדינה)". הבנק מ"בנק: ##-<שם>" (בלי קוד הבנק).
-  const bankName=t=>{const m=String(t||'').match(/(?:^|\n|\s)בנק\s*(?:מזוכה)?\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);return m?cut(m[1]).slice(0,60):''};
-  const payee=t=>{const m=String(t||'').match(/(?:שם\s*ה?מוטב|ה?מוטב|לזכות|שם\s*ה?מקבל|ה?מקבל|לטובת)\s*:\s*([^\n]+)/);if(!m)return '';const v=cut(m[1]).slice(0,80);if(!v)return '';const bank=/רצבי/.test(v)?bankName(t):'';return `למוטב: ${v}${bank?` (${bank})`:''}`};
-  const bankOf=t=>{const m=String(t||'').match(/בנק\s*מזוכה\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);if(!m)return '';const v=cut(m[1]).slice(0,60);return v?`לבנק: ${v}`:''};
-  const press=el=>{for(const type of['mousedown','mouseup','click'])el.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window}))};
-  // ⚠ נמדד 04.09 (07:40, 2.3.13): נלחץ `td.k-hierarchy-cell` ולא האייקון - querySelector עם
-  // רשימת סלקטורים מחזיר את הראשון בסדר המסמך, וה-td קודם לילד שלו. Kendo מאזין על האייקון.
-  const iconOf=row=>{const h=row.querySelector('.k-hierarchy-cell');return h?(h.querySelector('a,button,span,i,svg,[class*="icon"],[class*="expand"]')||h):null};
-  // ⚠⚠ נמדד 04.09 (07:50, 2.3.14): 4 לחיצות = 43 שניות גם בלי innerText של body - כל פתיחה
-  // היא קריאת שרת + רינדור מחדש של הרשת. 2.3.15 פתח 22 בבת אחת - הלשונית קפאה. 2.3.16
-  // מנות של 4 - "4 מתוך 20" ב-08:08:52, "8 מתוך 20" ב-08:09:33 (41 שניות למנה!), ואז
-  // קיפאון עד ה-timeout של 150 שניות. **המסקנה: הדף לא סובל יותר מפירוט פתוח אחד.**
-  // לכן: אחת-אחת, סוגרים וממתינים שהפירוט ייעלם לפני הבאה, ותקרה של 6 פתיחות לסנכרון
-  // (~60 שניות). פירוט שכבר נשמר (known) לא נפתח שוב, ולכן בסנכרונים הבאים מושלמות
-  // 6 העברות נוספות בכל פעם, עד שכולן מלאות - ואז רק החדשות.
-  const MAX_PER_SYNC=ctl.enable?ctl.cap:0,key=r=>`${r.date}|${r.action}|${r.debit??''}|${r.credit??''}`,pendingIdx=[];probe.reused=0;probe.left=0;
-  for(let i=0;i<rows.length;i++){if(!/העב/.test(rows[i].action))continue;probe.transfers++;const k=known&&known[key(rows[i])];if(k){rows[i].details=k;probe.reused++;continue}pendingIdx.push(i)}
-  const todo=pendingIdx.slice(0,MAX_PER_SYNC);probe.left=pendingIdx.length-todo.length;probe.skipped=!ctl.enable;probe.cap=ctl.cap;
-  const busy=()=>!!document.querySelector('.k-loading-mask,.k-loading-image,[class*="loading"]:not([hidden])');
-  for(let n=0;n<todo.length&&Date.now()-started<75000&&!probe.navigated;n++){
-    const i=todo[n],el=iconOf(els[i]);if(!el)continue;
-    // ⚠ לא לוחצים על דף שעדיין טוען (מסכת Kendo) - ממתינים עד 10 שניות שתיעלם.
-    for(let k=0;k<20&&busy();k++)await wait(500);
-    try{chrome.storage.local.set({syncStatus:`מזרחי־טפחות: קורא פירוט העברות ${n+1} מתוך ${todo.length}${probe.left?` (עוד ${probe.left} בסנכרון הבא)`:''}`})}catch{}
-    if(!detailOf(els[i])){try{press(el);probe.clicked++}catch{continue}}
-    let last='',d=null;
-    for(let k=0;k<30;k++){await wait(500);if(location.href!==href0){probe.navigated=true;break}d=detailOf(els[i]);const t=d?String(d.innerText||''):'';if(d&&t&&t===last&&!busy())break;last=t}
-    if(probe.navigated)break;
-    const text=d?String(d.innerText||''):'',name=payee(text)||bankOf(text);if(name){rows[i].details=name;probe.enriched++}
-    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,detailRow:!!d,lines:text.split('\n').map(clean).filter(Boolean).slice(0,20).map(l=>l.replace(/\d/g,'#').slice(0,140))});
-    // סגירה, והמתנה עד שהפירוט נעלם - לא פותחים את הבא על דף שעדיין מעכל את הקודם.
-    const el2=iconOf(els[i]);if(d&&el2){try{press(el2)}catch{}for(let k=0;k<10&&detailOf(els[i]);k++)await wait(500)}
-    await wait(400);
+try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const rows=[];for(const row of document.querySelectorAll('[role="row"],tr')){const cells=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>({text:clean(x.innerText),label:clean(x.getAttribute('aria-label'))})),dateCell=cells.find(c=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.text));if(!dateCell)continue;const actionCell=cells.find(c=>/סוג תנועה/.test(c.label)),amountCell=cells.find(c=>/זכות\s*\/\s*חובה/.test(c.label)),balanceCell=cells.find(c=>/יתרה/.test(c.label));const amount=money(amountCell?.text),balance=money(balanceCell?.text);rows.push({date:dateCell.text,action:actionCell?.text||'',details:'',debit:amount!=null&&amount<0?Math.abs(amount):null,credit:amount!=null&&amount>=0?amount:null,balance});try{row.setAttribute('data-bx-row',String(rows.length-1))}catch{}}return{rows,href:String(location.href).slice(0,100)}}});
+  const frames=results.map(r=>({frameId:r.frameId,rows:r.result?.rows||[],href:r.result?.href||''})).filter(f=>f.rows.length);
+  probe.href=frames[0]?.href||'';
+  const marked=frames.flatMap(f=>f.rows.map((r,ri)=>({r,f:f.frameId,i:ri})));
+  rows=marked.map(m=>m.r);
+  const key=r=>`${r.date}|${r.action}|${r.debit??''}|${r.credit??''}`,pending=[];
+  for(const m of marked){if(!/העב/.test(m.r.action))continue;probe.transfers++;const k=known&&known[key(m.r)];if(k){m.r.details=k;probe.reused++;continue}pending.push(m)}
+  const todo=ctl.enable?pending.slice(0,ctl.cap):[];probe.left=pending.length-todo.length;probe.cap=ctl.cap;probe.skipped=!ctl.enable;
+  const run=(frameId,func,args)=>chrome.scripting.executeScript({target:{tabId,frameIds:[frameId]},func,args}).then(r=>r?.[0]?.result);
+  const pressFn=i=>{const row=document.querySelector(`[data-bx-row="${i}"]`);if(!row)return{ok:false,why:'row'};const h=row.querySelector('.k-hierarchy-cell'),el=h?(h.querySelector('a,button,span,i,svg,[class*="icon"],[class*="expand"]')||h):null;if(!el)return{ok:false,why:'icon'};for(const type of['mousedown','mouseup','click'])el.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window}));return{ok:true,cls:String(el.className||'').slice(0,60)}};
+  const readFn=i=>{const row=document.querySelector(`[data-bx-row="${i}"]`);if(!row)return null;const n=row.nextElementSibling,open=!!n&&/k-detail-row/.test(String(n.className||''));return{open,text:open?String(n.innerText||'').slice(0,2000):'',busy:!!document.querySelector('.k-loading-mask')}};
+  for(let n=0;n<todo.length&&Date.now()-started<90000;n++){
+    const m=todo[n];
+    try{await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: קורא פירוט העברות ${n+1} מתוך ${todo.length}${probe.left?` (עוד ${probe.left} בסנכרון הבא)`:''}`})}catch{}
+    let st=await run(m.f,readFn,[m.i]);if(!st){probe.samples.push({action:m.r.action,why:'row-missing'});continue}
+    if(!st.open){const pr=await run(m.f,pressFn,[m.i]);if(!pr?.ok){probe.samples.push({action:m.r.action,why:pr?.why||'press'});continue}probe.clicked++}
+    let last='',text='';
+    for(let k=0;k<24;k++){await delay(500);st=await run(m.f,readFn,[m.i]);if(!st)break;if(st.open&&st.text&&st.text===last&&!st.busy){text=st.text;break}last=st.open?st.text:''}
+    if(!text)text=last;
+    const name=mizrahiPayee(text)||mizrahiBankOf(text);if(name){m.r.details=name;probe.enriched++}
+    if(probe.samples.length<3)probe.samples.push({action:m.r.action,open:!!(st&&st.open),lines:text.split('\n').map(mizClean).filter(Boolean).slice(0,20).map(l=>l.replace(/\d/g,'#').slice(0,140))});
+    if(st&&st.open){await run(m.f,pressFn,[m.i]).catch(()=>{});for(let k=0;k<8;k++){await delay(400);const s2=await run(m.f,readFn,[m.i]);if(!s2||!s2.open)break}}
   }
-  probe.ms=Date.now()-started;return{rows,probe}}});
-rows=results.flatMap(x=>Array.isArray(x.result?.rows)?x.result.rows:[]);const probes=results.map(x=>x.result?.probe).filter(Boolean);probe=probes.find(p=>p.transfers)||probes[0]||null}catch(e){probe={error:String(e&&e.message)}}
-try{await chrome.storage.local.set({mizrahiDetailProbe:{at:new Date().toISOString(),...(probe||{})}})}catch{}
+}catch(e){probe.error=String(e&&e.message)}
+probe.ms=Date.now()-started;
+try{await chrome.storage.local.set({mizrahiDetailProbe:{at:new Date().toISOString(),...probe}})}catch{}
 if(!rows.length)rows=mizrahiFrameData.get(tabId)?.transactions||[];return rows}
 async function readMizrahiSummary(tabId){const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const buttons=[...document.querySelectorAll('button')].map(x=>clean(x.innerText)),hit=buttons.find(t=>/\b\d{3}\s*-\s*\d{5,9}\b/.test(t));if(!hit)return null;const m=hit.match(/\b(\d{3})\s*-\s*(\d{5,9})\b/);if(!m)return null;const text=clean(document.body?.innerText),owner=hit.replace(m[0],'').trim()||'חשבון מזרחי',balance=money((text.match(/יתרת עו["״']ש\s*([\d,.-]+)\s*₪/)||[])[1]),creditLimit=money((text.match(/מסגרת אשראי בחשבון\s*([\d,.-]+)\s*₪/)||[])[1]);return{branch:m[1],accountNumber:m[2],owner,nickname:owner,balance,creditLimit}}});return results.map(x=>x.result).find(Boolean)||null}
 async function startMizrahi(){if(mizrahiBusy)return{ok:false,error:'סנכרון מזרחי־טפחות כבר מתבצע'};await chrome.storage.local.set({pendingMizrahi:true,syncStatus:'מזרחי־טפחות: בודק את החיבור ומזהה חשבונות'});const tab=await mizrahiTab();if(!tab){await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: פותח את חלון ההתחברות'});const opened=await chrome.tabs.create({url:MIZRAHI_HOME,active:true});if(Number.isInteger(opened?.id))await markOpened(opened.id);try{await waitTab(opened.id,'mizrahi-tefahot.co.il')}catch{}const shown=await openMizrahiLogin(opened.id);await chrome.storage.local.set({syncStatus:shown?'ממתין להתחברות למזרחי־טפחות — הזן משתמש וסיסמה בחלונית שנפתחה':'ממתין להתחברות למזרחי־טפחות — נפתח דף ההתחברות'});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMizrahi(tab.id).catch(async e=>{await chrome.storage.local.set({pendingMizrahi:false,syncStatus:`שגיאה במזרחי־טפחות: ${e.message}`});await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
