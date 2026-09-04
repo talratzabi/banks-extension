@@ -2699,6 +2699,13 @@ async function setMizrahiRange(tabId){
 // 2. גשש mizrahiDetailProbe: עד 3 דוגמאות של הטקסט שנוסף (ספרות ממוסכות),
 //    מחלקות האלמנט שנפתח, והאם זו חלונית - כדי לכתוב חילוץ מדויק מהמדידה.
 // ⚠ תקציב: עד 60 לחיצות ועד 25 שניות. שאר השורות נשארות בלי פירוט.
+// ⚠⚠ 04.09.2026 - נמדד ב-mizrahiDetailProbe אחרי הסנכרון של טל: 3 העברות, 3
+// לחיצות, **0 שורות נוספו** - הרשת היא Kendo Grid (`k-master-row ng-scope`),
+// ולחיצה על התא הראשון לא פותחת כלום. הפותחן הוא המשולש בצד שמאל
+// (`td.k-hierarchy-cell`), והפירוט נפתח כשורת `tr.k-detail-row` מתחת לשורה:
+// "בנק: … / חשבון: … / תאריך ביצוע: … / שם מוטב: … / סניף: … / מהות העברה: …"
+// (צילום של טל). טל: "מכל הפרטים צריך להופיע רק המוטב" - ולכן details = שם
+// המוטב בלבד. וגם "העב.מידית באינטרנט" היא העברה - הזיהוי לפי /העב/.
 async function readMizrahiTransactions(tabId){let rows=[],probe=null;try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:async()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const rows=[],els=[];for(const row of document.querySelectorAll('[role="row"],tr')){const cells=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>({text:clean(x.innerText),label:clean(x.getAttribute('aria-label'))})),dateCell=cells.find(c=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.text));if(!dateCell)continue;const actionCell=cells.find(c=>/סוג תנועה/.test(c.label)),amountCell=cells.find(c=>/זכות\s*\/\s*חובה/.test(c.label)),balanceCell=cells.find(c=>/יתרה/.test(c.label));const amount=money(amountCell?.text),balance=money(balanceCell?.text);rows.push({date:dateCell.text,action:actionCell?.text||'',details:'',debit:amount!=null&&amount<0?Math.abs(amount):null,credit:amount!=null&&amount>=0?amount:null,balance});els.push(row)}
   const probe={samples:[],transfers:0,clicked:0,enriched:0,navigated:false,dialogs:0,href:String(location.href).slice(0,100),ms:0};
   const started=Date.now(),wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -2707,18 +2714,22 @@ async function readMizrahiTransactions(tabId){let rows=[],probe=null;try{const r
   const closeBtn=()=>[...document.querySelectorAll('button,[role="button"],a')].find(b=>visible(b)&&(/^(סגור|סגירה|×|x|✕)$/i.test(clean(b.innerText))||/סגור|close/i.test(b.getAttribute('aria-label')||'')));
   const dialogSel='[role="dialog"],.modal.show,.modal.in,[class*="dialog"],[class*="popup"]';
   const href0=location.href;
+  const detailOf=row=>{const n=row.nextElementSibling;return n&&/k-detail-row/.test(String(n.className||''))?n:null};
+  // ⚠ השדות עלולים לשבת באותה שורת טקסט ("שם מוטב: X סניף: Y") - חותכים לפני התווית הבאה.
+  // התוויות מהצילום של טל (04.09): בנק, חשבון, תאריך ביצוע, סניף, מהות העברה, שעת ביצוע. לא תבנית כללית - "איילון קהש סניף:" נחתך בטעות ל"איילון".
+  const payee=t=>{const m=String(t||'').match(/שם\s*מוטב\s*:?\s*([^\n]+)/);if(!m)return '';return clean(m[1].replace(/\s+(?:בנק|חשבון|תאריך ביצוע|סניף|מהות העברה|שעת ביצוע|סכום|אסמכתא|הערות?)\s*:.*$/,'')).slice(0,80)};
   for(let i=0;i<rows.length&&probe.clicked<60&&Date.now()-started<25000;i++){
-    if(!/העברה/.test(rows[i].action))continue;probe.transfers++;
-    const row=els[i],cell=row.querySelector('[role="gridcell"],td')||row,before=lines();
-    try{cell.click()}catch{continue}
+    if(!/העב/.test(rows[i].action))continue;probe.transfers++;
+    const row=els[i],expander=row.querySelector('.k-hierarchy-cell a,.k-hierarchy-cell,a.k-icon,[aria-expanded],[class*="expand"],[class*="chevron"],[class*="arrow"]')||row.querySelector('[role="gridcell"],td')||row,before=lines();
+    try{expander.click()}catch{continue}
     probe.clicked++;
-    let after=before;for(let k=0;k<8;k++){await wait(300);after=lines();if(after.size!==before.size)break}
+    let detail=null,after=before;for(let k=0;k<8;k++){await wait(300);detail=detailOf(row);if(detail&&/שם\s*מוטב/.test(detail.innerText||''))break;after=lines();if(!detail&&after.size!==before.size)break}
     if(location.href!==href0){probe.navigated=true;break}
-    const added=[...after].filter(l=>!before.has(l)),dialog=[...document.querySelectorAll(dialogSel)].find(visible);if(dialog)probe.dialogs++;
-    const own=new Set([rows[i].date,rows[i].action]),detail=added.filter(l=>!own.has(l)&&l.length<80).join(' · ').slice(0,160);
-    if(detail){rows[i].details=detail;probe.enriched++}
-    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,dialog:!!dialog,added:added.slice(0,12).map(l=>l.replace(/\d/g,'#').slice(0,60)),classes:clean((dialog||row.nextElementSibling)?.getAttribute?.('class')).slice(0,80)});
-    if(dialog){const b=closeBtn();if(b)b.click();else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))}else{try{cell.click()}catch{}}
+    const text=detail?String(detail.innerText||''):[...after].filter(l=>!before.has(l)).join('\n'),dialog=[...document.querySelectorAll(dialogSel)].find(visible);if(dialog)probe.dialogs++;
+    const name=payee(text)||payee(dialog?.innerText);
+    if(name){rows[i].details=name;probe.enriched++}
+    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,dialog:!!dialog,expander:clean(expander.getAttribute?.('class')).slice(0,60),detailRow:!!detail,lines:text.split('\n').map(clean).filter(Boolean).slice(0,12).map(l=>l.replace(/\d/g,'#').slice(0,60))});
+    if(dialog){const b=closeBtn();if(b)b.click();else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))}else{try{expander.click()}catch{}}
     await wait(250);
   }
   probe.ms=Date.now()-started;return{rows,probe}}});
