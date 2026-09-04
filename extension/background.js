@@ -1288,9 +1288,16 @@ function markNewTransactions(previous,next,syncedSources){
     const old=oldByAccount.get(accountSyncKey(account)),oldRows=old?.transactions||[];
     // סנכרון ראשון של חשבון הוא קו בסיס: אין "נראה לראשונה", רק כלל התאריך.
     if(!old||!oldRows.length)return{...account,transactions:(account.transactions||[]).map(t=>{const{newAt,...rest}=t;return{...rest,isNew:isRecentNew(rest,atMs)}})};
-    const queue=new Map();for(const row of oldRows){const key=transactionSyncKey(row);if(!queue.has(key))queue.set(key,[]);queue.get(key).push(row)}
-    return{...account,transactions:(account.transactions||[]).map(row=>{const key=transactionSyncKey(row),q=queue.get(key);
-      if(q&&q.length){const prev=q.shift(),{newAt,...rest}=row,kept=prev.newAt?{...rest,newAt:prev.newAt}:rest;return{...kept,isNew:isRecentNew(kept,atMs)}}
+    // ⚠ 04.09.2026 - מזרחי מקבל עכשיו details (שם ההעברה) לשורות שבעבר נשמרו
+    // בלי. המפתח המלא כולל details, ולכן כל השורות היו נראות "חדש" פעם אחת -
+    // בדיוק הלקח מ-2.3.6. התאמה רופפת (בלי details) כשאחד הצדדים ריק.
+    const norm=v=>String(v||'').replace(/\s+/g,' ').trim(),loose=t=>JSON.stringify([String(t?.date||'').trim().replace(/[\/@-]/g,'.'),norm(t?.action),Number(t?.debit)||0,Number(t?.credit)||0]);
+    const push=(m,k,v)=>{if(!m.has(k))m.set(k,[]);m.get(k).push(v)},byKey=new Map(),byLoose=new Map(),used=new Set();
+    for(const row of oldRows){push(byKey,transactionSyncKey(row),row);push(byLoose,loose(row),row)}
+    const take=(list,pred)=>{const hit=(list||[]).find(r=>!used.has(r)&&(!pred||pred(r)));if(hit)used.add(hit);return hit||null};
+    return{...account,transactions:(account.transactions||[]).map(row=>{
+      const prev=take(byKey.get(transactionSyncKey(row)))||take(byLoose.get(loose(row)),p=>!norm(p.details)||!norm(row.details));
+      if(prev){const{newAt,...rest}=row,kept=prev.newAt?{...rest,newAt:prev.newAt}:rest;return{...kept,isNew:isRecentNew(kept,atMs)}}
       return{...row,isNew:true,newAt:markedAt}})};
   })
 }
@@ -2681,7 +2688,43 @@ async function setMizrahiRange(tabId){
     collectSince:wantMs?new Date(wantMs).toISOString().slice(0,10):'',
     frames:reads.length,result:best,all:hits.slice(0,4)}})}catch{}
   return best}
-async function readMizrahiTransactions(tabId){let rows=[];try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const rows=[];for(const row of document.querySelectorAll('[role="row"],tr')){const cells=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>({text:clean(x.innerText),label:clean(x.getAttribute('aria-label'))})),dateCell=cells.find(c=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.text));if(!dateCell)continue;const actionCell=cells.find(c=>/סוג תנועה/.test(c.label)),amountCell=cells.find(c=>/זכות\s*\/\s*חובה/.test(c.label)),balanceCell=cells.find(c=>/יתרה/.test(c.label));const amount=money(amountCell?.text),balance=money(balanceCell?.text);rows.push({date:dateCell.text,action:actionCell?.text||'',details:'',debit:amount!=null&&amount<0?Math.abs(amount):null,credit:amount!=null&&amount>=0?amount:null,balance})}return rows}});rows=results.flatMap(x=>Array.isArray(x.result)?x.result:[])}catch{}if(!rows.length)rows=mizrahiFrameData.get(tabId)?.transactions||[];return rows}
+// ⚠ 04.09.2026 - טל: "במזרחי בכל התנועות מסוג העברה בנקאית (או העברה אינטרנט)
+// כשלוחצים על התנועה יש פירוט לאן עבר - ליד כל תנועה לתת את שם התנועה ולא רק
+// העברה." ה-DOM של הפירוט **לא נמדד** (הסשן במזרחי פג - הדף תקוע על "אנא
+// המתן", ואין לי דרך להתחבר). לכן שני דברים יחד, בלי לנחש סלקטור:
+// 1. לכל שורת "העברה" לוחצים על התא הראשון, ממתינים, ולוקחים את **שורות הטקסט
+//    שנוספו לדף** (הפרש innerText של body לפני/אחרי) בתור details. זה תופס
+//    הרחבה בתוך הטבלה וגם חלונית. אחר כך סוגרים (כפתור סגור/Escape, או לחיצה
+//    חוזרת). ניווט מהדף עוצר את הלולאה; השורות עצמן כבר נאספו לפני הלחיצות.
+// 2. גשש mizrahiDetailProbe: עד 3 דוגמאות של הטקסט שנוסף (ספרות ממוסכות),
+//    מחלקות האלמנט שנפתח, והאם זו חלונית - כדי לכתוב חילוץ מדויק מהמדידה.
+// ⚠ תקציב: עד 60 לחיצות ועד 25 שניות. שאר השורות נשארות בלי פירוט.
+async function readMizrahiTransactions(tabId){let rows=[],probe=null;try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:async()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const rows=[],els=[];for(const row of document.querySelectorAll('[role="row"],tr')){const cells=[...row.querySelectorAll('[role="gridcell"],td')].map(x=>({text:clean(x.innerText),label:clean(x.getAttribute('aria-label'))})),dateCell=cells.find(c=>/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(c.text));if(!dateCell)continue;const actionCell=cells.find(c=>/סוג תנועה/.test(c.label)),amountCell=cells.find(c=>/זכות\s*\/\s*חובה/.test(c.label)),balanceCell=cells.find(c=>/יתרה/.test(c.label));const amount=money(amountCell?.text),balance=money(balanceCell?.text);rows.push({date:dateCell.text,action:actionCell?.text||'',details:'',debit:amount!=null&&amount<0?Math.abs(amount):null,credit:amount!=null&&amount>=0?amount:null,balance});els.push(row)}
+  const probe={samples:[],transfers:0,clicked:0,enriched:0,navigated:false,dialogs:0,href:String(location.href).slice(0,100),ms:0};
+  const started=Date.now(),wait=ms=>new Promise(r=>setTimeout(r,ms));
+  const lines=()=>new Set(String(document.body?.innerText||'').split('\n').map(clean).filter(Boolean));
+  const visible=el=>!!el&&el.offsetParent!==null;
+  const closeBtn=()=>[...document.querySelectorAll('button,[role="button"],a')].find(b=>visible(b)&&(/^(סגור|סגירה|×|x|✕)$/i.test(clean(b.innerText))||/סגור|close/i.test(b.getAttribute('aria-label')||'')));
+  const dialogSel='[role="dialog"],.modal.show,.modal.in,[class*="dialog"],[class*="popup"]';
+  const href0=location.href;
+  for(let i=0;i<rows.length&&probe.clicked<60&&Date.now()-started<25000;i++){
+    if(!/העברה/.test(rows[i].action))continue;probe.transfers++;
+    const row=els[i],cell=row.querySelector('[role="gridcell"],td')||row,before=lines();
+    try{cell.click()}catch{continue}
+    probe.clicked++;
+    let after=before;for(let k=0;k<8;k++){await wait(300);after=lines();if(after.size!==before.size)break}
+    if(location.href!==href0){probe.navigated=true;break}
+    const added=[...after].filter(l=>!before.has(l)),dialog=[...document.querySelectorAll(dialogSel)].find(visible);if(dialog)probe.dialogs++;
+    const own=new Set([rows[i].date,rows[i].action]),detail=added.filter(l=>!own.has(l)&&l.length<80).join(' · ').slice(0,160);
+    if(detail){rows[i].details=detail;probe.enriched++}
+    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,dialog:!!dialog,added:added.slice(0,12).map(l=>l.replace(/\d/g,'#').slice(0,60)),classes:clean((dialog||row.nextElementSibling)?.getAttribute?.('class')).slice(0,80)});
+    if(dialog){const b=closeBtn();if(b)b.click();else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))}else{try{cell.click()}catch{}}
+    await wait(250);
+  }
+  probe.ms=Date.now()-started;return{rows,probe}}});
+rows=results.flatMap(x=>Array.isArray(x.result?.rows)?x.result.rows:[]);const probes=results.map(x=>x.result?.probe).filter(Boolean);probe=probes.find(p=>p.transfers)||probes[0]||null}catch(e){probe={error:String(e&&e.message)}}
+try{await chrome.storage.local.set({mizrahiDetailProbe:{at:new Date().toISOString(),...(probe||{})}})}catch{}
+if(!rows.length)rows=mizrahiFrameData.get(tabId)?.transactions||[];return rows}
 async function readMizrahiSummary(tabId){const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{const clean=v=>String(v??'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/\s+/g,' ').trim();const money=v=>{const m=clean(v).replace(/[−–]/g,'-').match(/-?[\d,]+(?:\.\d{1,2})?/);if(!m)return null;const n=Number(m[0].replace(/,/g,''));return Number.isFinite(n)?n:null};const buttons=[...document.querySelectorAll('button')].map(x=>clean(x.innerText)),hit=buttons.find(t=>/\b\d{3}\s*-\s*\d{5,9}\b/.test(t));if(!hit)return null;const m=hit.match(/\b(\d{3})\s*-\s*(\d{5,9})\b/);if(!m)return null;const text=clean(document.body?.innerText),owner=hit.replace(m[0],'').trim()||'חשבון מזרחי',balance=money((text.match(/יתרת עו["״']ש\s*([\d,.-]+)\s*₪/)||[])[1]),creditLimit=money((text.match(/מסגרת אשראי בחשבון\s*([\d,.-]+)\s*₪/)||[])[1]);return{branch:m[1],accountNumber:m[2],owner,nickname:owner,balance,creditLimit}}});return results.map(x=>x.result).find(Boolean)||null}
 async function startMizrahi(){if(mizrahiBusy)return{ok:false,error:'סנכרון מזרחי־טפחות כבר מתבצע'};await chrome.storage.local.set({pendingMizrahi:true,syncStatus:'מזרחי־טפחות: בודק את החיבור ומזהה חשבונות'});const tab=await mizrahiTab();if(!tab){await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: פותח את חלון ההתחברות'});const opened=await chrome.tabs.create({url:MIZRAHI_HOME,active:true});if(Number.isInteger(opened?.id))await markOpened(opened.id);try{await waitTab(opened.id,'mizrahi-tefahot.co.il')}catch{}const shown=await openMizrahiLogin(opened.id);await chrome.storage.local.set({syncStatus:shown?'ממתין להתחברות למזרחי־טפחות — הזן משתמש וסיסמה בחלונית שנפתחה':'ממתין להתחברות למזרחי־טפחות — נפתח דף ההתחברות'});return{ok:true,status:'waiting_login'}}await returnToDashboard(tab.id,true);runMizrahi(tab.id).catch(async e=>{await chrome.storage.local.set({pendingMizrahi:false,syncStatus:`שגיאה במזרחי־טפחות: ${e.message}`});await chrome.runtime.openOptionsPage()});return{ok:true,status:'syncing'}}
 // ⚠ 03.09.2026 - טל: "אין סנכרון במזרחי." נמדד ביומן האחסון: הסטטוס האחרון
