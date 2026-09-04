@@ -2710,16 +2710,20 @@ async function setMizrahiRange(tabId){
 // ⚠ 04.09.2026 (09:40): שתי העברות זהות (06/07, 41,000) - אחת נקראה מהדף והשנייה **הועתקה**
 // ממנה דרך known (אותו מפתח), בלי שנפתחה. אם המוטבים שונים - זו טעות שקטה. לכן:
 // known נבנה רק משורות שהפירוט שלהן באמת נקרא מהדף (`detailsRead`), **רשימה** לכל מפתח,
-// ונצרכת בסדר הדף - שורה זהה נוספת בלי רשומה משלה נפתחת בעצמה. רשומות ישנות בלי
-// הדגל (מלפני 2.3.21) ייקראו שוב פעם אחת.
-async function mizrahiKnownDetails(){try{const st=await chrome.storage.local.get({accounts:[]});const out={};for(const a of st.accounts||[]){if(a.source!=='mizrahi')continue;for(const t of a.transactions||[]){const d=String(t.details||'');if(!t.detailsRead||!/^(למוטב|לבנק):/.test(d)||(/רצבי/.test(d)&&!/\(/.test(d)))continue;const k=`${t.date}|${t.action}|${t.debit??''}|${t.credit??''}`;(out[k]=out[k]||[]).push(d)}}return out}catch{return{}}}
+// ונצרכת בסדר הדף - שורה זהה נוספת בלי רשומה משלה נפתחת בעצמה.
+// ⚠ טל (04.09, 2.3.22): "אם כבר התנועות זוהו בעבר אז שירשום כמה שזוהו ולא ינסה לפענח אותם
+// שוב" - לכן רשומה שמורה תקינה נחשבת ידועה גם בלי הדגל. נקראות שוב רק: "רצבי" בלי בנק
+// (כדי להוסיף את הבנק), ו"לבנק:" מלוכלך (קוד בנק / "מזוכה" בתוך הערך - הבאג של 2.3.21).
+async function mizrahiKnownDetails(){try{const st=await chrome.storage.local.get({accounts:[]});const out={};for(const a of st.accounts||[]){if(a.source!=='mizrahi')continue;for(const t of a.transactions||[]){const d=String(t.details||'');if(!/^(למוטב|לבנק):/.test(d)||(/רצבי/.test(d)&&!/\(/.test(d))||(/^לבנק:/.test(d)&&/\d+\s*-|מזוכה/.test(d)))continue;const k=`${t.date}|${t.action}|${t.debit??''}|${t.credit??''}`;(out[k]=out[k]||[]).push(d)}}return out}catch{return{}}}
 // ⚠⚠ 04.09.2026 (08:15, 2.3.17): גם פתיחה **אחת** הקפיאה - "1 מתוך 6" ואז שקט עד ה-timeout.
 // שתי הריצות האחרונות רצו על אותה לשונית שכבר קפאה קודם (אין "פותח את חלון ההתחברות"
 // ביומן - הלשונית נמצאה ושומשה). לכן מפסק ביטחון: אחרי timeout - (א) הלשונית נטענת
 // מחדש, (ב) הסנכרון הבא רץ **בלי** פירוט (התנועות עצמן נשמרות, הסנכרון מצליח),
 // (ג) התקרה יורדת בחצי (6 -> 3 -> 1). הצלחה עם פירוט משאירה את התקרה.
 // ⚠ 04.09.2026 (09:35, 2.3.19 חי): 3 העברות = 13.3 שניות (~4.4 לשורה) בלי קיפאון. תקרה 12 = ~55 שניות.
-const MIZRAHI_DETAIL_CAP=12;
+// ⚠ 04.09.2026 - טל: "ולא יבקש לסנכרן פעמיים" - כל המוטבים החסרים בסנכרון אחד (~4.4 שניות
+// לכל אחד, נמדד 09:35). תקציב הלולאה 240 שניות, timeout 300. התקרה נשארת רק כמפסק (חצי אחרי timeout).
+const MIZRAHI_DETAIL_CAP=200;
 async function mizrahiDetailCtl(){try{const st=(await chrome.storage.local.get({mizrahiDetailState:{}})).mizrahiDetailState||{},cap=Math.max(1,Number(st.cap)||MIZRAHI_DETAIL_CAP);if(st.skipOnce){await chrome.storage.local.set({mizrahiDetailState:{...st,skipOnce:false}});return{enable:false,cap}}return{enable:true,cap}}catch{return{enable:true,cap:MIZRAHI_DETAIL_CAP}}}
 async function noteMizrahiDetailTimeout(tabId){try{const st=(await chrome.storage.local.get({mizrahiDetailState:{}})).mizrahiDetailState||{},cap=Math.max(1,Math.floor((Number(st.cap)||MIZRAHI_DETAIL_CAP)/2));await chrome.storage.local.set({mizrahiDetailState:{...st,skipOnce:true,cap,lastTimeoutAt:new Date().toISOString()}})}catch{}try{await chrome.tabs.reload(tabId)}catch{}}
 // ⚠⚠⚠ 04.09.2026 (08:23, 2.3.18) - ההוכחה שהפכה את האבחון: גם על לשונית **טרייה** (חלון
@@ -2751,14 +2755,18 @@ try{const results=await chrome.scripting.executeScript({target:{tabId,allFrames:
   const marked=frames.flatMap(f=>f.rows.map((r,ri)=>({r,f:f.frameId,i:ri})));
   rows=marked.map(m=>m.r);
   const key=r=>`${r.date}|${r.action}|${r.debit??''}|${r.credit??''}`,pending=[];
-  for(const m of marked){if(!/העב/.test(m.r.action))continue;probe.transfers++;const list=known&&known[key(m.r)];if(list&&list.length){m.r.details=list.shift();m.r.detailsRead=true;probe.reused++;continue}pending.push(m)}
+  // טל (04.09): "זוהה לדוגמה 20 תנועות מסוג העברה ו-5 תנועות מסוג בנקאות פתוחה, ומסנכרן כמה מתוך כמה".
+  // 'תשלום בנקאות פתוחה (י)' נפתח כמו העברה - הגשש ירשום מה יש בפירוט שלו.
+  probe.openBanking=0;
+  for(const m of marked){const act=m.r.action||'',isT=/העב/.test(act),isOB=/בנקאות פתוחה/.test(act);if(!isT&&!isOB)continue;if(isT)probe.transfers++;else probe.openBanking++;const list=known&&known[key(m.r)];if(list&&list.length){m.r.details=list.shift();m.r.detailsRead=true;probe.reused++;continue}pending.push(m)}
   const todo=ctl.enable?pending.slice(0,ctl.cap):[];probe.left=pending.length-todo.length;probe.cap=ctl.cap;probe.skipped=!ctl.enable;
+  if(!todo.length&&ctl.enable)try{await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: זוהו ${probe.transfers} תנועות מסוג העברה ו-${probe.openBanking} מסוג בנקאות פתוחה — ${probe.reused} כבר מפוענחות, אין חדשות לפענוח`})}catch{}
   const run=(frameId,func,args)=>chrome.scripting.executeScript({target:{tabId,frameIds:[frameId]},func,args}).then(r=>r?.[0]?.result);
   const pressFn=i=>{const row=document.querySelector(`[data-bx-row="${i}"]`);if(!row)return{ok:false,why:'row'};const h=row.querySelector('.k-hierarchy-cell'),el=h?(h.querySelector('a,button,span,i,svg,[class*="icon"],[class*="expand"]')||h):null;if(!el)return{ok:false,why:'icon'};for(const type of['mousedown','mouseup','click'])el.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window}));return{ok:true,cls:String(el.className||'').slice(0,60)}};
   const readFn=i=>{const row=document.querySelector(`[data-bx-row="${i}"]`);if(!row)return null;const n=row.nextElementSibling,open=!!n&&/k-detail-row/.test(String(n.className||''));return{open,text:open?String(n.innerText||'').slice(0,2000):'',busy:!!document.querySelector('.k-loading-mask')}};
-  for(let n=0;n<todo.length&&Date.now()-started<90000;n++){
+  for(let n=0;n<todo.length&&Date.now()-started<240000;n++){
     const m=todo[n];
-    try{await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: קורא פירוט העברות ${n+1} מתוך ${todo.length}${probe.left?` (עוד ${probe.left} בסנכרון הבא)`:''}`})}catch{}
+    try{await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: זוהו ${probe.transfers} תנועות מסוג העברה ו-${probe.openBanking} מסוג בנקאות פתוחה — מחלץ מוטב ${n+1} מתוך ${todo.length}${probe.reused?` (${probe.reused} כבר ידועים)`:''}${probe.left?` (עוד ${probe.left} בסנכרון הבא)`:''}`})}catch{}
     let st=await run(m.f,readFn,[m.i]);if(!st){probe.samples.push({action:m.r.action,why:'row-missing'});continue}
     if(!st.open){const pr=await run(m.f,pressFn,[m.i]);if(!pr?.ok){probe.samples.push({action:m.r.action,why:pr?.why||'press'});continue}probe.clicked++}
     let last='',text='';
@@ -2782,6 +2790,7 @@ async function startMizrahi(){if(mizrahiBusy)return{ok:false,error:'סנכרון
 // bgRun(t).catch(()=>{}) - כל שגיאה נבלעה בשקט, והסטטוס קפא. עכשיו השגיאה
 // נכתבת עם הכתובת שבה הלשונית עמדה, כדי שהפעם הבאה תאמר מה קרה.
 async function runMizrahi(tabId){if(mizrahiBusy)return;mizrahiBusy=true;try{await prepareMizrahi(tabId);const detected=await readMizrahiSummary(tabId);if(!detected)throw Error('לא זוהה חשבון פעיל בעמוד מזרחי');const found=[{...detected,key:`mizrahi|${detected.branch}-${detected.accountNumber}`,source:'mizrahi',sourceLabel:'מזרחי־טפחות',balance:null}];const result=await syncMizrahiSelected([`${detected.branch}-${detected.accountNumber}`],tabId);// ⚠ בתוך המנעול (AUDIT סעיף 2): חלון קרא-שנה-כתוב קצר, מסודר בתור.
+const dp=(await chrome.storage.local.get({mizrahiDetailProbe:{}})).mizrahiDetailProbe||{},dpTotal=(dp.transfers||0)+(dp.openBanking||0),payeeNote=dpTotal?` · זוהו ${dp.transfers||0} העברות ו-${dp.openBanking||0} בנקאות פתוחה, מוטב ל-${(dp.enriched||0)+(dp.reused||0)} מתוך ${dpTotal}${dp.skipped?' (דולג הפעם)':''}`:'';
 await accountsMutex(async()=>{
 const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]});const accounts=[...state.accounts.filter(a=>a.source!=='mizrahi'),...markNewTransactions(state.accounts,result.map(a=>keepAssignedCards(state.accounts,a)),['mizrahi'])],selectedAccountKeys=[...new Set([...state.selectedAccountKeys.filter(k=>!String(k).startsWith('mizrahi|')),result[0].selectionKey])];await chrome.storage.local.set({accounts,
   // ⚠ מוחק רק את מזרחי. הוחל לפי דפוס; לא נמדדה תקלה כאן.
@@ -2792,13 +2801,13 @@ const state=await chrome.storage.local.get({accounts:[],selectedAccountKeys:[]})
     const k=t=>`${t.date}|${t.reference||''}|${t.debit??''}|${t.credit??''}|${t.action||t.details||''}`;
     const prevSet=new Set(((prevMiz&&prevMiz.transactions)||[]).map(k));
     const mizNew=(result[0].transactions||[]).filter(t=>!prevSet.has(k(t))).length;
-    return`מזרחי־טפחות: סונכרן בהצלחה — ${mizNew?`${mizNew} תנועות חדשות`:'אין נתונים חדשים'} · ${result[0].transactions.length} תנועות · ${result[0].loans.length} הלוואות`})()});});await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage()}
+    return`מזרחי־טפחות: סונכרן בהצלחה — ${mizNew?`${mizNew} תנועות חדשות`:'אין נתונים חדשים'} · ${result[0].transactions.length} תנועות · ${result[0].loans.length} הלוואות${payeeNote}`})()});});await closeSyncTabs();if(!autoBusy)await chrome.runtime.openOptionsPage()}
   catch(e){let where='';try{where=String((await chrome.tabs.get(tabId)).url||'').slice(0,100)}catch{where='הלשונית נסגרה'}
     if(/פירוט ההעברות/.test(String(e.message||'')))await noteMizrahiDetailTimeout(tabId);
     const text=`שגיאה במזרחי־טפחות: ${e.message} (הלשונית עמדה על ${where})`;
     await chrome.storage.local.set({syncStatus:text,lastSyncError:{at:new Date().toISOString(),text:text.slice(0,300)}});if(!autoBusy)try{await chrome.runtime.openOptionsPage()}catch{}throw e}
   finally{mizrahiBusy=false;await restoreSyncTabs()}}
-async function syncMizrahiSelected(keys,knownTabId=null){const tab=knownTabId?await chrome.tabs.get(knownTabId):await mizrahiTab();if(tab)noteSyncTab(tab.id);if(!tab)throw Error('החיבור למזרחי־טפחות אינו פעיל');if(keys.length!==1)throw Error('בחיבור מזרחי הנוכחי ניתן לסנכרן חשבון פעיל אחד בכל פעם');await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: קובע את טווח התאריכים'});if(!tab.url?.includes('root-main-osh-p428New')){await chrome.tabs.update(tab.id,{url:MIZRAHI_TX});try{await waitTab(tab.id,'root-main-osh-p428New')}catch(e){let now='';try{now=String((await chrome.tabs.get(tab.id)).url||'').slice(0,100)}catch{}throw Error(`דף התנועות של מזרחי לא נטען תוך 30 שניות (הדף שהגיע: ${now||'לא ידוע'})`)}}await prepareMizrahi(tab.id);await delay(1200);await setMizrahiRange(tab.id);await delay(4200);const account=await readMizrahiSummary(tab.id),transactions=await withTimeout(readMizrahiTransactions(tab.id),150000,'קריאת התנועות ופירוט ההעברות במזרחי');if(!account)throw Error('פרטי החשבון הפעיל לא זוהו בעמוד מזרחי');if(`${account.branch}-${account.accountNumber}`!==keys[0])throw Error(`החשבון הפעיל הוא ${account.branch}-${account.accountNumber}, ולא החשבון שנבחר`);if(!transactions.length)throw Error('לא נקראו תנועות ישירות מטבלת שלושת החודשים — הסנכרון נעצר ולא נשמרו נתונים חלקיים');let loans=[];await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: נקראו ${transactions.length} תנועות; קורא הלוואות`});try{await chrome.tabs.update(tab.id,{url:MIZRAHI_LOANS});await waitTab(tab.id,'legacy-Loan-P060');await prepareMizrahi(tab.id);await delay(2200);const lr=await chrome.tabs.sendMessage(tab.id,{type:'MIZRAHI_LOANS'});if(lr?.ok)loans=lr.loans||[]}catch{}const now=new Date().toISOString(),availableCredit=account.balance==null||account.creditLimit==null?null:account.balance+account.creditLimit;return[{...account,availableCredit,transactions,loans,source:'mizrahi',sourceLabel:'מזרחי־טפחות',selectionKey:`mizrahi|${account.branch}-${account.accountNumber}`,id:`mizrahi-${account.branch}-${account.accountNumber}`,lastSync:now,status:loans.length?'מסונכרן':'מסונכרן ללא פירוט הלוואות'}]}
+async function syncMizrahiSelected(keys,knownTabId=null){const tab=knownTabId?await chrome.tabs.get(knownTabId):await mizrahiTab();if(tab)noteSyncTab(tab.id);if(!tab)throw Error('החיבור למזרחי־טפחות אינו פעיל');if(keys.length!==1)throw Error('בחיבור מזרחי הנוכחי ניתן לסנכרן חשבון פעיל אחד בכל פעם');await chrome.storage.local.set({syncStatus:'מזרחי־טפחות: קובע את טווח התאריכים'});if(!tab.url?.includes('root-main-osh-p428New')){await chrome.tabs.update(tab.id,{url:MIZRAHI_TX});try{await waitTab(tab.id,'root-main-osh-p428New')}catch(e){let now='';try{now=String((await chrome.tabs.get(tab.id)).url||'').slice(0,100)}catch{}throw Error(`דף התנועות של מזרחי לא נטען תוך 30 שניות (הדף שהגיע: ${now||'לא ידוע'})`)}}await prepareMizrahi(tab.id);await delay(1200);await setMizrahiRange(tab.id);await delay(4200);const account=await readMizrahiSummary(tab.id),transactions=await withTimeout(readMizrahiTransactions(tab.id),300000,'קריאת התנועות ופירוט ההעברות במזרחי');if(!account)throw Error('פרטי החשבון הפעיל לא זוהו בעמוד מזרחי');if(`${account.branch}-${account.accountNumber}`!==keys[0])throw Error(`החשבון הפעיל הוא ${account.branch}-${account.accountNumber}, ולא החשבון שנבחר`);if(!transactions.length)throw Error('לא נקראו תנועות ישירות מטבלת שלושת החודשים — הסנכרון נעצר ולא נשמרו נתונים חלקיים');let loans=[];await chrome.storage.local.set({syncStatus:`מזרחי־טפחות: נקראו ${transactions.length} תנועות; קורא הלוואות`});try{await chrome.tabs.update(tab.id,{url:MIZRAHI_LOANS});await waitTab(tab.id,'legacy-Loan-P060');await prepareMizrahi(tab.id);await delay(2200);const lr=await chrome.tabs.sendMessage(tab.id,{type:'MIZRAHI_LOANS'});if(lr?.ok)loans=lr.loans||[]}catch{}const now=new Date().toISOString(),availableCredit=account.balance==null||account.creditLimit==null?null:account.balance+account.creditLimit;return[{...account,availableCredit,transactions,loans,source:'mizrahi',sourceLabel:'מזרחי־טפחות',selectionKey:`mizrahi|${account.branch}-${account.accountNumber}`,id:`mizrahi-${account.branch}-${account.accountNumber}`,lastSync:now,status:loans.length?'מסונכרן':'מסונכרן ללא פירוט הלוואות'}]}
 
 const ISRACARD_HOME='https://web.isracard.co.il/StatusPage';
 // מסך הכניסה. נמדד 18.08.2026 מתוך ה-href של „כניסה לחשבון שלי" באתר isracard.co.il.
