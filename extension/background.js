@@ -2720,16 +2720,26 @@ async function readMizrahiTransactions(tabId){let rows=[],probe=null;try{const r
   const payee=t=>{const m=String(t||'').match(/שם\s*מוטב\s*:?\s*([^\n]+)/);if(!m)return '';return clean(m[1].replace(/\s+(?:בנק|חשבון|תאריך ביצוע|סניף|מהות העברה|שעת ביצוע|סכום|אסמכתא|הערות?)\s*:.*$/,'')).slice(0,80)};
   for(let i=0;i<rows.length&&probe.clicked<60&&Date.now()-started<25000;i++){
     if(!/העב/.test(rows[i].action))continue;probe.transfers++;
-    const row=els[i],expander=row.querySelector('.k-hierarchy-cell a,.k-hierarchy-cell,a.k-icon,[aria-expanded],[class*="expand"],[class*="chevron"],[class*="arrow"]')||row.querySelector('[role="gridcell"],td')||row,before=lines();
-    try{expander.click()}catch{continue}
+    // ⚠⚠ 04.09.2026 - נמדד (mizrahiDetailProbe, סנכרון 07:33): נלחץ `td.k-hierarchy-cell
+    // h-expend ng-scope` - ולא נפתח כלום. querySelector עם רשימת סלקטורים מחזיר את
+    // הראשון **בסדר המסמך**, וה-td קודם לילד שלו - כלומר נלחץ התא ולא האייקון.
+    // Kendo מאזין על האייקון (`a.k-icon`/`.k-i-expand`) ולא על התא. לכן: קודם הצאצא
+    // הפנימי ביותר של תא ההיררכיה, ורצף mousedown/mouseup/click (לא רק click).
+    const row=els[i],hcell=row.querySelector('.k-hierarchy-cell'),inner=hcell?(hcell.querySelector('a,button,span,i,svg,[class*="icon"],[class*="expand"]')||hcell):null;
+    const expander=inner||row.querySelector('a.k-icon,[aria-expanded],[class*="expand"],[class*="chevron"],[class*="arrow"]')||row.querySelector('[role="gridcell"],td')||row,before=lines();
+    const press=el=>{for(const type of['mousedown','mouseup','click'])el.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window}))};
+    try{press(expander)}catch{continue}
     probe.clicked++;
-    let detail=null,after=before;for(let k=0;k<8;k++){await wait(300);detail=detailOf(row);if(detail&&/שם\s*מוטב/.test(detail.innerText||''))break;after=lines();if(!detail&&after.size!==before.size)break}
+    let detail=null,after=before;for(let k=0;k<8;k++){await wait(300);detail=detailOf(row);if(detail&&/שם\s*מוטב/.test(detail.innerText||''))break;after=lines();if(!detail&&after.size!==before.size)break;
+      // אחרי 1.2 שניות בלי תגובה - ניסיון שני על התא עצמו ואז על השורה.
+      if(k===3&&hcell&&expander!==hcell)try{press(hcell)}catch{}
+      if(k===5)try{press(row)}catch{}}
     if(location.href!==href0){probe.navigated=true;break}
     const text=detail?String(detail.innerText||''):[...after].filter(l=>!before.has(l)).join('\n'),dialog=[...document.querySelectorAll(dialogSel)].find(visible);if(dialog)probe.dialogs++;
     const name=payee(text)||payee(dialog?.innerText);
     if(name){rows[i].details=name;probe.enriched++}
-    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,dialog:!!dialog,expander:clean(expander.getAttribute?.('class')).slice(0,60),detailRow:!!detail,lines:text.split('\n').map(clean).filter(Boolean).slice(0,12).map(l=>l.replace(/\d/g,'#').slice(0,60))});
-    if(dialog){const b=closeBtn();if(b)b.click();else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))}else{try{expander.click()}catch{}}
+    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,dialog:!!dialog,expander:clean(expander.getAttribute?.('class')).slice(0,60),tag:expander.tagName,cellHtml:hcell?String(hcell.outerHTML||'').replace(/\d/g,'#').slice(0,240):'',detailRow:!!detail,nextClass:clean(row.nextElementSibling?.getAttribute?.('class')).slice(0,60),lines:text.split('\n').map(clean).filter(Boolean).slice(0,12).map(l=>l.replace(/\d/g,'#').slice(0,60))});
+    if(dialog){const b=closeBtn();if(b)b.click();else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))}else if(detail||after.size!==before.size){try{press(expander)}catch{}}
     await wait(250);
   }
   probe.ms=Date.now()-started;return{rows,probe}}});
