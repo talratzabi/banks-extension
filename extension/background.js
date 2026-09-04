@@ -2715,42 +2715,35 @@ async function readMizrahiTransactions(tabId){let rows=[],probe=null;try{const r
   const dialogSel='[role="dialog"],.modal.show,.modal.in,[class*="dialog"],[class*="popup"]';
   const href0=location.href;
   const detailOf=row=>{const n=row.nextElementSibling;return n&&/k-detail-row/.test(String(n.className||''))?n:null};
-  // ⚠ השדות עלולים לשבת באותה שורת טקסט ("שם מוטב: X סניף: Y") - חותכים לפני התווית הבאה.
-  // התוויות מהצילום של טל (04.09): בנק, חשבון, תאריך ביצוע, סניף, מהות העברה, שעת ביצוע. לא תבנית כללית - "איילון קהש סניף:" נחתך בטעות ל"איילון".
   // ⚠ 04.09.2026 - נמדד בגשש: "העברה באינטרנט" נפתחת ל"בנק / סניף / חשבון / מהות העברה /
   // תאריך ביצוע / שעת ביצוע / שם מוטב" (כל שדה בשורה), ו"העברת יומן לבנק זר" נפתחת
-  // ל"בנק מזוכה : … סניף מזוכה : … חשבו…" (הכול בשורה אחת, עם רווח לפני הנקודתיים).
-  // טל: הנוסח ליד התנועה - "למוטב: <שם>".
-  const LABELS='בנק מזוכה|סניף מזוכה|חשבון מזוכה|מספר חשבון|בנק|חשבון|תאריך ביצוע|תאריך|שעת ביצוע|סניף|מהות העברה|מהות|סכום|אסמכתא|הערות?|פרטים';
-  const payee=t=>{const m=String(t||'').match(/(?:שם\s*ה?מוטב|ה?מוטב|לזכות|שם\s*ה?מקבל|ה?מקבל|לטובת)\s*:\s*([^\n]+)/);if(!m)return '';const v=clean(m[1].replace(new RegExp(`\\s+(?:${LABELS})\\s*:.*$`),'')).slice(0,80);return v?`למוטב: ${v}`:''};
-  for(let i=0;i<rows.length&&probe.clicked<60&&Date.now()-started<40000;i++){
-    if(!/העב/.test(rows[i].action))continue;probe.transfers++;
-    // ⚠⚠ 04.09.2026 - נמדד (mizrahiDetailProbe, סנכרון 07:33): נלחץ `td.k-hierarchy-cell
-    // h-expend ng-scope` - ולא נפתח כלום. querySelector עם רשימת סלקטורים מחזיר את
-    // הראשון **בסדר המסמך**, וה-td קודם לילד שלו - כלומר נלחץ התא ולא האייקון.
-    // Kendo מאזין על האייקון (`a.k-icon`/`.k-i-expand`) ולא על התא. לכן: קודם הצאצא
-    // הפנימי ביותר של תא ההיררכיה, ורצף mousedown/mouseup/click (לא רק click).
-    const row=els[i],hcell=row.querySelector('.k-hierarchy-cell'),inner=hcell?(hcell.querySelector('a,button,span,i,svg,[class*="icon"],[class*="expand"]')||hcell):null;
-    // ⚠ נמדד 04.09 (07:40): 3 לחיצות לקחו 74 שניות - innerText של כל ה-body בכל דגימה
-    // (8 דגימות ללחיצה) הוא שקורא את הזמן. כשיש תא היררכיה (Kendo) לא נוגעים ב-body.
-    const expander=inner||row.querySelector('a.k-icon,[aria-expanded],[class*="expand"],[class*="chevron"],[class*="arrow"]')||row.querySelector('[role="gridcell"],td')||row,before=hcell?null:lines();
-    const press=el=>{for(const type of['mousedown','mouseup','click'])el.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window}))};
-    try{press(expander)}catch{continue}
-    probe.clicked++;
-    let detail=null,after=before,lastText='';for(let k=0;k<8;k++){await wait(300);detail=detailOf(row);
-      if(detail){const t=String(detail.innerText||'');if(/מוטב|לזכות|מקבל|לטובת/.test(t)||(t&&t===lastText))break;lastText=t;continue}
-      if(!hcell){after=lines();if(after.size!==before.size)break}
-      // אחרי 1.2 שניות בלי תגובה - ניסיון שני על התא עצמו ואז על השורה.
-      if(k===3&&hcell&&expander!==hcell)try{press(hcell)}catch{}
-      if(k===5)try{press(row)}catch{}}
-    if(location.href!==href0){probe.navigated=true;break}
-    const text=detail?String(detail.innerText||''):(before&&after?[...after].filter(l=>!before.has(l)).join('\n'):''),dialog=[...document.querySelectorAll(dialogSel)].find(visible);if(dialog)probe.dialogs++;
-    const name=payee(text)||payee(dialog?.innerText);
-    if(name){rows[i].details=name;probe.enriched++}
-    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,dialog:!!dialog,expander:clean(expander.getAttribute?.('class')).slice(0,60),tag:expander.tagName,cellHtml:hcell?String(hcell.outerHTML||'').replace(/\d/g,'#').slice(0,240):'',detailRow:!!detail,nextClass:clean(row.nextElementSibling?.getAttribute?.('class')).slice(0,60),lines:text.split('\n').map(clean).filter(Boolean).slice(0,20).map(l=>l.replace(/\d/g,'#').slice(0,140))});
-    if(dialog){const b=closeBtn();if(b)b.click();else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))}else if(detail||(before&&after&&after.size!==before.size)){try{press(expander)}catch{}}
-    await wait(250);
-  }
+  // לשורה אחת: "בנק מזוכה : ##-<בנק> סניף מזוכה : … חשבון מזוכה : … אופן העברה : … שעת
+  // ביצוע : … סניף מבצע : …" - **בלי שם מוטב**. שם: "לבנק: <בנק>". טל: הנוסח "למוטב: <שם>".
+  const LABELS='בנק מזוכה|סניף מזוכה|חשבון מזוכה|אופן העברה|סניף מבצע|מספר חשבון|בנק|חשבון|תאריך ביצוע|תאריך|שעת ביצוע|סניף|מהות העברה|מהות|סכום|אסמכתא|הערות?|פרטים';
+  const cut=v=>clean(String(v||'').replace(new RegExp(`\\s+(?:${LABELS})\\s*:.*$`),''));
+  // טל (04.09): "איפה שמופיע טל רצבי או סופי רצבי תציין את שם הבנק" - העברה לחשבון עצמי:
+  // "למוטב: טל רצבי (בנק יהב לעובדי המדינה)". הבנק מ"בנק: ##-<שם>" (בלי קוד הבנק).
+  const bankName=t=>{const m=String(t||'').match(/(?:^|\n|\s)בנק\s*(?:מזוכה)?\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);return m?cut(m[1]).slice(0,60):''};
+  const payee=t=>{const m=String(t||'').match(/(?:שם\s*ה?מוטב|ה?מוטב|לזכות|שם\s*ה?מקבל|ה?מקבל|לטובת)\s*:\s*([^\n]+)/);if(!m)return '';const v=cut(m[1]).slice(0,80);if(!v)return '';const bank=/רצבי/.test(v)?bankName(t):'';return `למוטב: ${v}${bank?` (${bank})`:''}`};
+  const bankOf=t=>{const m=String(t||'').match(/בנק\s*מזוכה\s*:\s*(?:\d+\s*-\s*)?([^\n]+)/);if(!m)return '';const v=cut(m[1]).slice(0,60);return v?`לבנק: ${v}`:''};
+  const press=el=>{for(const type of['mousedown','mouseup','click'])el.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window}))};
+  // ⚠ נמדד 04.09 (07:40, 2.3.13): נלחץ `td.k-hierarchy-cell` ולא האייקון - querySelector עם
+  // רשימת סלקטורים מחזיר את הראשון בסדר המסמך, וה-td קודם לילד שלו. Kendo מאזין על האייקון.
+  const iconOf=row=>{const h=row.querySelector('.k-hierarchy-cell');return h?(h.querySelector('a,button,span,i,svg,[class*="icon"],[class*="expand"]')||h):null};
+  // מדידת כפילויות (טל, 04.09: 41,000 ו-83,000 מופיעים פעמיים-שלוש בלי יתרה): מאפייני מבנה
+  // לכל שורה שנקראה - מחלקה, טבלה, נראות. בלי סכומים.
+  probe.rowsMeta=els.slice(0,24).map((row,i)=>{const tbl=row.closest('table,[role="grid"]');return{d:rows[i].date,bal:rows[i].balance!=null,cls:clean(row.className).slice(0,50),tbl:clean(tbl?.id||tbl?.className).slice(0,50),vis:row.offsetParent!==null}});
+  probe.hidden=els.filter(r=>r.offsetParent===null).length;probe.total=els.length;
+  // ⚠⚠ נמדד 04.09 (07:50, 2.3.14): 4 לחיצות = 43 שניות גם בלי innerText של body - כל פתיחה
+  // היא קריאת שרת של ~10 שניות. לכן לא אחת-אחת: **פותחים את כולן בבת אחת**, ממתינים פעם
+  // אחת עד שכל שורות הפירוט יציבות (עד 20 שניות), קוראים, ואז סוגרים.
+  const targets=[];
+  for(let i=0;i<rows.length&&targets.length<60;i++){if(!/העב/.test(rows[i].action))continue;probe.transfers++;const el=iconOf(els[i]);if(!el)continue;if(detailOf(els[i])){targets.push(i);continue}try{press(el);probe.clicked++;targets.push(i)}catch{}await wait(120)}
+  const seenText=new Map();
+  for(let k=0;k<40;k++){await wait(500);if(location.href!==href0){probe.navigated=true;break}let pending=0;for(const i of targets){const d=detailOf(els[i]),t=d?String(d.innerText||''):'';if(!d||!t||t!==seenText.get(i))pending++;seenText.set(i,t)}if(!pending)break}
+  for(const i of targets){const d=detailOf(els[i]),text=d?String(d.innerText||''):'',name=payee(text)||bankOf(text);if(name){rows[i].details=name;probe.enriched++}
+    if(probe.samples.length<3)probe.samples.push({action:rows[i].action,detailRow:!!d,lines:text.split('\n').map(clean).filter(Boolean).slice(0,20).map(l=>l.replace(/\d/g,'#').slice(0,140))});
+    const el=iconOf(els[i]);if(d&&el)try{press(el)}catch{}}
   probe.ms=Date.now()-started;return{rows,probe}}});
 rows=results.flatMap(x=>Array.isArray(x.result?.rows)?x.result.rows:[]);const probes=results.map(x=>x.result?.probe).filter(Boolean);probe=probes.find(p=>p.transfers)||probes[0]||null}catch(e){probe={error:String(e&&e.message)}}
 try{await chrome.storage.local.set({mizrahiDetailProbe:{at:new Date().toISOString(),...(probe||{})}})}catch{}
